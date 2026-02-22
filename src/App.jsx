@@ -145,6 +145,7 @@ function buildCSS(C,T,FS=14){
 body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;font-weight:300;-webkit-font-smoothing:antialiased;font-size:${f}px;}
 button,input,textarea,select{font-family:\'DM Sans\',sans-serif;}
 .app{max-width:460px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;}
+@media(min-width:768px){.app{max-width:100%;margin:0;}}
 .hdr{padding:12px 18px 0;border-bottom:1px solid var(--b1);background:${hb};position:sticky;top:0;z-index:40;backdrop-filter:blur(14px);}
 .hdr-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;gap:10px;}
 .hdr-title{font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:.8px;color:var(--tx2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
