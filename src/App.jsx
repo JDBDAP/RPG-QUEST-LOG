@@ -22,6 +22,7 @@ const DEFAULT_SETTINGS = {
   theme:  { bg:"#0c0c0c", s1:"#141414", s2:"#1a1a1a", b1:"#252525", b2:"#333333", tx:"#dedede", tx2:"#999999", tx3:"#555555" },
   xp: { globalPerLevel:600, skillPerLevel:6000, practicePerMin:1, aiScoring:true },
   fontSize: 14,
+  contentWidth: 700,
 };
 
 const THEME_PRESETS = [
@@ -324,7 +325,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
   .app{max-width:100%;flex-direction:row;min-height:100vh;}
   .hdr{display:none;}
   .bnav{display:none;}
-  .sidenav{display:flex;flex-direction:column;width:200px;min-height:100vh;background:${hb};border-right:1px solid var(--b1);position:sticky;top:0;height:100vh;flex-shrink:0;padding:20px 0;}
+  .sidenav{display:flex;flex-direction:column;width:220px;min-height:100vh;background:${hb};border-right:1px solid var(--b1);position:sticky;top:0;height:100vh;flex-shrink:0;padding:20px 0;}
   .side-top{padding:0 18px 20px;border-bottom:1px solid var(--b1);margin-bottom:10px;}
   .side-title{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.8px;color:var(--tx2);margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .side-lv{font-family:'DM Mono',monospace;font-size:10px;color:var(--primary);background:var(--primaryf);border:1px solid var(--primaryb);border-radius:20px;padding:2px 10px;letter-spacing:1px;display:inline-block;}
@@ -334,10 +335,11 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
   .slink.on{background:var(--s2);color:var(--tx);}
   .slink-icon{font-size:13px;flex-shrink:0;}
   .slink-lbl{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1.2px;text-transform:uppercase;}
-  .pg{padding:28px 32px 40px;flex:1;max-width:680px;}
+  .main-wrap{flex:1;display:flex;justify-content:center;overflow-y:auto;}
+  .pg{padding:28px 32px 40px;width:100%;max-width:var(--content-width,700px);}
 }
 @media(min-width:1100px){
-  .pg{max-width:780px;}
+  .pg{max-width:var(--content-width,780px);}
 }
 `;}
 
@@ -578,7 +580,7 @@ export default function App(){
   return (
     <SettingsCtx.Provider value={{settings,saveSettings}}>
       <style>{buildCSS(C,TH,settings.fontSize||14)}</style>
-      <div className="app">
+      <div className="app" style={{"--content-width":`${settings.contentWidth||700}px`}}>
         {!settings.profile.setup&&<ProfileSetup onComplete={completeSetup}/>}
         {settings.profile.setup&&<>
           {/* Desktop sidebar */}
@@ -609,6 +611,7 @@ export default function App(){
               <span className="xp-lbl">{xp} {L.xpName}</span>
             </div>
           </header>
+          <div className="main-wrap">
           <main className="pg">
             {tab==="planner"  && <PlannerTab period={period} setPeriod={setPeriod} tasks={periodTasks()} weekDays={weekDays} allTasks={tasks} skills={skills} onAddTask={addTask} onToggle={toggleTask} onDelete={deleteTask} onEdit={editTask}/>}
             {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest}/>}
@@ -617,6 +620,7 @@ export default function App(){
             {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed}/>}
             {tab==="settings" && <SettingsTab showToast={showToast} onExport={exportData} onImport={importData}/>}
           </main>
+          </div>
           {/* Mobile bottom nav */}
           <nav className="bnav">
             {NAV.map(n=>(
@@ -1322,6 +1326,16 @@ function SettingsTab({showToast,onExport,onImport}){
               {l}
             </button>
           ))}
+        </div>
+      </div>
+      <div className="srow">
+        <div style={{flex:1}}><div className="srow-label">Content width</div>
+          <div className="srow-sub">How wide the main content area is on desktop</div></div>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <input type="range" min={500} max={1100} step={50} value={draft.contentWidth||700}
+            onChange={e=>setDraft(d=>({...d,contentWidth:Number(e.target.value)}))}
+            style={{width:90,accentColor:"var(--primary)"}}/>
+          <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)",minWidth:36}}>{draft.contentWidth||700}px</span>
         </div>
       </div>
       <div className="srow">
