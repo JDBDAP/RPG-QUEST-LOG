@@ -1015,7 +1015,7 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
       setScoring(true);
       try{
         const skNames=f.skillIds.map(id=>skills.find(s=>s.id===id)?.name).filter(Boolean).join(", ")||"General";
-        const res=await fetch("https://api.anthropic.com/v1/messages",{
+        const res=await fetch("/api/chat",{
           method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:80,
             messages:[{role:"user",content:`Score a practice session for XP. Time-based would be ${baseXp}.\nType: ${ptype?.label}, Duration: ${f.dur}min, Skills: ${skNames}\nJournal: "${f.note}"\nReturn JSON only, no markdown: {"xp":number,"reason":"12 words max"}`}]
@@ -1055,7 +1055,7 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
         return `${ptype.label} ${m.dur}min${skNames?" ("+skNames+")":""}${m.note?" — "+m.note.slice(0,60):""}`;
       }).join("\n");
       const totalMinsA=recent.reduce((a,m)=>a+m.dur,0);
-      const res=await fetch("https://api.anthropic.com/v1/messages",{
+      const res=await fetch("/api/chat",{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:300,
           messages:[{role:"user",content:`Analyze these practice sessions and give honest, direct feedback in 3-4 sentences. Note patterns, gaps, what's working, and one concrete suggestion. Be specific, not generic.\n\nTotal: ${recent.length} sessions, ${totalMinsA} minutes\n\n${summary}`}]
