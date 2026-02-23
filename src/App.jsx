@@ -627,11 +627,11 @@ export default function App(){
           </header>
           <div className="main-wrap">
           <main className="pg">
-            {tab==="planner"  && <PlannerTab period={period} setPeriod={setPeriod} tasks={periodTasks()} weekDays={weekDays} allTasks={tasks} skills={skills} quests={quests} onAddTask={addTask} onToggle={toggleTask} onDelete={deleteTask} onEdit={editTask}/>}
+            {tab==="planner"  && <PlannerTab period={period} setPeriod={setPeriod} tasks={periodTasks()} weekDays={weekDays} allTasks={tasks} skills={skills} quests={quests} onAddTask={addTask} onToggle={toggleTask} onDelete={deleteTask} onEdit={editTask} onToggleQuest={toggleQuest}/>}
             {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest}/>}
             {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} onAdd={addSkill} onDelete={deleteSkill}/>}
             {tab==="practice" && <PracticeTab meds={meds} skills={skills} streaks={streaks} pending={pendingPractice} practiceTypes={practiceTypes} onAddType={addPracticeType} onDeleteType={deletePracticeType} onLog={logMed} onDelete={deleteMed} onClearPending={()=>setPendingPractice(null)}/>}
-            {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed}/>}
+            {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest}/>}
             {tab==="settings" && <SettingsTab showToast={showToast} onExport={exportData} onImport={importData}/>}
           </main>
           </div>
@@ -692,7 +692,34 @@ function ProfileSetup({onComplete}){
   );
 }
 
-function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAddTask,onToggle,onDelete,onEdit}){
+function QuestPlannerCard({quest,skills,onToggle}){
+  const {settings}=useSettings(); const L=settings.labels;
+  const qSkills=(quest.skills||[]).map(id=>skills.find(s=>s.id===id)).filter(Boolean);
+  const isRadiant=quest.type==="radiant";
+  const dueFmt=quest.due?new Date(quest.due).toLocaleDateString("en-US",{month:"short",day:"numeric"}):null;
+  const now=Date.now();
+  const overdue=quest.due&&quest.due<now&&!quest.done;
+  return (
+    <div className={`card quest-${quest.type} ${quest.done?"done":""}`}
+      style={{marginBottom:3,borderColor:overdue?"var(--danger)":"var(--primaryb)",background:"var(--primaryf)"}}>
+      <button className="chk" style={{color:"var(--primary)",borderColor:"var(--primaryb)"}}
+        onClick={()=>onToggle(quest.id)}>
+        {quest.done?"✓":""}
+      </button>
+      <div className="cbody">
+        <div className={`ctitle ${quest.done?"done":""}`}>{quest.title}</div>
+        <div className="cmeta">
+          <span className="ctag" style={{color:"var(--primary)",borderColor:"var(--primaryb)"}}>◆ {isRadiant?"Radiant":"Quest"}</span>
+          {qSkills.map(sk=><span key={sk.id} className="ctag" style={{borderColor:sk.color+"44",color:sk.color}}>{sk.icon} {sk.name}</span>)}
+          <span className="ctag">{quest.xpVal} {L.xpName}</span>
+          {dueFmt&&<span className="ctag" style={{color:overdue?"var(--danger)":"var(--tx3)"}}>{overdue?"⚠ due ":"due "}{dueFmt}</span>}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAddTask,onToggle,onDelete,onEdit,onToggleQuest}){
   const {settings}=useSettings(); const L=settings.labels;
   const [showForm,setShowForm]=useState(false);
   const [f,setF]=useState({title:"",skill:"",xpVal:20,questId:""});
@@ -703,11 +730,15 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
     setF(v=>({...v,title:"",questId:""})); setShowForm(false);
   };
   const activeQuests=(quests||[]).filter(q=>!q.done);
-  const submit=()=>{
-    if(!f.title.trim()) return;
-    onAddTask({title:f.title.trim(),period,skill:f.skill||null,xpVal:f.xpVal});
-    setF(v=>({...v,title:""})); setShowForm(false);
-  };
+
+  // Helper: get quests due on a specific dayKey string (YYYY-MM-DD)
+  const questsForDay=(dk)=>(quests||[]).filter(q=>q.due&&!q.done&&dayKey(new Date(q.due))===dk);
+  const questsForMonth=(year,month)=>(quests||[]).filter(q=>{
+    if(!q.due||q.done) return false;
+    const d=new Date(q.due); return d.getFullYear()===year&&d.getMonth()===month;
+  });
+  const todayDk=dayKey(new Date());
+  const todayQuests=questsForDay(todayDk);
   const active=tasks.filter(t=>!t.done), done=tasks.filter(t=>t.done);
   return (<>
     <div className="stabs">
@@ -744,16 +775,30 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
     ):<button className="addbtn" onClick={()=>setShowForm(true)}><span>+</span> Add task</button>}
     {period==="weekly"?(weekDays.map((d,i)=>{
       const dk=dayKey(d), isToday=dk===dayKey(new Date()), dt=allTasks.filter(t=>t.dayKey===dk);
+      const dq=questsForDay(dk);
       return (
         <div key={i} className="wk-day">
           <div className={`wk-day-lbl ${isToday?"today":""}`}>{["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][i]} {d.getDate()}{isToday?" · today":""}</div>
-          {dt.length===0?<div style={{fontSize:12,color:"var(--tx3)",paddingLeft:2}}>—</div>
-            :<div className="clist">{dt.map(t=><TaskCard key={t.id} task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div>}
+          {dt.length===0&&dq.length===0?<div style={{fontSize:12,color:"var(--tx3)",paddingLeft:2}}>—</div>:<>
+            {dq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest}/>)}
+            <div className="clist">{dt.map(t=><TaskCard key={t.id} task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div>
+          </>}
         </div>
       );
     })):(
       <>
-        {active.length===0&&done.length===0&&<div className="empty">No tasks yet</div>}
+        {todayQuests.length>0&&period==="daily"&&<>
+          <div className="slbl" style={{marginBottom:6}}>◆ Quests due today</div>
+          {todayQuests.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest}/>)}
+          {(active.length>0||done.length>0)&&<div className="gap"/>}
+        </>}
+        {period==="monthly"&&(()=>{
+          const now=new Date(); const mq=questsForMonth(now.getFullYear(),now.getMonth());
+          return mq.length>0?<><div className="slbl" style={{marginBottom:6}}>◆ Quests this month</div>
+            {mq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest}/>)}
+            {(active.length>0||done.length>0)&&<div className="gap"/>}</>:null;
+        })()}
+        {active.length===0&&done.length===0&&todayQuests.length===0&&<div className="empty">No tasks yet</div>}
         <div className="clist">{active.map(t=><TaskCard key={t.id} task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div>
         {done.length>0&&<><div className="gap"/><div className="slbl">{L.done}</div>
           <div className="clist">{done.map(t=><TaskCard key={t.id} task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div></>}
@@ -1163,16 +1208,18 @@ function MedCard({med,ptype,mSkills,onDelete}){
   );
 }
 
-function buildAdvisorTools(skills){
+function buildAdvisorTools(skills,quests){
   const sn=skills.map(s=>`${s.id}=${s.name}`).join(",")||"none";
+  const qn=(quests||[]).filter(q=>!q.done).map(q=>`${q.id}="${q.title}"`).join(",")||"none";
   return [
-    {name:"add_quest",description:"Add a quest",input_schema:{type:"object",properties:{title:{type:"string"},type:{type:"string",enum:["main","radiant"]},skillId:{type:"string",description:`Optional skills: ${sn}`},note:{type:"string"},dueDate:{type:"string"},dueTime:{type:"string"}},required:["title","type"]}},
+    {name:"add_quest",description:"Add a new quest",input_schema:{type:"object",properties:{title:{type:"string"},type:{type:"string",enum:["main","radiant"]},skillId:{type:"string",description:`Optional skills: ${sn}`},note:{type:"string"},dueDate:{type:"string"},dueTime:{type:"string"}},required:["title","type"]}},
+    {name:"update_quest",description:`Update an existing quest — set due date, change title, add a note. Active quests: ${qn}`,input_schema:{type:"object",properties:{questId:{type:"string",description:"ID of quest to update"},dueDate:{type:"string",description:"YYYY-MM-DD"},dueTime:{type:"string",description:"HH:MM (optional)"},title:{type:"string"},note:{type:"string"}},required:["questId"]}},
     {name:"add_task",description:"Add a task",input_schema:{type:"object",properties:{title:{type:"string"},period:{type:"string",enum:["daily","weekly","monthly"]},skillId:{type:"string",description:`Optional skills: ${sn}`},xpVal:{type:"number"}},required:["title","period"]}},
     {name:"log_session",description:"Log a practice session",input_schema:{type:"object",properties:{type:{type:"string",enum:["mindfulness","presence","grounding","visualization","ritual","breathwork","contemplation","open"]},duration:{type:"number"},skillId:{type:"string",description:`Optional skills: ${sn}`},note:{type:"string"},backlogDate:{type:"string"}},required:["type","duration"]}},
   ];
 }
 
-function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,onLogMed}){
+function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,onLogMed,onEditQuest}){
   const {settings}=useSettings(); const L=settings.labels;
   const [msgs,setMsgs]=useState([]);
   const [input,setInput]=useState("");
@@ -1196,6 +1243,12 @@ function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,o
     if(action.tool==="add_quest"){
       const due=action.input.dueDate?new Date(`${action.input.dueDate}${action.input.dueTime?"T"+action.input.dueTime:"T09:00"}`).getTime():null;
       await onAddQuest({title:action.input.title,type:action.input.type,skill:action.input.skillId||null,note:action.input.note||"",due});
+    } else if(action.tool==="update_quest"){
+      const updates={};
+      if(action.input.dueDate) updates.due=new Date(`${action.input.dueDate}${action.input.dueTime?"T"+action.input.dueTime:"T09:00"}`).getTime();
+      if(action.input.title) updates.title=action.input.title;
+      if(action.input.note!==undefined) updates.note=action.input.note;
+      await onEditQuest(action.input.questId,updates);
     } else if(action.tool==="add_task"){
       await onAddTask({title:action.input.title,period:action.input.period,skill:action.input.skillId||null,xpVal:action.input.xpVal||20});
     } else if(action.tool==="log_session"){
@@ -1221,10 +1274,10 @@ function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,o
     const history=[...msgs.map(m=>({role:m.role,content:m.content})),{role:"user",content:msg}];
     setMsgs(prev=>[...prev,{role:"user",content:msg}]);
     try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{
+      const res=await fetch("/api/chat",{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,
-          system:buildCtx(),tools:buildAdvisorTools(skills),messages:history}),
+          system:buildCtx(),tools:buildAdvisorTools(skills,quests),messages:history}),
       });
       const data=await res.json();
       const toolBlocks=data.content?.filter(b=>b.type==="tool_use")||[];
@@ -1283,6 +1336,9 @@ function ActionCard({action,skills,onAccept,onCancel}){
   if(action.tool==="add_quest"){
     summary=`[${action.input.type}] "${action.input.title}"`;
     detail=[sk?`→ ${sk.name}`:null,action.input.note,action.input.dueDate?`due ${action.input.dueDate}`:null].filter(Boolean).join(" · ");
+  } else if(action.tool==="update_quest"){
+    summary=`Update quest`;
+    detail=[action.input.title?`rename → "${action.input.title}"`:null,action.input.dueDate?`set due ${action.input.dueDate}`:null,action.input.note?`note: ${action.input.note}`:null].filter(Boolean).join(" · ");
   } else if(action.tool==="add_task"){
     summary=`[${action.input.period}] "${action.input.title}"`;
     detail=[sk?`→ ${sk.name}`:null,action.input.xpVal?`${action.input.xpVal}xp`:null].filter(Boolean).join(" · ");
