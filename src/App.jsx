@@ -499,6 +499,19 @@ export default function App(){
     }
   };
   const deleteQuest=async id=>saveQ(quests.filter(q=>q.id!==id));
+  const addSubquest=async(questId,title)=>{
+    await saveQ(quests.map(q=>q.id!==questId?q:{...q,subquests:[...(q.subquests||[]),{id:uid(),title,done:false}]}));
+  };
+  const toggleSubquest=async(questId,subId)=>{
+    await saveQ(quests.map(q=>{
+      if(q.id!==questId) return q;
+      return {...q,subquests:(q.subquests||[]).map(s=>s.id===subId?{...s,done:!s.done}:s)};
+    }));
+    showToast("Subquest updated");
+  };
+  const deleteSubquest=async(questId,subId)=>{
+    await saveQ(quests.map(q=>q.id!==questId?q:{...q,subquests:(q.subquests||[]).filter(s=>s.id!==subId)}));
+  };
 
   const addSkill=async d=>{
     await saveS([...skills,{id:uid(),name:d.name,icon:d.icon,color:d.color,xp:d.startXp||0}]);
@@ -614,8 +627,8 @@ export default function App(){
           </header>
           <div className="main-wrap">
           <main className="pg">
-            {tab==="planner"  && <PlannerTab period={period} setPeriod={setPeriod} tasks={periodTasks()} weekDays={weekDays} allTasks={tasks} skills={skills} onAddTask={addTask} onToggle={toggleTask} onDelete={deleteTask} onEdit={editTask}/>}
-            {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest}/>}
+            {tab==="planner"  && <PlannerTab period={period} setPeriod={setPeriod} tasks={periodTasks()} weekDays={weekDays} allTasks={tasks} skills={skills} quests={quests} onAddTask={addTask} onToggle={toggleTask} onDelete={deleteTask} onEdit={editTask}/>}
+            {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest}/>}
             {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} onAdd={addSkill} onDelete={deleteSkill}/>}
             {tab==="practice" && <PracticeTab meds={meds} skills={skills} streaks={streaks} pending={pendingPractice} practiceTypes={practiceTypes} onAddType={addPracticeType} onDeleteType={deletePracticeType} onLog={logMed} onDelete={deleteMed} onClearPending={()=>setPendingPractice(null)}/>}
             {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed}/>}
@@ -679,11 +692,17 @@ function ProfileSetup({onComplete}){
   );
 }
 
-function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,onAddTask,onToggle,onDelete,onEdit}){
+function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAddTask,onToggle,onDelete,onEdit}){
   const {settings}=useSettings(); const L=settings.labels;
   const [showForm,setShowForm]=useState(false);
-  const [f,setF]=useState({title:"",skill:"",xpVal:20});
+  const [f,setF]=useState({title:"",skill:"",xpVal:20,questId:""});
   useEffect(()=>{if(skills.length&&!f.skill)setF(v=>({...v,skill:skills[0]?.id||""}));},[skills]);
+  const submit=()=>{
+    if(!f.title.trim()) return;
+    onAddTask({title:f.title.trim(),period,skill:f.skill||null,xpVal:f.xpVal,questId:f.questId||null});
+    setF(v=>({...v,title:"",questId:""})); setShowForm(false);
+  };
+  const activeQuests=(quests||[]).filter(q=>!q.done);
   const submit=()=>{
     if(!f.title.trim()) return;
     onAddTask({title:f.title.trim(),period,skill:f.skill||null,xpVal:f.xpVal});
@@ -712,6 +731,14 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,onAddTask,o
           </select>
           <button className="fsbtn" style={{width:"auto",padding:"7px 12px",marginTop:0}} onClick={()=>setShowForm(false)}>✕</button>
         </div>
+        {activeQuests.length>0&&(
+          <div className="frow">
+            <select className="fsel" style={{flex:1}} value={f.questId} onChange={e=>setF(v=>({...v,questId:e.target.value}))}>
+              <option value="">No quest link</option>
+              {activeQuests.map(q=><option key={q.id} value={q.id}>◆ {q.title}</option>)}
+            </select>
+          </div>
+        )}
         <button className="fsbtn" onClick={submit}>Add Task</button>
       </div>
     ):<button className="addbtn" onClick={()=>setShowForm(true)}><span>+</span> Add task</button>}
@@ -721,21 +748,21 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,onAddTask,o
         <div key={i} className="wk-day">
           <div className={`wk-day-lbl ${isToday?"today":""}`}>{["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][i]} {d.getDate()}{isToday?" · today":""}</div>
           {dt.length===0?<div style={{fontSize:12,color:"var(--tx3)",paddingLeft:2}}>—</div>
-            :<div className="clist">{dt.map(t=><TaskCard key={t.id} task={t} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div>}
+            :<div className="clist">{dt.map(t=><TaskCard key={t.id} task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div>}
         </div>
       );
     })):(
       <>
         {active.length===0&&done.length===0&&<div className="empty">No tasks yet</div>}
-        <div className="clist">{active.map(t=><TaskCard key={t.id} task={t} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div>
+        <div className="clist">{active.map(t=><TaskCard key={t.id} task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div>
         {done.length>0&&<><div className="gap"/><div className="slbl">{L.done}</div>
-          <div className="clist">{done.map(t=><TaskCard key={t.id} task={t} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div></>}
+          <div className="clist">{done.map(t=><TaskCard key={t.id} task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div></>}
       </>
     )}
   </>);
 }
 
-function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit}){
+function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,onToggleSubquest,onDeleteSubquest}){
   const {settings}=useSettings(); const L=settings.labels;
   const [form,setForm]=useState(null);
   const [f,setF]=useState({title:"",note:"",type:"main",skills:[],dueDate:"",dueTime:"",showSkill:false});
@@ -780,16 +807,16 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit}){
     <div className="slbl">{L.mainQuest}s</div>
     {form==="main"?<QForm btnClass="primary" btnLabel={`Accept · +${L.mainXp} ${L.xpName} on completion`}/>
       :<button className="addbtn" onClick={()=>openForm("main")}><span>+</span> New {L.mainQuest.toLowerCase()}</button>}
-    <div className="clist">{mainA.map(q=><QuestCard key={q.id} quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div>
+    <div className="clist">{mainA.map(q=><QuestCard key={q.id} quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest}/>)}</div>
     {mainD.length>0&&<><div className="gap"/><div className="slbl">{L.completed}</div>
-      <div className="clist">{mainD.map(q=><QuestCard key={q.id} quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div></>}
+      <div className="clist">{mainD.map(q=><QuestCard key={q.id} quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest}/>)}</div></>}
     {quests.filter(q=>q.type==="main").length===0&&form!=="main"&&<div className="empty">No {L.mainQuest.toLowerCase()}s yet</div>}
     <div className="gap"/>
     <div className="slbl">{L.radiantQuest}s</div>
     <p style={{fontSize:12,color:"var(--tx2)",fontStyle:"italic",marginBottom:12,lineHeight:1.5}}>{L.radiantDesc}</p>
     {form==="radiant"?<QForm btnClass="secondary" btnLabel={`Commit · +${L.radiantXp} ${L.xpName} per completion`}/>
       :<button className="addbtn" onClick={()=>openForm("radiant")}><span>+</span> New {L.radiantQuest.toLowerCase()}</button>}
-    <div className="clist">{radiant.map(q=><QuestCard key={q.id} quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div>
+    <div className="clist">{radiant.map(q=><QuestCard key={q.id} quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest}/>)}</div>
     {radiant.length===0&&form!=="radiant"&&<div className="empty">No {L.radiantQuest.toLowerCase()}s yet</div>}
   </>);
 }
@@ -1431,9 +1458,10 @@ function SettingsTab({showToast,onExport,onImport}){
   </div>);
 }
 
-function TaskCard({task,skills,onToggle,onDelete,onEdit}){
+function TaskCard({task,skills,quests,onToggle,onDelete,onEdit}){
   const {settings}=useSettings(); const L=settings.labels;
   const sk=skills.find(s=>s.id===task.skill);
+  const linkedQuest=task.questId?(quests||[]).find(q=>q.id===task.questId):null;
   const [editing,setEditing]=useState(false);
   const [f,setF]=useState({title:task.title,skill:task.skill||"",xpVal:task.xpVal});
   const save=()=>{
@@ -1465,6 +1493,7 @@ function TaskCard({task,skills,onToggle,onDelete,onEdit}){
         <div className="cmeta">
           {sk&&<span className="ctag" style={{borderColor:sk.color+"44",color:sk.color}}>{sk.icon} {sk.name}</span>}
           <span className="ctag">{task.xpVal} {L.xpName}</span>
+          {linkedQuest&&<span className="ctag" style={{borderColor:"var(--primaryb)",color:"var(--primary)"}}>◆ {linkedQuest.title}</span>}
         </div>
       </div>
       <button className="delbtn" onClick={()=>setEditing(true)} title="Edit">✎</button>
@@ -1473,10 +1502,12 @@ function TaskCard({task,skills,onToggle,onDelete,onEdit}){
   );
 }
 
-function QuestCard({quest,skills,onToggle,onDelete,onEdit}){
+function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggleSubquest,onDeleteSubquest}){
   const {settings}=useSettings(); const L=settings.labels;
   const qSkills=(quest.skills||[]).map(id=>skills.find(s=>s.id===id)).filter(Boolean);
   const [editing,setEditing]=useState(false);
+  const [showSubs,setShowSubs]=useState(false);
+  const [newSub,setNewSub]=useState("");
   const [ef,setEf]=useState({title:quest.title,note:quest.note||"",dueDate:quest.due?new Date(quest.due).toISOString().split("T")[0]:""});
   const saveEdit=()=>{
     if(!ef.title.trim()) return;
@@ -1484,6 +1515,13 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit}){
     onEdit(quest.id,{title:ef.title.trim(),note:ef.note.trim(),due});
     setEditing(false);
   };
+  const submitSub=()=>{
+    if(!newSub.trim()) return;
+    onAddSubquest(quest.id,newSub.trim());
+    setNewSub("");
+  };
+  const subs=quest.subquests||[];
+  const subsDone=subs.filter(s=>s.done).length;
   if(editing) return (
     <div className="fwrap" style={{marginBottom:2}}>
       <div className="frow"><input className="fi full" autoFocus value={ef.title} onChange={e=>setEf(v=>({...v,title:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&saveEdit()}/></div>
@@ -1501,27 +1539,51 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit}){
   const dueFmt=quest.due?new Date(quest.due).toLocaleDateString("en-US",{month:"short",day:"numeric"}):null;
   const isRadiant=quest.type==="radiant";
   return (
-    <div className={`card quest-${quest.type} ${quest.done?"done":""}`}
-      style={overdue?{borderColor:"var(--danger)"}:dueSoon?{borderColor:"var(--primary)"}:{}}>
-      <button className="chk" style={isRadiant?{color:"var(--secondary)",borderColor:"var(--secondaryb)"}:{}}
-        onClick={()=>onToggle(quest.id)}>
-        {isRadiant?"◉":quest.done?"✓":""}
-      </button>
-      <div className="cbody">
-        <div className={`ctitle ${quest.done&&!isRadiant?"done":""}`}>{quest.title}</div>
-        {quest.note&&<div className="cnote">{quest.note}</div>}
-        <div className="cmeta">
-          {qSkills.map(sk=><span key={sk.id} className="ctag" style={{borderColor:sk.color+"44",color:sk.color}}>{sk.icon} {sk.name}</span>)}
-          <span className="ctag">{quest.xpVal} {L.xpName}{isRadiant?" / run":""}</span>
-          {dueFmt&&<span className="ctag" style={{
-            color:overdue?"var(--danger)":dueSoon?"var(--primary)":"var(--tx3)",
-            borderColor:overdue?"var(--dangerf)":dueSoon?"var(--primaryb)":"var(--b1)"
-          }}>{overdue?"⚠ ":"◷ "}{dueFmt}</span>}
-          {quest.done&&!isRadiant&&<span className="ctag" style={{color:"var(--success)",borderColor:"var(--successf)"}}>✓</span>}
+    <div style={{marginBottom:2}}>
+      <div className={`card quest-${quest.type} ${quest.done?"done":""}`}
+        style={overdue?{borderColor:"var(--danger)"}:dueSoon?{borderColor:"var(--primary)"}:{}}>
+        <button className="chk" style={isRadiant?{color:"var(--secondary)",borderColor:"var(--secondaryb)"}:{}}
+          onClick={()=>onToggle(quest.id)}>
+          {isRadiant?"◉":quest.done?"✓":""}
+        </button>
+        <div className="cbody">
+          <div className={`ctitle ${quest.done&&!isRadiant?"done":""}`}>{quest.title}</div>
+          {quest.note&&<div className="cnote">{quest.note}</div>}
+          <div className="cmeta">
+            {qSkills.map(sk=><span key={sk.id} className="ctag" style={{borderColor:sk.color+"44",color:sk.color}}>{sk.icon} {sk.name}</span>)}
+            <span className="ctag">{quest.xpVal} {L.xpName}{isRadiant?" / run":""}</span>
+            {dueFmt&&<span className="ctag" style={{
+              color:overdue?"var(--danger)":dueSoon?"var(--primary)":"var(--tx3)",
+              borderColor:overdue?"var(--dangerf)":dueSoon?"var(--primaryb)":"var(--b1)"
+            }}>{overdue?"⚠ ":"◷ "}{dueFmt}</span>}
+            {quest.done&&!isRadiant&&<span className="ctag" style={{color:"var(--success)",borderColor:"var(--successf)"}}>✓</span>}
+            {subs.length>0&&<button onClick={()=>setShowSubs(v=>!v)}
+              style={{background:"none",border:"1px solid var(--b1)",borderRadius:20,padding:"2px 8px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:.8,color:subsDone===subs.length?"var(--success)":"var(--tx3)",transition:"all .15s"}}>
+              {subsDone}/{subs.length} steps
+            </button>}
+          </div>
         </div>
+        <button className="delbtn" onClick={()=>setEditing(true)} title="Edit">✎</button>
+        <button className="delbtn" onClick={()=>onDelete(quest.id)}>✕</button>
       </div>
-      <button className="delbtn" onClick={()=>setEditing(true)} title="Edit">✎</button>
-      <button className="delbtn" onClick={()=>onDelete(quest.id)}>✕</button>
+      {(showSubs||subs.length>0)&&(
+        <div style={{marginLeft:12,marginTop:2,marginBottom:2,borderLeft:"1px solid var(--b1)",paddingLeft:10}}>
+          {subs.map(s=>(
+            <div key={s.id} style={{display:"flex",alignItems:"center",gap:7,padding:"5px 0",borderBottom:"1px solid var(--b1)"}}>
+              <button className={`chk ${s.done?"on":""}`} style={{width:13,height:13,fontSize:8,flexShrink:0}} onClick={()=>onToggleSubquest(quest.id,s.id)}>{s.done?"✓":""}</button>
+              <span style={{flex:1,fontSize:12,color:s.done?"var(--tx3)":"var(--tx)",textDecoration:s.done?"line-through":"none"}}>{s.title}</span>
+              <button className="delbtn" style={{fontSize:9}} onClick={()=>onDeleteSubquest(quest.id,s.id)}>✕</button>
+            </div>
+          ))}
+          <div style={{display:"flex",gap:5,paddingTop:5}}>
+            <input className="fi" placeholder="Add step..." value={newSub}
+              onChange={e=>setNewSub(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&submitSub()}
+              style={{fontSize:11,padding:"4px 8px",flex:1}}/>
+            <button className="fsbtn" style={{width:"auto",padding:"4px 10px",margin:0,fontSize:9}} onClick={submitSub}>+</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
