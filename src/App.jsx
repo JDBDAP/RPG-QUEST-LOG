@@ -48,7 +48,18 @@ const PALETTES = [
 ];
 
 const SKILL_ICONS  = ["◈","◉","◎","◆","◬","✦","◌","◊","△","○","□","◇","❋","⊕","◐","◑","⬡","✧","⟡","◿"];
-const SKILL_COLORS = ["#6a8fb5","#6a9e6a","#9e6ab5","#c8a96e","#5b9e9e","#b5906a","#9e6a6a","#7a9e6a","#8b6a9e","#9e8b5b","#5b7a9e","#9e7a5b","#7a9e9e","#9e9e5b","#8b5b8b","#b58b6a","#6ab58b","#8b8b5b"];
+const SKILL_COLORS = [
+  // Muted (original palette)
+  "#6a8fb5","#6a9e6a","#9e6ab5","#c8a96e","#5b9e9e","#b5906a",
+  "#9e6a6a","#7a9e6a","#8b6a9e","#9e8b5b","#5b7a9e","#9e7a5b",
+  "#7a9e9e","#9e9e5b","#8b5b8b","#b58b6a","#6ab58b","#8b8b5b",
+  // Vivid
+  "#e05555","#e07a30","#e0c030","#55c255","#30b8e0","#7055e0",
+  "#e055b8","#e05580","#55e0a0","#55a0e0","#c255e0","#e09030",
+  // Bright / neon-ish
+  "#ff6b6b","#ffa94d","#ffe066","#69db7c","#4dabf7","#cc5de8",
+  "#f783ac","#74c0fc","#63e6be","#a9e34b","#ff8cc6","#f9ca24",
+];
 const DEFAULT_PRACTICE_TYPES = [];
 const DEFAULT_SKILLS = [];
 const SKILL_PRESETS = [
@@ -434,6 +445,7 @@ export default function App(){
   const [pendingPractice,setPendingPractice]=useState(null);
   const [toast,setToast]=useState({msg:"",on:false});
   const [confirm,setConfirm]=useState(null);
+  const [showJarvis,setShowJarvis]=useState(false);
   const [loaded,setLoaded]=useState(false);
   const [seenTabs,setSeenTabs]=useState({});
   const [explainer,setExplainer]=useState(null);
@@ -585,9 +597,18 @@ export default function App(){
     await saveS([...skills,{id:uid(),name:d.name,icon:d.icon,color:d.color,xp:d.startXp||0}]);
     showToast("Skill created");
   };
+  const addSkillBatch=async arr=>{
+    const newSkills=arr.map(d=>({id:uid(),name:d.name,icon:d.icon,color:d.color,xp:d.startXp||0,customImg:d.customImg||null}));
+    await saveS([...skills,...newSkills]);
+    showToast(`Added ${newSkills.length} skills`);
+  };
   const deleteSkill=async id=>{
     setConfirm({msg:"Delete this skill?",sub:"All XP earned will be lost.",
       onOk:async()=>{await saveS(skills.filter(s=>s.id!==id));setConfirm(null);showToast("Skill removed");}});
+  };
+  const editSkill=async(id,updates)=>{
+    await saveS(skills.map(s=>s.id===id?{...s,...updates}:s));
+    showToast("Skill updated");
   };
 
   const logMed=async d=>{
@@ -708,7 +729,7 @@ export default function App(){
           <main className="pg">
             {tab==="planner"  && <PlannerTab period={period} setPeriod={setPeriod} tasks={periodTasks()} weekDays={weekDays} allTasks={tasks} skills={skills} quests={quests} onAddTask={addTask} onToggle={toggleTask} onDelete={deleteTask} onEdit={editTask} onToggleQuest={toggleQuest}/>}
             {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest}/>}
-            {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onDelete={deleteSkill}/>}
+            {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill}/>}
             {tab==="practice" && <PracticeTab meds={meds} skills={skills} streaks={streaks} pending={pendingPractice} practiceTypes={practiceTypes} onAddType={addPracticeType} onDeleteType={deletePracticeType} onLog={logMed} onDelete={deleteMed} onClearPending={()=>setPendingPractice(null)}/>}
             {tab==="journal"  && <JournalTab entries={journal} onAdd={addJournalEntry} onDelete={deleteJournalEntry}/>}
             {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} journal={journal} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest}/>}
@@ -718,6 +739,9 @@ export default function App(){
           {/* Weekly Review floating button */}
           <button className="review-btn" onClick={()=>setShowReview(true)} title="Weekly Review">◈ Review</button>
           {showReview&&<WeeklyReview tasks={tasks} quests={quests} skills={skills} meds={meds} xpLog={xpLog} onClose={()=>setShowReview(false)} onNavigate={id=>{setShowReview(false);handleTabChange(id);}}/>}
+          {/* Jarvis FAB */}
+          <button onClick={()=>setShowJarvis(true)} style={{position:"fixed",bottom:72,right:16,width:44,height:44,borderRadius:"50%",background:"var(--s2)",border:"1px solid var(--b2)",color:"var(--tx)",fontSize:18,cursor:"pointer",zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 12px rgba(0,0,0,.4)",transition:"all .15s"}} title="Jarvis AI">⟡</button>
+          {showJarvis&&<JarvisOverlay tasks={tasks} quests={quests} skills={skills} onAddQuest={addQuest} onAddTask={addTask} onClose={()=>setShowJarvis(false)}/>}
           {/* Mobile bottom nav */}
           <nav className="bnav">
             {NAV.map(n=>(
@@ -895,36 +919,33 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
   const [form,setForm]=useState(null);
   const [search,setSearch]=useState("");
   const [filterPrio,setFilterPrio]=useState("");
-  const [f,setF]=useState({title:"",skill:"",note:"",dueDate:"",type:"main",priority:"med"});
-  const openForm=t=>{ setForm(t); setF(v=>({...v,type:t,title:"",note:"",dueDate:"",priority:"med"})); };
+  const [f,setF]=useState({title:"",skillIds:[],note:"",dueDate:"",type:"main",priority:"med",color:null});
+  const [qXpSug,setQXpSug]=useState(null);
+  const [qXpLoad,setQXpLoad]=useState(false);
+  const openForm=t=>{ setForm(t); setF({title:"",skillIds:[],note:"",dueDate:"",type:t,priority:"med",color:null}); setQXpSug(null); };
+  const toggleQSkill=id=>setF(v=>{const next=v.skillIds.includes(id)?v.skillIds.filter(x=>x!==id):[...v.skillIds,id];const auto=next.length>0?(skills.find(s=>s.id===next[0])?.color)||null:null;return {...v,skillIds:next,color:v.color!==null?v.color:auto};});
   const submit=()=>{
     if(!f.title.trim()) return;
     const due=f.dueDate?new Date(f.dueDate+"T09:00").getTime():null;
-    onAdd({title:f.title.trim(),type:form,skill:f.skill||null,note:f.note.trim(),due,priority:f.priority});
-    setForm(null);
+    onAdd({title:f.title.trim(),type:form,skills:f.skillIds,note:f.note.trim(),due,priority:f.priority,color:f.color||null});
+    setForm(null); setQXpSug(null);
   };
-  const QForm=({btnClass,btnLabel})=>(
-    <div className="fwrap">
-      <div className="frow"><input className="fi full" autoFocus placeholder="Quest title..." value={f.title} onChange={e=>setF(v=>({...v,title:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
-      <div className="frow">
-        <select className="fsel" value={f.skill} onChange={e=>setF(v=>({...v,skill:e.target.value}))}>
-          <option value="">No skill</option>
-          {skills.map(s=><option key={s.id} value={s.id}>{s.icon} {s.name}</option>)}
-        </select>
-        <select className="fsel" value={f.priority} onChange={e=>setF(v=>({...v,priority:e.target.value}))}>
-          <option value="high">⬤ High</option>
-          <option value="med">⬤ Med</option>
-          <option value="low">⬤ Low</option>
-        </select>
-        <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0}} onClick={()=>setForm(null)}>✕</button>
-      </div>
-      <div className="frow">
-        <input className="fi" placeholder="Intention (optional)..." value={f.note} onChange={e=>setF(v=>({...v,note:e.target.value}))}/>
-        <input className="fi" type="date" style={{colorScheme:"dark",width:140}} value={f.dueDate} onChange={e=>setF(v=>({...v,dueDate:e.target.value}))}/>
-      </div>
-      <button className={`fsbtn ${btnClass||""}`} onClick={submit}>{btnLabel||"Accept Quest"}</button>
-    </div>
-  );
+  const suggestNewQuestXp=async()=>{
+    if(!f.title.trim()) return;
+    setQXpLoad(true); setQXpSug(null);
+    const typeLabel=form==="main"?"main quest":form==="side"?"side quest":"radiant/repeatable quest";
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:120,
+          messages:[{role:"user",content:`Quest in a gamified life tracker: "${f.title}"${f.note?`. Intention: "${f.note}"`:""}. Type: ${typeLabel}. Suggest fair XP (main=60-120, side=30-70, radiant=20-40 per run). Reply ONLY with JSON: {"xp": NUMBER, "reason": "one short sentence"}`}]})});
+      const data=await res.json();
+      const txt=data.content?.map(b=>b.text||"").join("")||"";
+      const m=txt.match(/\{[\s\S]*\}/);
+      if(m) setQXpSug(JSON.parse(m[0]));
+    }catch(e){setQXpSug({xp:null,reason:"Couldn't reach AI."});}
+    setQXpLoad(false);
+  };
   const filterQ=q=>{
     if(search&&!q.title.toLowerCase().includes(search.toLowerCase())) return false;
     if(filterPrio&&q.priority!==filterPrio) return false;
@@ -945,7 +966,36 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
       </select>
     </div>
     <div className="slbl">{L.mainQuest}s</div>
-    {form==="main"?<QForm btnLabel={`Accept · +${L.mainXp} ${L.xpName}`}/>
+    {form==="main"?(<div className="fwrap">
+      <div className="frow"><input className="fi full" autoFocus placeholder="Quest title..." value={f.title} onChange={e=>setF(v=>({...v,title:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
+      {skills.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
+        {skills.map(s=><button key={s.id} onClick={()=>toggleQSkill(s.id)} style={{background:f.skillIds.includes(s.id)?s.color+"22":"var(--bg)",border:`1px solid ${f.skillIds.includes(s.id)?s.color+"66":"var(--b2)"}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:.8,color:f.skillIds.includes(s.id)?s.color:"var(--tx3)",transition:"all .15s"}}>{s.icon} {s.name}</button>)}
+      </div>}
+      <div className="frow">
+        <select className="fsel" value={f.priority} onChange={e=>setF(v=>({...v,priority:e.target.value}))}>
+          <option value="high">⬤ High</option>
+          <option value="med">⬤ Med</option>
+          <option value="low">⬤ Low</option>
+        </select>
+        <input className="fi" type="date" style={{colorScheme:"dark",width:140}} value={f.dueDate} onChange={e=>setF(v=>({...v,dueDate:e.target.value}))}/>
+        <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0}} onClick={()=>setForm(null)}>✕</button>
+      </div>
+      <textarea className="fi" rows={2} placeholder="Intention (optional)..." value={f.note} onChange={e=>setF(v=>({...v,note:e.target.value}))} style={{resize:"vertical",minHeight:44,fontFamily:"inherit",fontSize:12,marginBottom:4,width:"100%",boxSizing:"border-box"}}/>
+      <div style={{marginBottom:6}}>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5}}>Quest color</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:4,alignItems:"center"}}>
+          {SKILL_COLORS.map(c=><div key={c} onClick={()=>setF(v=>({...v,color:c}))} style={{width:18,height:18,borderRadius:"50%",background:c,cursor:"pointer",border:f.color===c?"2px solid var(--tx)":"2px solid transparent",flexShrink:0}}/>)}
+          <div onClick={()=>setF(v=>({...v,color:null}))} style={{width:18,height:18,borderRadius:"50%",background:"var(--bg)",cursor:"pointer",border:!f.color?"2px solid var(--tx)":"2px solid var(--b2)",fontSize:9,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--tx3)"}} title="Auto from skill">∅</div>
+        </div>
+      </div>
+            <button className="fsbtn secondary" style={{marginBottom:4}} onClick={suggestNewQuestXp} disabled={qXpLoad||!f.title.trim()}>
+        {qXpLoad?"thinking...":"⟡ AI XP opinion"}
+      </button>
+      {qXpSug&&<div style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:4,padding:"8px 10px",marginBottom:6,fontSize:11,color:"var(--tx2)",lineHeight:1.5}}>
+        {qXpSug.xp?<><span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",fontWeight:"bold"}}>+{qXpSug.xp} XP</span> — {qXpSug.reason}</>:qXpSug.reason}
+      </div>}
+            <button className="fsbtn" onClick={submit}>{`Accept · +${L.mainXp} ${L.xpName}`}</button>
+    </div>)
       :<button className="addbtn" onClick={()=>openForm("main")}><span>+</span> New {L.mainQuest.toLowerCase()}</button>}
     <div className="clist">{mainA.map(q=><QuestCard key={q.id} quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest}/>)}</div>
     {mainD.length>0&&<><div className="gap"/><div className="slbl">{L.completed}</div>
@@ -954,25 +1004,87 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
     <div className="gap"/>
     <div className="slbl">{L.sideQuest}s</div>
     <p style={{fontSize:12,color:"var(--tx2)",fontStyle:"italic",marginBottom:12,lineHeight:1.5}}>Optional objectives. Complete for bonus XP, no pressure.</p>
-    {form==="side"?<QForm btnClass="secondary" btnLabel={`Accept · +${L.sideXp} ${L.xpName}`}/>
+    {form==="side"?(<div className="fwrap">
+      <div className="frow"><input className="fi full" autoFocus placeholder="Quest title..." value={f.title} onChange={e=>setF(v=>({...v,title:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
+      {skills.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
+        {skills.map(s=><button key={s.id} onClick={()=>toggleQSkill(s.id)} style={{background:f.skillIds.includes(s.id)?s.color+"22":"var(--bg)",border:`1px solid ${f.skillIds.includes(s.id)?s.color+"66":"var(--b2)"}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:.8,color:f.skillIds.includes(s.id)?s.color:"var(--tx3)",transition:"all .15s"}}>{s.icon} {s.name}</button>)}
+      </div>}
+      <div className="frow">
+        <select className="fsel" value={f.priority} onChange={e=>setF(v=>({...v,priority:e.target.value}))}>
+          <option value="high">⬤ High</option>
+          <option value="med">⬤ Med</option>
+          <option value="low">⬤ Low</option>
+        </select>
+        <input className="fi" type="date" style={{colorScheme:"dark",width:140}} value={f.dueDate} onChange={e=>setF(v=>({...v,dueDate:e.target.value}))}/>
+        <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0}} onClick={()=>setForm(null)}>✕</button>
+      </div>
+      <textarea className="fi" rows={2} placeholder="Intention (optional)..." value={f.note} onChange={e=>setF(v=>({...v,note:e.target.value}))} style={{resize:"vertical",minHeight:44,fontFamily:"inherit",fontSize:12,marginBottom:4,width:"100%",boxSizing:"border-box"}}/>
+      <div style={{marginBottom:6}}>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5}}>Quest color</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:4,alignItems:"center"}}>
+          {SKILL_COLORS.map(c=><div key={c} onClick={()=>setF(v=>({...v,color:c}))} style={{width:18,height:18,borderRadius:"50%",background:c,cursor:"pointer",border:f.color===c?"2px solid var(--tx)":"2px solid transparent",flexShrink:0}}/>)}
+          <div onClick={()=>setF(v=>({...v,color:null}))} style={{width:18,height:18,borderRadius:"50%",background:"var(--bg)",cursor:"pointer",border:!f.color?"2px solid var(--tx)":"2px solid var(--b2)",fontSize:9,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--tx3)"}} title="Auto from skill">∅</div>
+        </div>
+      </div>
+            <button className="fsbtn secondary" style={{marginBottom:4}} onClick={suggestNewQuestXp} disabled={qXpLoad||!f.title.trim()}>
+        {qXpLoad?"thinking...":"⟡ AI XP opinion"}
+      </button>
+      {qXpSug&&<div style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:4,padding:"8px 10px",marginBottom:6,fontSize:11,color:"var(--tx2)",lineHeight:1.5}}>
+        {qXpSug.xp?<><span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",fontWeight:"bold"}}>+{qXpSug.xp} XP</span> — {qXpSug.reason}</>:qXpSug.reason}
+      </div>}
+            <button className="fsbtn secondary" onClick={submit}>{`Accept · +${L.sideXp} ${L.xpName}`}</button>
+    </div>)
       :<button className="addbtn" onClick={()=>openForm("side")}><span>+</span> New {L.sideQuest.toLowerCase()}</button>}
     <div className="clist">{side.map(q=><QuestCard key={q.id} quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest}/>)}</div>
     {side.length===0&&form!=="side"&&<div className="empty">No {L.sideQuest.toLowerCase()}s yet</div>}
     <div className="gap"/>
     <div className="slbl">{L.radiantQuest}s</div>
     <p style={{fontSize:12,color:"var(--tx2)",fontStyle:"italic",marginBottom:12,lineHeight:1.5}}>{L.radiantDesc}</p>
-    {form==="radiant"?<QForm btnClass="secondary" btnLabel={`Commit · +${L.radiantXp} ${L.xpName} per completion`}/>
+    {form==="radiant"?(<div className="fwrap">
+      <div className="frow"><input className="fi full" autoFocus placeholder="Quest title..." value={f.title} onChange={e=>setF(v=>({...v,title:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
+      {skills.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
+        {skills.map(s=><button key={s.id} onClick={()=>toggleQSkill(s.id)} style={{background:f.skillIds.includes(s.id)?s.color+"22":"var(--bg)",border:`1px solid ${f.skillIds.includes(s.id)?s.color+"66":"var(--b2)"}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:.8,color:f.skillIds.includes(s.id)?s.color:"var(--tx3)",transition:"all .15s"}}>{s.icon} {s.name}</button>)}
+      </div>}
+      <div className="frow">
+        <select className="fsel" value={f.priority} onChange={e=>setF(v=>({...v,priority:e.target.value}))}>
+          <option value="high">⬤ High</option>
+          <option value="med">⬤ Med</option>
+          <option value="low">⬤ Low</option>
+        </select>
+        <input className="fi" type="date" style={{colorScheme:"dark",width:140}} value={f.dueDate} onChange={e=>setF(v=>({...v,dueDate:e.target.value}))}/>
+        <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0}} onClick={()=>setForm(null)}>✕</button>
+      </div>
+      <textarea className="fi" rows={2} placeholder="Intention (optional)..." value={f.note} onChange={e=>setF(v=>({...v,note:e.target.value}))} style={{resize:"vertical",minHeight:44,fontFamily:"inherit",fontSize:12,marginBottom:4,width:"100%",boxSizing:"border-box"}}/>
+      <div style={{marginBottom:6}}>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5}}>Quest color</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:4,alignItems:"center"}}>
+          {SKILL_COLORS.map(c=><div key={c} onClick={()=>setF(v=>({...v,color:c}))} style={{width:18,height:18,borderRadius:"50%",background:c,cursor:"pointer",border:f.color===c?"2px solid var(--tx)":"2px solid transparent",flexShrink:0}}/>)}
+          <div onClick={()=>setF(v=>({...v,color:null}))} style={{width:18,height:18,borderRadius:"50%",background:"var(--bg)",cursor:"pointer",border:!f.color?"2px solid var(--tx)":"2px solid var(--b2)",fontSize:9,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--tx3)"}} title="Auto from skill">∅</div>
+        </div>
+      </div>
+            <button className="fsbtn secondary" style={{marginBottom:4}} onClick={suggestNewQuestXp} disabled={qXpLoad||!f.title.trim()}>
+        {qXpLoad?"thinking...":"⟡ AI XP opinion"}
+      </button>
+      {qXpSug&&<div style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:4,padding:"8px 10px",marginBottom:6,fontSize:11,color:"var(--tx2)",lineHeight:1.5}}>
+        {qXpSug.xp?<><span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",fontWeight:"bold"}}>+{qXpSug.xp} XP</span> — {qXpSug.reason}</>:qXpSug.reason}
+      </div>}
+            <button className="fsbtn secondary" onClick={submit}>{`Commit · +${L.radiantXp} ${L.xpName} per completion`}</button>
+    </div>)
       :<button className="addbtn" onClick={()=>openForm("radiant")}><span>+</span> New {L.radiantQuest.toLowerCase()}</button>}
     <div className="clist">{radiant.map(q=><QuestCard key={q.id} quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest}/>)}</div>
     {radiant.length===0&&form!=="radiant"&&<div className="empty">No {L.radiantQuest.toLowerCase()}s yet</div>}
   </>);
 }
 
-function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onDelete}){
+const SKILL_ICONS_EXTRA = ["◈","◉","◎","◆","◬","✦","◌","◊","△","○","□","◇","❋","⊕","◐","◑","⬡","✧","⟡","◿","⚔","🧠","💪","🎯","🎨","📚","🎵","🌱","⚡","🔥","💎","🏆","🎭","🔬","🌟","✍","🎸","🏋","🧘","💻","🗺","🎲","⚙","🛡","🌊","🦾","🧩","🎤","📖","🌙"];
+
+function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,onEdit}){
   const {settings}=useSettings(); const L=settings.labels;
   const [showForm,setShowForm]=useState(false);
   const [showPresets,setShowPresets]=useState(false);
-  const [f,setF]=useState({name:"",icon:"◈",color:SKILL_COLORS[0],startLevel:1});
+  const [editingId,setEditingId]=useState(null);
+  const [ef,setEf]=useState({name:"",icon:"◈",color:SKILL_COLORS[0]});
+  const [f,setF]=useState({name:"",icon:"◈",color:SKILL_COLORS[0],startLevel:1,customImg:null});
 
   // build last-14-days activity map per skill
   const activityMap=useMemo(()=>{
@@ -994,11 +1106,26 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onDelete}){
   const submit=()=>{
     if(!f.name.trim()) return;
     const startXp=(Math.max(1,Number(f.startLevel)||1)-1)*skPerLv;
-    onAdd({name:f.name.trim(),icon:f.icon,color:f.color,startXp});
-    setF({name:"",icon:"◈",color:SKILL_COLORS[0],startLevel:1}); setShowForm(false);
+    onAdd({name:f.name.trim(),icon:f.icon,color:f.color,startXp,customImg:f.customImg||null});
+    setF({name:"",icon:"◈",color:SKILL_COLORS[0],startLevel:1,customImg:null}); setShowForm(false);
   };
-  const applyPreset=p=>{
-    p.skills.forEach(s=>onAdd({name:s.name,icon:s.icon,color:s.color,startXp:0}));
+  const openEdit=s=>{
+    setEf({name:s.name,icon:s.icon,color:s.color,customImg:s.customImg||null});
+    setEditingId(s.id);
+  };
+  const submitEdit=()=>{
+    if(!ef.name.trim()) return;
+    onEdit(editingId,{name:ef.name.trim(),icon:ef.icon,color:ef.color,customImg:ef.customImg||null});
+    setEditingId(null);
+  };
+  const handleImg=(e,setter)=>{
+    const file=e.target.files[0]; if(!file) return;
+    const reader=new FileReader();
+    reader.onload=ev=>setter(v=>({...v,customImg:ev.target.result,icon:"img"}));
+    reader.readAsDataURL(file);
+  };
+  const applyPreset=async p=>{
+    await onAddBatch(p.skills.map(s=>({name:s.name,icon:s.icon,color:s.color,startXp:0})));
     setShowPresets(false);
   };
 
@@ -1018,7 +1145,14 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onDelete}){
           <div style={{fontSize:11,color:"var(--tx3)",fontStyle:"italic",flex:1}}>{Number(f.startLevel)>1?`Pre-loads ${((Number(f.startLevel)||1)-1)*skPerLv} ${L.xpName}`:"Starting fresh"}</div>
         </div>
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:7,marginTop:4}}>Icon</div>
-        <div className="icon-grid">{SKILL_ICONS.map(ic=><button key={ic} className={`icon-opt ${f.icon===ic?"on":""}`} onClick={()=>setF(v=>({...v,icon:ic}))}>{ic}</button>)}</div>
+        <div className="icon-grid">{SKILL_ICONS_EXTRA.map(ic=><button key={ic} className={`icon-opt ${f.icon===ic?"on":""}`} onClick={()=>setF(v=>({...v,icon:ic,customImg:null}))}>{ic}</button>)}</div>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5}}>Or upload image</div>
+        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",marginBottom:8}}>
+          {f.customImg?<img src={f.customImg} style={{width:32,height:32,borderRadius:4,objectFit:"cover",border:"1px solid var(--b2)"}}/>:<span style={{fontSize:11,color:"var(--tx3)"}}>No image</span>}
+          <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>handleImg(e,setF)}/>
+          <span className="fsbtn" style={{width:"auto",padding:"4px 10px",margin:0,fontSize:9}}>Choose</span>
+          {f.customImg&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setF(v=>({...v,customImg:null,icon:"◈"}))}>✕ clear</button>}
+        </label>
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:7}}>Color</div>
         <div className="color-grid">{SKILL_COLORS.map(c=><div key={c} className={`color-opt ${f.color===c?"on":""}`} style={{background:c}} onClick={()=>setF(v=>({...v,color:c}))}/>)}</div>
         <button className="fsbtn" onClick={submit}>Create Skill</button>
@@ -1051,6 +1185,28 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onDelete}){
         <div style={{fontSize:11,color:"var(--tx3)",lineHeight:1.5,marginBottom:10}}>Skills are the dimensions you're developing. Define them yourself — or load a preset to get started quickly.</div>
       </div>
     )}
+    {editingId&&(()=>{
+      const es=skills.find(s=>s.id===editingId); if(!es) return null;
+      return (<div className="fwrap" style={{marginBottom:12}}>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:10}}>Edit skill</div>
+        <input className="fi full" value={ef.name} onChange={e=>setEf(v=>({...v,name:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submitEdit()}/>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:7,marginTop:8}}>Icon</div>
+        <div className="icon-grid">{SKILL_ICONS_EXTRA.map(ic=><button key={ic} className={`icon-opt ${ef.icon===ic?"on":""}`} onClick={()=>setEf(v=>({...v,icon:ic,customImg:null}))}>{ic}</button>)}</div>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5}}>Or upload image</div>
+        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",marginBottom:8}}>
+          {ef.customImg?<img src={ef.customImg} style={{width:32,height:32,borderRadius:4,objectFit:"cover",border:"1px solid var(--b2)"}}/>:<span style={{fontSize:11,color:"var(--tx3)"}}>No image</span>}
+          <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>handleImg(e,setEf)}/>
+          <span className="fsbtn" style={{width:"auto",padding:"4px 10px",margin:0,fontSize:9}}>Choose</span>
+          {ef.customImg&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setEf(v=>({...v,customImg:null,icon:"◈"}))}>✕ clear</button>}
+        </label>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:7}}>Color</div>
+        <div className="color-grid">{SKILL_COLORS.map(c=><div key={c} className={`color-opt ${ef.color===c?"on":""}`} style={{background:c}} onClick={()=>setEf(v=>({...v,color:c}))}/>)}</div>
+        <div style={{display:"flex",gap:6}}>
+          <button className="fsbtn" style={{flex:1,marginTop:4}} onClick={submitEdit}>Save changes</button>
+          <button className="fsbtn" style={{flex:"none",width:"auto",padding:"8px 12px",marginTop:4}} onClick={()=>setEditingId(null)}>Cancel</button>
+        </div>
+      </div>);
+    })()}
     {skills.map(s=>{
       const lv=skillLv(s.xp,skPerLv), pg=skillProg(s.xp,skPerLv), cur=s.xp%skPerLv;
       const streak=streaks[s.id]||{count:0}; const mult=getMultiplier(streak.count);
@@ -1059,10 +1215,14 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onDelete}){
       return (
         <div key={s.id} className="skill-card">
           <div className="sk-hdr">
-            <div className="sk-name"><span style={{color:s.color,fontSize:15}}>{s.icon}</span> {s.name}</div>
+            <div className="sk-name">
+              {s.customImg?<img src={s.customImg} style={{width:16,height:16,borderRadius:2,objectFit:"cover",verticalAlign:"middle"}}/>:<span style={{color:s.color,fontSize:15}}>{s.icon}</span>}
+              {" "}{s.name}
+            </div>
             <div className="sk-meta">
               {streak.count>=3&&<span className="sk-streak">{streak.count}d {mult>1?`${mult}×`:""}</span>}
               <div className="sk-lv">{L.levelName} <span>{lv}</span></div>
+              <button className="sk-delbtn" style={{marginLeft:2}} onClick={()=>openEdit(s)}>✎</button>
               <button className="sk-delbtn" onClick={()=>onDelete(s.id)}>✕</button>
             </div>
           </div>
@@ -1106,6 +1266,8 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
   const [showForm,setShowForm]=useState(false);
   const [showTypeForm,setShowTypeForm]=useState(false);
   const [scoring,setScoring]=useState(false);
+  const [xpPreview,setXpPreview]=useState(null);
+  const [xpPrevLoad,setXpPrevLoad]=useState(false);
   const [newType,setNewType]=useState({label:"",icon:"◎"});
   const [f,setF]=useState({typeId:"",skillIds:[],dur:15,note:"",sessionDate:"",sessionTime:"",showDate:false});
 
@@ -1151,6 +1313,28 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
     setShowForm(false);
   };
 
+  const previewXp=async()=>{
+    const ptype=practiceTypes.find(t=>t.id===f.typeId);
+    if(!ptype) return;
+    setXpPrevLoad(true); setXpPreview(null);
+    const baseXp=f.dur*ppm;
+    const skNames=f.skillIds.map(id=>skills.find(s=>s.id===id)?.name).filter(Boolean).join(", ")||"General";
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:100,
+          messages:[{role:"user",content:`Evaluate a practice session for a gamified life tracker. Time-based XP would be ${baseXp}.
+Type: ${ptype.label}, Duration: ${f.dur}min, Skills: ${skNames}${f.note.trim()?`
+Journal: "${f.note}"`:""}
+Suggest fair XP and a short reason. Reply ONLY with JSON: {"xp": NUMBER, "reason": "max 15 words"}`}]})});
+      const data=await res.json();
+      const txt=data.content?.map(b=>b.text||"").join("")||"";
+      const m=txt.match(/\{[\s\S]*\}/);
+      if(m) setXpPreview(JSON.parse(m[0]));
+      else setXpPreview({xp:baseXp,reason:"Couldn't parse AI response."});
+    }catch(e){setXpPreview({xp:null,reason:"Couldn't reach AI."});}
+    setXpPrevLoad(false);
+  };
   const submitNewType=async()=>{
     if(!newType.label.trim()) return;
     await onAddType({label:newType.label.trim(),icon:newType.icon});
@@ -1260,7 +1444,13 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
             <input className="fi" type="time" style={{colorScheme:"dark",maxWidth:100}} value={f.sessionTime} onChange={e=>setF(v=>({...v,sessionTime:e.target.value}))}/>
           </div>
         )}
-        <button className="fsbtn secondary" style={{marginTop:10}} onClick={submit} disabled={scoring||!f.typeId}>
+        <button className="fsbtn secondary" style={{marginTop:6,marginBottom:2}} onClick={previewXp} disabled={xpPrevLoad||!f.typeId}>
+          {xpPrevLoad?"thinking...":"⟡ AI XP preview"}
+        </button>
+        {xpPreview&&<div style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:4,padding:"8px 10px",marginBottom:6,fontSize:11,color:"var(--tx2)",lineHeight:1.5}}>
+          {xpPreview.xp?<><span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",fontWeight:"bold"}}>~{xpPreview.xp} XP</span> — {xpPreview.reason}<br/><span style={{fontSize:10,color:"var(--tx3)"}}>Final XP calculated on log (journal scoring may adjust)</span></>:xpPreview.reason}
+        </div>}
+        <button className="fsbtn secondary" style={{marginTop:4}} onClick={submit} disabled={scoring||!f.typeId}>
           {scoring?"✦ Scoring...":"Log Session"}
         </button>
       </div>
@@ -1334,6 +1524,86 @@ function buildAdvisorTools(skills,quests){
     {name:"log_session",description:"Log a practice session",input_schema:{type:"object",properties:{type:{type:"string",enum:["mindfulness","presence","grounding","visualization","ritual","breathwork","contemplation","open"]},duration:{type:"number"},skillId:{type:"string",description:`Optional skills: ${sn}`},note:{type:"string"},backlogDate:{type:"string"}},required:["type","duration"]}},
   ];
 }
+
+function JarvisOverlay({tasks,quests,skills,onAddQuest,onAddTask,onClose}){
+  const [input,setInput]=useState("");
+  const [msgs,setMsgs]=useState([{role:"assistant",content:"Jarvis online. Tell me what to add — tasks, quests, skills — or ask anything about your codex."}]);
+  const [loading,setLoading]=useState(false);
+  const inputRef=useRef(null);
+  useEffect(()=>{inputRef.current?.focus();},[]);
+
+  const send=async()=>{
+    const txt=input.trim(); if(!txt||loading) return;
+    const next=[...msgs,{role:"user",content:txt}];
+    setMsgs(next); setInput(""); setLoading(true);
+    try{
+      const systemPrompt=`You are Jarvis, an AI assistant embedded in a gamified life tracker called The Codex. 
+The user has: ${tasks.length} tasks, ${quests.length} quests, ${skills.map(s=>s.name).join(", ")||"no skills"}.
+Help the user add items efficiently. When they want to add something, respond with:
+1. A brief confirmation message
+2. A JSON block like: {"actions":[{"type":"add_task","title":"...","xpVal":20},{"type":"add_quest","title":"...","note":"..."}]}
+Supported action types: add_task (fields: title, xpVal), add_quest (fields: title, note).
+If just chatting, skip the JSON. Be concise, direct, slightly witty.`;
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,
+          system:systemPrompt,
+          messages:next.map(m=>({role:m.role,content:m.content}))})
+      });
+      const data=await res.json();
+      const raw=data.content?.map(b=>b.text||"").join("")||"...";
+      // Parse and execute actions
+      const jsonMatch=raw.match(/\{[\s\S]*"actions"[\s\S]*\}/);
+      if(jsonMatch){
+        try{
+          const parsed=JSON.parse(jsonMatch[0]);
+          for(const a of parsed.actions||[]){
+            if(a.type==="add_task") await onAddTask({title:a.title,xpVal:a.xpVal||20,skill:null});
+            if(a.type==="add_quest") await onAddQuest({title:a.title,note:a.note||"",type:"main",due:""});
+          }
+        }catch(e){}
+      }
+      const display=raw.replace(/```json[\s\S]*?```/g,"").replace(/\{[\s\S]*"actions"[\s\S]*\}/g,"").trim();
+      setMsgs(v=>[...v,{role:"assistant",content:display||"Done."}]);
+    }catch(e){setMsgs(v=>[...v,{role:"assistant",content:"Error connecting. Check API key."}]);}
+    setLoading(false);
+  };
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.7)",backdropFilter:"blur(4px)",zIndex:9999,display:"flex",alignItems:"flex-end",justifyContent:"center",padding:"0 0 80px"}}>
+      <div style={{width:"min(500px,95vw)",background:"var(--s1)",border:"1px solid var(--b2)",borderRadius:8,overflow:"hidden",display:"flex",flexDirection:"column",maxHeight:"60vh"}}>
+        <div style={{padding:"12px 16px",borderBottom:"1px solid var(--b1)",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,letterSpacing:2,textTransform:"uppercase",color:"var(--tx2)"}}>⟡ Jarvis</div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:16,lineHeight:1}}>✕</button>
+        </div>
+        <div style={{flex:1,overflowY:"auto",padding:"12px 16px",display:"flex",flexDirection:"column",gap:10}}>
+          {msgs.map((m,i)=>(
+            <div key={i} style={{alignSelf:m.role==="user"?"flex-end":"flex-start",maxWidth:"85%",
+              background:m.role==="user"?"var(--s2)":"var(--bg)",
+              border:"1px solid var(--b1)",borderRadius:6,padding:"8px 12px",
+              fontSize:12,color:"var(--tx)",lineHeight:1.5,fontFamily:"'DM Mono',monospace"}}>
+              {m.content}
+            </div>
+          ))}
+          {loading&&<div style={{alignSelf:"flex-start",fontSize:11,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontStyle:"italic"}}>thinking...</div>}
+        </div>
+        <div style={{padding:"12px 16px",borderTop:"1px solid var(--b1)",display:"flex",gap:8}}>
+          <input ref={inputRef} value={input} onChange={e=>setInput(e.target.value)}
+            onKeyDown={e=>e.key==="Enter"&&send()}
+            placeholder="Add a task, quest, or just ask..."
+            style={{flex:1,background:"var(--bg)",border:"1px solid var(--b2)",borderRadius:4,
+              padding:"8px 10px",color:"var(--tx)",fontFamily:"'DM Mono',monospace",fontSize:11,outline:"none"}}/>
+          <button onClick={send} disabled={loading||!input.trim()}
+            style={{background:"var(--s2)",border:"1px solid var(--b2)",borderRadius:4,
+              padding:"8px 14px",color:"var(--tx)",fontFamily:"'DM Mono',monospace",
+              fontSize:9,letterSpacing:1.5,textTransform:"uppercase",cursor:"pointer",
+              opacity:loading||!input.trim()?.5:1}}>Send</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 
 function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,onLogMed,onEditQuest}){
   const {settings}=useSettings(); const L=settings.labels;
@@ -1692,12 +1962,35 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
   const [editing,setEditing]=useState(false);
   const [showSubs,setShowSubs]=useState(false);
   const [newSub,setNewSub]=useState("");
-  const [ef,setEf]=useState({title:quest.title,note:quest.note||"",dueDate:quest.due?new Date(quest.due).toISOString().split("T")[0]:""});
+  const defaultQColor=(sIds)=>{ const s=skills.find(sk=>sk.id===(sIds||[])[0]); return s?s.color:null; };
+  const [ef,setEf]=useState({title:quest.title,note:quest.note||"",dueDate:quest.due?new Date(quest.due).toISOString().split("T")[0]:"",skillIds:quest.skills||[],color:quest.color||defaultQColor(quest.skills)||null});
+  const [xpSuggestion,setXpSuggestion]=useState(null);
+  const [xpLoading,setXpLoading]=useState(false);
+  const toggleESkill=id=>setEf(v=>{
+    const next=v.skillIds.includes(id)?v.skillIds.filter(x=>x!==id):[...v.skillIds,id];
+    const autoColor=!quest.color&&next.length>0?defaultQColor(next):v.color;
+    return {...v,skillIds:next,color:autoColor};
+  });
   const saveEdit=()=>{
     if(!ef.title.trim()) return;
     const due=ef.dueDate?new Date(ef.dueDate+"T09:00").getTime():null;
-    onEdit(quest.id,{title:ef.title.trim(),note:ef.note.trim(),due});
-    setEditing(false);
+    onEdit(quest.id,{title:ef.title.trim(),note:ef.note.trim(),due,skills:ef.skillIds,color:ef.color||null});
+    setEditing(false); setXpSuggestion(null);
+  };
+  const suggestQuestXp=async()=>{
+    if(!ef.title.trim()) return;
+    setXpLoading(true); setXpSuggestion(null);
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:120,
+          messages:[{role:"user",content:`This quest in a gamified life tracker: "${ef.title}"${ef.note?`. Intention: "${ef.note}"`:""}. Type: ${quest.type}. Suggest a fair XP reward (typical range: main=60-120, side=30-70, radiant=20-40 per run). Reply with ONLY a JSON object: {"xp": NUMBER, "reason": "one short sentence"}`}]})});
+      const data=await res.json();
+      const txt=data.content?.map(b=>b.text||"").join("")||"";
+      const parsed=JSON.parse(txt.match(/\{[\s\S]*\}/)?.[0]||"{}");
+      if(parsed.xp) setXpSuggestion(parsed);
+    }catch(e){setXpSuggestion({xp:null,reason:"Couldn't reach AI."});}
+    setXpLoading(false);
   };
   const submitSub=()=>{
     if(!newSub.trim()) return;
@@ -1715,11 +2008,27 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
   if(editing) return (
     <div className="fwrap" style={{marginBottom:2}}>
       <div className="frow"><input className="fi full" autoFocus value={ef.title} onChange={e=>setEf(v=>({...v,title:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&saveEdit()}/></div>
-      <div className="frow"><input className="fi" placeholder="Intention (optional)..." value={ef.note} onChange={e=>setEf(v=>({...v,note:e.target.value}))}/></div>
+      <textarea className="fi" rows={2} placeholder="Intention (optional)..." value={ef.note} onChange={e=>setEf(v=>({...v,note:e.target.value}))} style={{resize:"vertical",minHeight:48,fontFamily:"inherit",fontSize:12,marginBottom:6}}/>
+      {skills.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
+        {skills.map(s=><button key={s.id} onClick={()=>toggleESkill(s.id)} style={{background:ef.skillIds.includes(s.id)?s.color+"22":"var(--bg)",border:`1px solid ${ef.skillIds.includes(s.id)?s.color+"66":"var(--b2)"}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:.8,color:ef.skillIds.includes(s.id)?s.color:"var(--tx3)",transition:"all .15s"}}>{s.icon} {s.name}</button>)}
+      </div>}
       <div className="frow">
         <input className="fi" type="date" style={{colorScheme:"dark"}} value={ef.dueDate} onChange={e=>setEf(v=>({...v,dueDate:e.target.value}))}/>
-        <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0}} onClick={()=>setEditing(false)}>✕</button>
+        <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0,flexShrink:0}} onClick={()=>{setEditing(false);setXpSuggestion(null);}}>✕</button>
       </div>
+      <div style={{marginBottom:8}}>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:6}}>Quest color</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:5,alignItems:"center"}}>
+          {SKILL_COLORS.map(c=><div key={c} onClick={()=>setEf(v=>({...v,color:c}))} style={{width:20,height:20,borderRadius:"50%",background:c,cursor:"pointer",border:ef.color===c?"2px solid var(--tx)":"2px solid transparent",transition:"all .15s"}}/>)}
+          <div onClick={()=>setEf(v=>({...v,color:null}))} style={{width:20,height:20,borderRadius:"50%",background:"var(--bg)",cursor:"pointer",border:!ef.color?"2px solid var(--tx)":"2px solid var(--b2)",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--tx3)"}} title="Default">∅</div>
+        </div>
+      </div>
+      <button className="fsbtn secondary" style={{marginTop:4,marginBottom:2}} onClick={suggestQuestXp} disabled={xpLoading||!ef.title.trim()}>
+        {xpLoading?"thinking...":"⟡ AI XP opinion"}
+      </button>
+      {xpSuggestion&&<div style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:4,padding:"8px 10px",marginBottom:6,fontSize:11,color:"var(--tx2)",lineHeight:1.5}}>
+        {xpSuggestion.xp?<><span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",fontWeight:"bold"}}>+{xpSuggestion.xp} XP</span> — {xpSuggestion.reason}</>:xpSuggestion.reason}
+      </div>}
       <button className="fsbtn" onClick={saveEdit}>Save</button>
     </div>
   );
@@ -1727,7 +2036,13 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
   return (
     <div style={{marginBottom:4}}>
       <div className={`card quest-${quest.type} ${quest.done?"done":""}`}
-        style={overdue?{borderColor:"var(--danger)"}:dueSoon?{borderColor:"var(--primary)"}:{}}>
+        style={(()=>{
+          const qc=quest.color||(qSkills[0]?.color)||null;
+          if(overdue) return {borderColor:"var(--danger)"};
+          if(dueSoon) return {borderColor:"var(--primary)"};
+          if(qc) return {borderColor:qc,borderLeftWidth:3};
+          return {};
+        })()}>
         <button className="chk" style={isRadiant?{color:"var(--secondary)",borderColor:"var(--secondaryb)"}:{}}
           onClick={()=>onToggle(quest.id)}>
           {isRadiant?"◉":quest.done?"✓":""}
