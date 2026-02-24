@@ -9,9 +9,9 @@ const DEFAULT_SETTINGS = {
   profile: { name: "", setup: false },
   labels: {
     plannerTab:"Planner", questsTab:"Quests", skillsTab:"Skills",
-    practiceTab:"Practice", advisorTab:"Advisor", settingsTab:"Settings",
-    mainQuest:"Main Quest", radiantQuest:"Radiant Quest",
-    mainXp:"80", radiantXp:"30",
+    practiceTab:"Practice", advisorTab:"Advisor", settingsTab:"Settings", journalTab:"Journal",
+    mainQuest:"Main Quest", sideQuest:"Side Quest", radiantQuest:"Radiant Quest",
+    mainXp:"80", sideXp:"50", radiantXp:"30",
     daily:"Daily", weekly:"Weekly", monthly:"Monthly",
     xpName:"XP", levelName:"LVL", done:"Done", completed:"Completed",
     radiantDesc:"Recurring practices. Embodied, not completed.",
@@ -73,6 +73,31 @@ const SKILL_PRESETS = [
     {name:"Spirit",      icon:"✦", color:"#9e6ab5"},
     {name:"Social",      icon:"◎", color:"#5b9e9e"},
     {name:"Craft",       icon:"◆", color:"#c8a96e"},
+  ]},
+  { name:"Magick · Elements", skills:[
+    {name:"Fire",        icon:"◆", color:"#d4603a"},
+    {name:"Water",       icon:"◎", color:"#4a90c8"},
+    {name:"Air",         icon:"◌", color:"#a0c8d4"},
+    {name:"Earth",       icon:"◬", color:"#7a9e5a"},
+    {name:"Spirit",      icon:"✦", color:"#9e6ab5"},
+  ]},
+  { name:"Magick · Practice", skills:[
+    {name:"Meditation",  icon:"◉", color:"#9e6ab5"},
+    {name:"Ritual",      icon:"✦", color:"#c8a96e"},
+    {name:"Divination",  icon:"◎", color:"#5b9e9e"},
+    {name:"Astral",      icon:"◈", color:"#6a8fb5"},
+    {name:"Alchemy",     icon:"◆", color:"#9e7a4a"},
+    {name:"Chaos",       icon:"◬", color:"#c86e6e"},
+  ]},
+  { name:"Magick · Sephiroth (Kabbalah)", skills:[
+    {name:"Kether",      icon:"✦", color:"#ffffff"},
+    {name:"Chesed",      icon:"◈", color:"#6a8fb5"},
+    {name:"Geburah",     icon:"◆", color:"#c86e6e"},
+    {name:"Tiphareth",   icon:"◉", color:"#c8a96e"},
+    {name:"Netzach",     icon:"◬", color:"#6a9e6a"},
+    {name:"Hod",         icon:"◎", color:"#c8b05a"},
+    {name:"Yesod",       icon:"◌", color:"#9e6ab5"},
+    {name:"Malkuth",     icon:"◬", color:"#8a7a6a"},
   ]},
 ];
 const TAB_EXPLAINERS = {
@@ -342,6 +367,27 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 @media(min-width:1100px){
   .pg{max-width:var(--content-width,780px);}
 }
+
+.prio-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;display:inline-block;margin-right:2px;}
+.prio-high{background:#c85858;}.prio-med{background:#c8a96e;}.prio-low{background:#5b9e9e;}
+.sub-progress{height:2px;background:var(--b1);border-radius:1px;margin-top:5px;overflow:hidden;}
+.sub-progress-fill{height:100%;background:var(--primary);border-radius:1px;transition:width .3s;}
+.card.quest-side{border-color:var(--secondaryb);}
+.review-btn{position:fixed;bottom:72px;right:16px;background:var(--s2);border:1px solid var(--b2);color:var(--tx2);font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1px;padding:7px 12px;border-radius:20px;cursor:pointer;z-index:50;transition:all .15s;box-shadow:0 2px 12px #0008;}
+.review-btn:hover{background:var(--primary);color:var(--bg);border-color:var(--primary);}
+@media(min-width:768px){.review-btn{bottom:20px;right:24px;}}
+.journal-entry{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:14px 16px;margin-bottom:8px;}.journal-entry.practice-entry{border-color:var(--secondaryb);background:var(--s2);}
+.journal-date{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1px;color:var(--tx3);margin-bottom:6px;}
+.journal-text{font-size:13px;color:var(--tx);line-height:1.7;white-space:pre-wrap;}
+.journal-img{max-width:100%;border-radius:4px;margin-bottom:8px;border:1px solid var(--b1);}
+.xp-log-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--b1);font-size:12px;}
+.xp-log-amt{font-family:'DM Mono',monospace;font-size:11px;color:var(--success);min-width:50px;}
+.xp-log-label{flex:1;color:var(--tx2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.xp-log-time{font-family:'DM Mono',monospace;font-size:9px;color:var(--tx3);}
+.search-row{display:flex;gap:8px;margin-bottom:14px;}
+.search-input{flex:1;background:var(--s1);border:1px solid var(--b1);color:var(--tx);border-radius:var(--r);padding:7px 12px;font-size:12px;outline:none;}
+.search-input:focus{border-color:var(--primaryb);}
+.review-modal{background:var(--s1);border:1px solid var(--b1);border-radius:8px;padding:24px;max-width:560px;width:100%;max-height:80vh;overflow-y:auto;}
 `;}
 
 
@@ -391,6 +437,9 @@ export default function App(){
   const [loaded,setLoaded]=useState(false);
   const [seenTabs,setSeenTabs]=useState({});
   const [explainer,setExplainer]=useState(null);
+  const [journal,setJournal]=useState([]);
+  const [xpLog,setXpLog]=useState([]);
+  const [showReview,setShowReview]=useState(false);
   const toastRef=useRef(null);
 
   useEffect(()=>{
@@ -404,6 +453,8 @@ export default function App(){
       const x=await sget("cx_xp");       if(x!==null) setXp(x);
       const st=await sget("cx_streaks"); if(st) setStreaks(st);
       const sv=await sget("cx_seen");    if(sv) setSeenTabs(sv);
+      const jn=await sget("cx_journal"); if(jn) setJournal(jn);
+      const xl=await sget("cx_xplog");   if(xl) setXpLog(xl);
       setLoaded(true);
     })();
   },[]);
@@ -425,7 +476,11 @@ export default function App(){
     toastRef.current=setTimeout(()=>setToast({msg:"",on:false}),2200);
   },[]);
 
-  const award=useCallback(async(baseAmt,skillId,curXp,curSkills,curStreaks)=>{
+  const saveXpLog=async(entry)=>{
+    setXpLog(prev=>{const next=[entry,...prev].slice(0,100);sset("cx_xplog",next);return next;});
+  };
+
+  const award=useCallback(async(baseAmt,skillId,curXp,curSkills,curStreaks,label)=>{
     const skPerLv=settings.xp.skillPerLevel||6000;
     const streak=skillId?(curStreaks[skillId]||{count:0}):{count:0};
     const multiplier=getMultiplier(streak.count);
@@ -441,6 +496,8 @@ export default function App(){
       });
       setSkills(newSkills); await sset("cx_skills",newSkills);
     }
+    const sk=curSkills.find(s=>s.id===skillId);
+    await saveXpLog({id:uid(),amt,label:label||"Task",skill:sk?.name||null,multiplier,created:Date.now()});
     return {amt,multiplier,leveledUp,newSkills};
   },[settings.xp.skillPerLevel]);
 
@@ -461,7 +518,7 @@ export default function App(){
     const task=tasks.find(t=>t.id===id); if(!task) return;
     await saveT(tasks.map(t=>t.id===id?{...t,done:!t.done}:t));
     if(!task.done){
-      const {amt,leveledUp}=await award(task.xpVal,task.skill,xp,skills,streaks);
+      const {amt,leveledUp}=await award(task.xpVal,task.skill,xp,skills,streaks,task.title);
       showToast(`+${amt} ${L.xpName}`);
       if(leveledUp) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);
     }
@@ -469,9 +526,9 @@ export default function App(){
   const deleteTask=async id=>saveT(tasks.filter(t=>t.id!==id));
 
   const addQuest=async d=>{
-    const xpVal=d.type==="main"?Number(L.mainXp)||80:Number(L.radiantXp)||30;
+    const xpVal=d.type==="main"?Number(L.mainXp)||80:d.type==="side"?Number(L.sideXp)||50:Number(L.radiantXp)||30;
     const qSkills=d.skills||(d.skill?[d.skill]:[]);
-    await saveQ([{id:uid(),...d,skills:qSkills,xpVal,done:false,created:Date.now()},...quests]);
+    await saveQ([{id:uid(),...d,skills:qSkills,xpVal,done:false,priority:d.priority||"med",created:Date.now()},...quests]);
     showToast("Quest accepted");
   };
   const toggleQuest=async id=>{
@@ -480,7 +537,7 @@ export default function App(){
       const qSkills=q.skills||[]; const primary=qSkills[0]||null;
       let newStr=streaks;
       if(primary){ newStr=updateStreak(streaks,primary); await saveStr(newStr); }
-      const {amt,multiplier,leveledUp}=await award(q.xpVal,primary,xp,skills,newStr);
+      const {amt,multiplier,leveledUp}=await award(q.xpVal,primary,xp,skills,newStr,`◉ ${q.title}`);
       const streak=newStr[primary]||{count:0};
       let msg=`+${amt} ${L.xpName}`;
       if(multiplier>1) msg+=` · ${streak.count}d ${L.comboName||"Combo"} ${multiplier}×`;
@@ -493,7 +550,8 @@ export default function App(){
     await saveQ(quests.map(q=>q.id===id?{...q,done:!q.done}:q));
     if(!q.done){
       const primary=(q.skills||[])[0]||null;
-      const {amt,leveledUp}=await award(q.xpVal,primary,xp,skills,streaks);
+      const prefix=q.type==="main"?"◆":q.type==="side"?"◇":"";
+      const {amt,leveledUp}=await award(q.xpVal,primary,xp,skills,streaks,`${prefix} ${q.title}`);
       showToast(`+${amt} ${L.xpName}`);
       if(leveledUp) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);
     }
@@ -513,6 +571,16 @@ export default function App(){
     await saveQ(quests.map(q=>q.id!==questId?q:{...q,subquests:(q.subquests||[]).filter(s=>s.id!==subId)}));
   };
 
+  const addJournalEntry=async(entry)=>{
+    const next=[{id:uid(),...entry,created:Date.now()},...journal];
+    setJournal(next); await sset("cx_journal",next);
+    showToast("Entry saved");
+  };
+  const deleteJournalEntry=async(id)=>{
+    const next=journal.filter(e=>e.id!==id);
+    setJournal(next); await sset("cx_journal",next);
+  };
+
   const addSkill=async d=>{
     await saveS([...skills,{id:uid(),name:d.name,icon:d.icon,color:d.color,xp:d.startXp||0}]);
     showToast("Skill created");
@@ -527,10 +595,19 @@ export default function App(){
     let newStr=streaks;
     for(const sid of skillIds){ newStr=updateStreak(newStr,sid); }
     if(skillIds.length) await saveStr(newStr);
-    const {amt,multiplier,leveledUp}=await award(d.baseXp,primary,xp,skills,newStr);
+    const {amt,multiplier,leveledUp}=await award(d.baseXp,primary,xp,skills,newStr,d.type);
+    const sessionCreated=d.sessionDate||Date.now();
     const session={id:uid(),type:d.type,dur:d.dur,skillIds,note:d.note,
-      aiReason:d.aiReason,xpAwarded:amt,multiplier,created:d.sessionDate||Date.now()};
+      aiReason:d.aiReason,xpAwarded:amt,multiplier,created:sessionCreated};
     await saveM([session,...meds]);
+    // Auto-save note to journal as a practice segment
+    if(d.note&&d.note.trim()){
+      const sk=skills.filter(s=>skillIds.includes(s.id));
+      const skLabel=sk.map(s=>`${s.icon} ${s.name}`).join(", ");
+      const header=`[${d.type}${skLabel?` · ${skLabel}`:""}${d.dur?` · ${d.dur}min`:""}]`;
+      const next=[{id:uid(),text:`${header}\n${d.note.trim()}`,img:null,source:"practice",created:sessionCreated},...journal];
+      setJournal(next); await sset("cx_journal",next);
+    }
     const streak=newStr[primary]||{count:0};
     let msg=`+${amt} ${L.xpName}`;
     if(multiplier>1) msg+=` · ${streak.count}d ${L.comboName||"Combo"} ${multiplier}×`;
@@ -585,7 +662,8 @@ export default function App(){
     {id:"quests",   icon:"◆", label:L.questsTab},
     {id:"skills",   icon:"◈", label:L.skillsTab},
     {id:"practice", icon:"◉", label:L.practiceTab},
-    {id:"advisor",  icon:"✦", label:L.advisorTab},
+    {id:"journal",  icon:"✦", label:L.journalTab},
+    {id:"advisor",  icon:"◎", label:L.advisorTab},
     {id:"settings", icon:"⚙", label:L.settingsTab},
   ];
 
@@ -594,9 +672,10 @@ export default function App(){
   return (
     <SettingsCtx.Provider value={{settings,saveSettings}}>
       <style>{buildCSS(C,TH,settings.fontSize||14)}</style>
-      <div className="app" style={{"--content-width":`${settings.contentWidth||700}px`}}>
+      <div className="app" style={{"--content-width":`${settings.contentWidth||700}px`,...(settings.images?.bg?{backgroundImage:`url(${settings.images.bg})`,backgroundSize:"cover",backgroundAttachment:"fixed",backgroundPosition:"center"}:{})}}>
         {!settings.profile.setup&&<ProfileSetup onComplete={completeSetup}/>}
         {settings.profile.setup&&<>
+          {settings.images?.banner&&<div style={{width:"100%",maxHeight:80,overflow:"hidden",flexShrink:0}}><img src={settings.images.banner} alt="" style={{width:"100%",objectFit:"cover",maxHeight:80}}/></div>}
           {/* Desktop sidebar */}
           <nav className="sidenav">
             <div className="side-top">
@@ -629,12 +708,16 @@ export default function App(){
           <main className="pg">
             {tab==="planner"  && <PlannerTab period={period} setPeriod={setPeriod} tasks={periodTasks()} weekDays={weekDays} allTasks={tasks} skills={skills} quests={quests} onAddTask={addTask} onToggle={toggleTask} onDelete={deleteTask} onEdit={editTask} onToggleQuest={toggleQuest}/>}
             {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest}/>}
-            {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} onAdd={addSkill} onDelete={deleteSkill}/>}
+            {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onDelete={deleteSkill}/>}
             {tab==="practice" && <PracticeTab meds={meds} skills={skills} streaks={streaks} pending={pendingPractice} practiceTypes={practiceTypes} onAddType={addPracticeType} onDeleteType={deletePracticeType} onLog={logMed} onDelete={deleteMed} onClearPending={()=>setPendingPractice(null)}/>}
-            {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest}/>}
+            {tab==="journal"  && <JournalTab entries={journal} onAdd={addJournalEntry} onDelete={deleteJournalEntry}/>}
+            {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} journal={journal} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest}/>}
             {tab==="settings" && <SettingsTab showToast={showToast} onExport={exportData} onImport={importData}/>}
           </main>
           </div>
+          {/* Weekly Review floating button */}
+          <button className="review-btn" onClick={()=>setShowReview(true)} title="Weekly Review">◈ Review</button>
+          {showReview&&<WeeklyReview tasks={tasks} quests={quests} skills={skills} meds={meds} xpLog={xpLog} onClose={()=>setShowReview(false)} onNavigate={id=>{setShowReview(false);handleTabChange(id);}}/>}
           {/* Mobile bottom nav */}
           <nav className="bnav">
             {NAV.map(n=>(
@@ -810,52 +893,71 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
 function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,onToggleSubquest,onDeleteSubquest}){
   const {settings}=useSettings(); const L=settings.labels;
   const [form,setForm]=useState(null);
-  const [f,setF]=useState({title:"",note:"",type:"main",skills:[],dueDate:"",dueTime:"",showSkill:false});
-  const toggleSkill=id=>setF(v=>({...v,skills:v.skills.includes(id)?v.skills.filter(s=>s!==id):[...v.skills,id]}));
+  const [search,setSearch]=useState("");
+  const [filterPrio,setFilterPrio]=useState("");
+  const [f,setF]=useState({title:"",skill:"",note:"",dueDate:"",type:"main",priority:"med"});
+  const openForm=t=>{ setForm(t); setF(v=>({...v,type:t,title:"",note:"",dueDate:"",priority:"med"})); };
   const submit=()=>{
     if(!f.title.trim()) return;
-    const due=f.dueDate?new Date(`${f.dueDate}${f.dueTime?"T"+f.dueTime:"T09:00"}`).getTime():null;
-    onAdd({title:f.title.trim(),note:f.note.trim(),type:f.type,skills:f.skills,due});
-    setF(v=>({...v,title:"",note:"",dueDate:"",dueTime:"",skills:[],showSkill:false})); setForm(null);
+    const due=f.dueDate?new Date(f.dueDate+"T09:00").getTime():null;
+    onAdd({title:f.title.trim(),type:form,skill:f.skill||null,note:f.note.trim(),due,priority:f.priority});
+    setForm(null);
   };
-  const openForm=type=>{setForm(type);setF(v=>({...v,type}));};
-  const mainA=quests.filter(q=>q.type==="main"&&!q.done);
-  const mainD=quests.filter(q=>q.type==="main"&&q.done);
-  const radiant=quests.filter(q=>q.type==="radiant");
   const QForm=({btnClass,btnLabel})=>(
     <div className="fwrap">
-      <div className="frow"><input className="fi full" placeholder="Title..." autoFocus value={f.title} onChange={e=>setF(v=>({...v,title:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
-      <div className="frow"><input className="fi" placeholder="Intention (optional)..." value={f.note} onChange={e=>setF(v=>({...v,note:e.target.value}))}/></div>
-      <button className="exp-tog" onClick={()=>setF(v=>({...v,showSkill:!v.showSkill}))}>
-        <span className={`exp-arr ${f.showSkill?"open":""}`}>▼</span>
-        <span>{f.skills.length?`${f.skills.length} skill${f.skills.length>1?"s":""} tagged`:"Tag skills (optional)"}</span>
-      </button>
-      {f.showSkill&&(
-        <div style={{display:"flex",flexWrap:"wrap",gap:5,marginTop:6,marginBottom:4}}>
-          {skills.map(s=>(
-            <button key={s.id} onClick={()=>toggleSkill(s.id)}
-              style={{background:f.skills.includes(s.id)?s.color+"22":"var(--bg)",border:`1px solid ${f.skills.includes(s.id)?s.color+"66":"var(--b2)"}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:.8,color:f.skills.includes(s.id)?s.color:"var(--tx3)",transition:"all .15s"}}>
-              {s.icon} {s.name}
-            </button>
-          ))}
-        </div>
-      )}
-      <div className="frow" style={{marginTop:6}}>
-        <input className="fi" type="date" style={{colorScheme:"dark"}} value={f.dueDate} onChange={e=>setF(v=>({...v,dueDate:e.target.value}))}/>
-        <input className="fi" type="time" style={{colorScheme:"dark",maxWidth:100}} value={f.dueTime} onChange={e=>setF(v=>({...v,dueTime:e.target.value}))}/>
+      <div className="frow"><input className="fi full" autoFocus placeholder="Quest title..." value={f.title} onChange={e=>setF(v=>({...v,title:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
+      <div className="frow">
+        <select className="fsel" value={f.skill} onChange={e=>setF(v=>({...v,skill:e.target.value}))}>
+          <option value="">No skill</option>
+          {skills.map(s=><option key={s.id} value={s.id}>{s.icon} {s.name}</option>)}
+        </select>
+        <select className="fsel" value={f.priority} onChange={e=>setF(v=>({...v,priority:e.target.value}))}>
+          <option value="high">⬤ High</option>
+          <option value="med">⬤ Med</option>
+          <option value="low">⬤ Low</option>
+        </select>
+        <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0}} onClick={()=>setForm(null)}>✕</button>
       </div>
-      {f.dueDate&&<NotifPrompt dueDate={f.dueDate} dueTime={f.dueTime} title={f.title}/>}
-      <button className={`fsbtn ${btnClass}`} onClick={submit}>{btnLabel}</button>
+      <div className="frow">
+        <input className="fi" placeholder="Intention (optional)..." value={f.note} onChange={e=>setF(v=>({...v,note:e.target.value}))}/>
+        <input className="fi" type="date" style={{colorScheme:"dark",width:140}} value={f.dueDate} onChange={e=>setF(v=>({...v,dueDate:e.target.value}))}/>
+      </div>
+      <button className={`fsbtn ${btnClass||""}`} onClick={submit}>{btnLabel||"Accept Quest"}</button>
     </div>
   );
+  const filterQ=q=>{
+    if(search&&!q.title.toLowerCase().includes(search.toLowerCase())) return false;
+    if(filterPrio&&q.priority!==filterPrio) return false;
+    return true;
+  };
+  const mainA=quests.filter(q=>q.type==="main"&&!q.done&&filterQ(q));
+  const mainD=quests.filter(q=>q.type==="main"&&q.done&&filterQ(q));
+  const side=quests.filter(q=>q.type==="side"&&filterQ(q));
+  const radiant=quests.filter(q=>q.type==="radiant"&&filterQ(q));
   return (<>
+    <div className="search-row">
+      <input className="search-input" placeholder="Search quests..." value={search} onChange={e=>setSearch(e.target.value)}/>
+      <select className="fsel" style={{width:"auto"}} value={filterPrio} onChange={e=>setFilterPrio(e.target.value)}>
+        <option value="">All</option>
+        <option value="high">High</option>
+        <option value="med">Med</option>
+        <option value="low">Low</option>
+      </select>
+    </div>
     <div className="slbl">{L.mainQuest}s</div>
-    {form==="main"?<QForm btnClass="primary" btnLabel={`Accept · +${L.mainXp} ${L.xpName} on completion`}/>
+    {form==="main"?<QForm btnLabel={`Accept · +${L.mainXp} ${L.xpName}`}/>
       :<button className="addbtn" onClick={()=>openForm("main")}><span>+</span> New {L.mainQuest.toLowerCase()}</button>}
     <div className="clist">{mainA.map(q=><QuestCard key={q.id} quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest}/>)}</div>
     {mainD.length>0&&<><div className="gap"/><div className="slbl">{L.completed}</div>
       <div className="clist">{mainD.map(q=><QuestCard key={q.id} quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest}/>)}</div></>}
     {quests.filter(q=>q.type==="main").length===0&&form!=="main"&&<div className="empty">No {L.mainQuest.toLowerCase()}s yet</div>}
+    <div className="gap"/>
+    <div className="slbl">{L.sideQuest}s</div>
+    <p style={{fontSize:12,color:"var(--tx2)",fontStyle:"italic",marginBottom:12,lineHeight:1.5}}>Optional objectives. Complete for bonus XP, no pressure.</p>
+    {form==="side"?<QForm btnClass="secondary" btnLabel={`Accept · +${L.sideXp} ${L.xpName}`}/>
+      :<button className="addbtn" onClick={()=>openForm("side")}><span>+</span> New {L.sideQuest.toLowerCase()}</button>}
+    <div className="clist">{side.map(q=><QuestCard key={q.id} quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest}/>)}</div>
+    {side.length===0&&form!=="side"&&<div className="empty">No {L.sideQuest.toLowerCase()}s yet</div>}
     <div className="gap"/>
     <div className="slbl">{L.radiantQuest}s</div>
     <p style={{fontSize:12,color:"var(--tx2)",fontStyle:"italic",marginBottom:12,lineHeight:1.5}}>{L.radiantDesc}</p>
@@ -866,7 +968,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
   </>);
 }
 
-function SkillsTab({skills,skPerLv,streaks,meds,onAdd,onDelete}){
+function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onDelete}){
   const {settings}=useSettings(); const L=settings.labels;
   const [showForm,setShowForm]=useState(false);
   const [showPresets,setShowPresets]=useState(false);
@@ -957,9 +1059,9 @@ function SkillsTab({skills,skPerLv,streaks,meds,onAdd,onDelete}){
       return (
         <div key={s.id} className="skill-card">
           <div className="sk-hdr">
-            <div className="sk-name"><span style={{color:s.color,fontSize:15}}>{s.icon}</span><span>{s.name}</span></div>
+            <div className="sk-name"><span style={{color:s.color,fontSize:15}}>{s.icon}</span> {s.name}</div>
             <div className="sk-meta">
-              {streak.count>=3&&<span className="sk-streak">{streak.count}d {mult}×</span>}
+              {streak.count>=3&&<span className="sk-streak">{streak.count}d {mult>1?`${mult}×`:""}</span>}
               <div className="sk-lv">{L.levelName} <span>{lv}</span></div>
               <button className="sk-delbtn" onClick={()=>onDelete(s.id)}>✕</button>
             </div>
@@ -973,13 +1075,27 @@ function SkillsTab({skills,skPerLv,streaks,meds,onAdd,onDelete}){
             {days.map((m,i)=>{
               const h=m===0?2:Math.max(4,Math.round((m/maxMins)*22));
               const isToday=i===13;
-              return <div key={i} title={`${m}min`} style={{flex:1,height:h,borderRadius:2,background:m===0?"var(--b1)":s.color,opacity:isToday?1:0.5+(i/13)*0.5,transition:"height .2s"}}/>;
+              return <div key={i} title={`${m}min`} style={{flex:1,height:h,borderRadius:1,background:isToday?s.color:s.color+"55",transition:"height .2s"}}/>;
             })}
           </div>
-          <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",marginTop:3,textAlign:"right",letterSpacing:.5}}>14d activity</div>
+          <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",marginTop:3,textAlign:"right"}}>14d activity</div>
         </div>
       );
     })}
+    {xpLog&&xpLog.length>0&&<>
+      <div className="gap"/>
+      <div className="slbl">Recent XP</div>
+      <div style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"4px 12px"}}>
+        {xpLog.slice(0,20).map(e=>(
+          <div key={e.id} className="xp-log-row">
+            <span className="xp-log-amt">+{e.amt}{e.multiplier>1?` ${e.multiplier}×`:""}</span>
+            <span className="xp-log-label">{e.label}</span>
+            {e.skill&&<span className="ctag" style={{fontSize:9}}>{e.skill}</span>}
+            <span className="xp-log-time">{new Date(e.created).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</span>
+          </div>
+        ))}
+      </div>
+    </>}
   </>);
 }
 
@@ -1499,6 +1615,18 @@ function SettingsTab({showToast,onExport,onImport}){
       </div>
     </Collapsible>
     <div className="gap"/>
+    <Collapsible question="Custom Images">
+      <p style={{fontSize:11,color:"var(--tx3)",marginBottom:14,lineHeight:1.6}}>
+        Upload PNG/JPG images for backgrounds and banners. Stored locally, keep under 2MB each.
+      </p>
+      <CustomImageUploader label="App Background" aspectHint="any ratio — covers full background"
+        value={draft.images?.bg||null}
+        onChange={v=>setDraft(d=>({...d,images:{...(d.images||{}),bg:v}}))}/>
+      <CustomImageUploader label="Header Banner / Logo" aspectHint="wide ~800x120px"
+        value={draft.images?.banner||null}
+        onChange={v=>setDraft(d=>({...d,images:{...(d.images||{}),banner:v}}))}/>
+    </Collapsible>
+    <div className="gap"/>
     <div className="slbl">data</div>
     <button className="exp-btn" onClick={onExport}><span>↓</span> Export all data as JSON</button>
     <button className="exp-btn" onClick={()=>importRef.current?.click()}><span>↑</span> Import data from JSON</button>
@@ -1578,6 +1706,12 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
   };
   const subs=quest.subquests||[];
   const subsDone=subs.filter(s=>s.done).length;
+  const isRadiant=quest.type==="radiant";
+  const now=Date.now();
+  const overdue=quest.due&&!quest.done&&quest.due<now;
+  const dueSoon=quest.due&&!quest.done&&quest.due>now&&quest.due-now<86400000;
+  const dueFmt=quest.due?new Date(quest.due).toLocaleDateString("en-US",{month:"short",day:"numeric"}):null;
+
   if(editing) return (
     <div className="fwrap" style={{marginBottom:2}}>
       <div className="frow"><input className="fi full" autoFocus value={ef.title} onChange={e=>setEf(v=>({...v,title:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&saveEdit()}/></div>
@@ -1589,13 +1723,9 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
       <button className="fsbtn" onClick={saveEdit}>Save</button>
     </div>
   );
-  const now=Date.now();
-  const overdue=quest.due&&!quest.done&&quest.due<now;
-  const dueSoon=quest.due&&!quest.done&&quest.due>now&&quest.due-now<86400000;
-  const dueFmt=quest.due?new Date(quest.due).toLocaleDateString("en-US",{month:"short",day:"numeric"}):null;
-  const isRadiant=quest.type==="radiant";
+
   return (
-    <div style={{marginBottom:2}}>
+    <div style={{marginBottom:4}}>
       <div className={`card quest-${quest.type} ${quest.done?"done":""}`}
         style={overdue?{borderColor:"var(--danger)"}:dueSoon?{borderColor:"var(--primary)"}:{}}>
         <button className="chk" style={isRadiant?{color:"var(--secondary)",borderColor:"var(--secondaryb)"}:{}}
@@ -1603,7 +1733,11 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
           {isRadiant?"◉":quest.done?"✓":""}
         </button>
         <div className="cbody">
-          <div className={`ctitle ${quest.done&&!isRadiant?"done":""}`}>{quest.title}</div>
+          <div style={{display:"flex",alignItems:"center",gap:4}}>
+            {quest.priority&&<span className={`prio-dot prio-${quest.priority||"med"}`} title={`Priority: ${quest.priority}`}/>}
+            <span className={`ctitle ${quest.done&&!isRadiant?"done":""}`}>{quest.title}</span>
+          </div>
+          {subs.length>0&&<div className="sub-progress"><div className="sub-progress-fill" style={{width:`${subs.length?Math.round(subsDone/subs.length*100):0}%`}}/></div>}
           {quest.note&&<div className="cnote">{quest.note}</div>}
           <div className="cmeta">
             {qSkills.map(sk=><span key={sk.id} className="ctag" style={{borderColor:sk.color+"44",color:sk.color}}>{sk.icon} {sk.name}</span>)}
@@ -1613,33 +1747,329 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
               borderColor:overdue?"var(--dangerf)":dueSoon?"var(--primaryb)":"var(--b1)"
             }}>{overdue?"⚠ ":"◷ "}{dueFmt}</span>}
             {quest.done&&!isRadiant&&<span className="ctag" style={{color:"var(--success)",borderColor:"var(--successf)"}}>✓</span>}
-            {subs.length>0&&<button onClick={()=>setShowSubs(v=>!v)}
-              style={{background:"none",border:"1px solid var(--b1)",borderRadius:20,padding:"2px 8px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:.8,color:subsDone===subs.length?"var(--success)":"var(--tx3)",transition:"all .15s"}}>
-              {subsDone}/{subs.length} steps
-            </button>}
+            <button onClick={()=>setShowSubs(v=>!v)}
+              style={{background:"none",border:"1px solid var(--b1)",borderRadius:20,padding:"2px 8px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:.8,color:subs.length&&subsDone===subs.length?"var(--success)":showSubs?"var(--primary)":"var(--tx3)",transition:"all .15s"}}>
+              {subs.length>0?`${subsDone}/${subs.length} steps`:"+ steps"}
+            </button>
           </div>
         </div>
         <button className="delbtn" onClick={()=>setEditing(true)} title="Edit">✎</button>
         <button className="delbtn" onClick={()=>onDelete(quest.id)}>✕</button>
       </div>
-      {(showSubs||subs.length>0)&&(
-        <div style={{marginLeft:12,marginTop:2,marginBottom:2,borderLeft:"1px solid var(--b1)",paddingLeft:10}}>
+      {showSubs&&(
+        <div style={{marginLeft:12,marginTop:2,borderLeft:"2px solid var(--b1)",paddingLeft:10}}>
           {subs.map(s=>(
             <div key={s.id} style={{display:"flex",alignItems:"center",gap:7,padding:"5px 0",borderBottom:"1px solid var(--b1)"}}>
-              <button className={`chk ${s.done?"on":""}`} style={{width:13,height:13,fontSize:8,flexShrink:0}} onClick={()=>onToggleSubquest(quest.id,s.id)}>{s.done?"✓":""}</button>
+              <button className={`chk ${s.done?"on":""}`} style={{width:14,height:14,fontSize:8,flexShrink:0,minWidth:14}} onClick={()=>onToggleSubquest(quest.id,s.id)}>{s.done?"✓":""}</button>
               <span style={{flex:1,fontSize:12,color:s.done?"var(--tx3)":"var(--tx)",textDecoration:s.done?"line-through":"none"}}>{s.title}</span>
               <button className="delbtn" style={{fontSize:9}} onClick={()=>onDeleteSubquest(quest.id,s.id)}>✕</button>
             </div>
           ))}
-          <div style={{display:"flex",gap:5,paddingTop:5}}>
+          <div style={{display:"flex",gap:5,paddingTop:6}}>
             <input className="fi" placeholder="Add step..." value={newSub}
               onChange={e=>setNewSub(e.target.value)}
               onKeyDown={e=>e.key==="Enter"&&submitSub()}
               style={{fontSize:11,padding:"4px 8px",flex:1}}/>
-            <button className="fsbtn" style={{width:"auto",padding:"4px 10px",margin:0,fontSize:9}} onClick={submitSub}>+</button>
+            <button className="fsbtn" style={{width:"auto",padding:"4px 12px",margin:0,fontSize:11}} onClick={submitSub}>+</button>
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── JOURNAL TAB ────────────────────────────────────────────────────────────
+function JournalTab({entries,onAdd,onDelete}){
+  const {settings}=useSettings();
+  const [text,setText]=useState("");
+  const [img,setImg]=useState(null);
+  const [ocring,setOcring]=useState(false);
+  const [showForm,setShowForm]=useState(false);
+  const [filter,setFilter]=useState("all"); // "all" | "practice" | "manual"
+  const [story,setStory]=useState("");
+  const [genning,setGenning]=useState(false);
+  const [showStory,setShowStory]=useState(false);
+  const fileRef=useRef();
+
+  const handleImg=async e=>{
+    const file=e.target.files?.[0]; if(!file) return;
+    const reader=new FileReader();
+    reader.onload=async ev=>{
+      const b64=ev.target.result;
+      setImg(b64);
+      setOcring(true);
+      try{
+        const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({
+            model:"llama-3.2-11b-vision-preview",max_tokens:1000,
+            messages:[{role:"user",content:[
+              {type:"image_url",image_url:{url:b64}},
+              {type:"text",text:"Transcribe all handwritten or printed text from this journal page exactly as written. Return only the transcribed text, no commentary."}
+            ]}]
+          })
+        });
+        const data=await res.json();
+        const extracted=data?.choices?.[0]?.message?.content||data?.content?.[0]?.text||"";
+        if(extracted) setText(prev=>prev+(prev?"\n\n":"")+extracted.trim());
+      }catch{ /* OCR failed silently */ }
+      finally{ setOcring(false); }
+    };
+    reader.readAsDataURL(file);
+    e.target.value="";
+  };
+
+  const submit=()=>{
+    if(!text.trim()&&!img) return;
+    onAdd({text:text.trim(),img:img||null,source:"manual"});
+    setText(""); setImg(null); setShowForm(false);
+  };
+
+  const practiceEntries=entries.filter(e=>e.source==="practice");
+  const canGenStory=practiceEntries.length>=3;
+
+  const generateStory=async()=>{
+    setGenning(true); setShowStory(true);
+    try{
+      const corpus=practiceEntries.slice(0,30).map(e=>{
+        const d=new Date(e.created).toLocaleDateString("en-US",{month:"short",day:"numeric"});
+        return `[${d}] ${e.text}`;
+      }).join("\n\n");
+      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"llama-3.3-70b-versatile",max_tokens:1200,
+          messages:[{role:"user",content:`You are a mystical chronicler. Based on the following practice journal entries, write a cohesive, evocative narrative (3-4 paragraphs) that weaves together the practitioner's journey — the patterns, the breakthroughs, the texture of their practice. Write in second person ("you"), present tense, like a living story. Make it feel meaningful and earned, not generic.\n\nJournal entries:\n${corpus}\n\nWrite the narrative now:`}]
+        })
+      });
+      const data=await res.json();
+      const msg=data?.choices?.[0]?.message?.content||data?.content?.[0]?.text||"";
+      setStory(msg);
+    }catch{ setStory("Couldn't reach the advisor. Try again when connected."); }
+    finally{ setGenning(false); }
+  };
+
+  const filtered=filter==="all"?entries:entries.filter(e=>e.source===filter);
+  const fmt=ts=>new Date(ts).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
+
+  return (<>
+    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+      <div className="slbl" style={{margin:0}}>Journal</div>
+      <button className="addbtn" style={{margin:0,padding:"5px 14px"}} onClick={()=>setShowForm(v=>!v)}>
+        {showForm?"Cancel":"+ New Entry"}
+      </button>
+    </div>
+
+    {/* Filter tabs */}
+    <div style={{display:"flex",gap:6,marginBottom:16}}>
+      {[["all","All"],["manual","Written"],["practice","Practice"]].map(([v,label])=>(
+        <button key={v} onClick={()=>setFilter(v)}
+          style={{padding:"4px 12px",borderRadius:20,fontSize:11,border:"1px solid var(--b2)",
+            background:filter===v?"var(--primaryb)":"var(--s1)",
+            color:filter===v?"var(--primary)":"var(--tx3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",letterSpacing:.5}}>
+          {label} {v==="practice"&&practiceEntries.length>0&&<span style={{opacity:.7}}>({practiceEntries.length})</span>}
+        </button>
+      ))}
+    </div>
+
+    {/* AI Story button */}
+    {practiceEntries.length>0&&(
+      <div style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"12px 14px",marginBottom:16}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div>
+            <div style={{fontSize:12,color:"var(--primary)",fontFamily:"'DM Mono',monospace",letterSpacing:1,marginBottom:2}}>✦ CHRONICLE</div>
+            <div style={{fontSize:11,color:"var(--tx3)"}}>
+              {canGenStory?"Weave your practice entries into a narrative.":"Log 3+ practice sessions with notes to unlock."}
+            </div>
+          </div>
+          {canGenStory&&(
+            <button className="fsbtn" style={{width:"auto",padding:"6px 14px",margin:0,fontSize:10}}
+              onClick={generateStory} disabled={genning}>
+              {genning?"◌ Weaving...":"Generate"}
+            </button>
+          )}
+        </div>
+        {showStory&&story&&(
+          <div style={{marginTop:14,paddingTop:14,borderTop:"1px solid var(--b1)"}}>
+            <div style={{fontSize:13,color:"var(--tx)",lineHeight:1.85,whiteSpace:"pre-wrap",fontStyle:"italic"}}>{story}</div>
+            <div style={{display:"flex",gap:8,marginTop:10}}>
+              <button className="fsbtn" style={{width:"auto",padding:"5px 12px",margin:0,fontSize:10}} onClick={generateStory} disabled={genning}>Regenerate</button>
+              <button className="fsbtn" style={{width:"auto",padding:"5px 12px",margin:0,fontSize:10,background:"var(--s2)",color:"var(--tx2)",border:"1px solid var(--b2)"}} onClick={()=>setShowStory(false)}>Hide</button>
+            </div>
+          </div>
+        )}
+        {showStory&&genning&&!story&&(
+          <div style={{marginTop:12,fontSize:12,color:"var(--tx3)",fontStyle:"italic"}}>Gathering threads...</div>
+        )}
+      </div>
+    )}
+
+    {/* New entry form */}
+    {showForm&&(
+      <div className="fwrap" style={{marginBottom:16}}>
+        {img&&<img src={img} className="journal-img" alt="attached"/>}
+        <textarea className="fi full" placeholder="Write your entry... or attach a photo of your paper journal below."
+          value={text} onChange={e=>setText(e.target.value)}
+          style={{minHeight:120,resize:"vertical",lineHeight:1.7}}/>
+        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          <button className="fsbtn" style={{width:"auto",padding:"7px 14px",margin:0,background:"var(--s2)",color:"var(--tx2)",border:"1px solid var(--b2)"}}
+            onClick={()=>fileRef.current?.click()}>
+            {ocring?"◌ Reading image...":"📷 Attach / OCR Photo"}
+          </button>
+          <a href="https://lens.google.com" target="_blank" rel="noreferrer"
+            style={{fontSize:11,color:"var(--tx3)",textDecoration:"underline"}}>or Google Lens (free)</a>
+          <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleImg}/>
+        </div>
+        <button className="fsbtn" onClick={submit}>Save Entry</button>
+      </div>
+    )}
+
+    {filtered.length===0&&(
+      <div className="empty">
+        {filter==="practice"?"No practice notes yet. Add a note when logging a session.":"No entries yet."}
+      </div>
+    )}
+
+    {filtered.map(e=>(
+      <div key={e.id} className={`journal-entry${e.source==="practice"?" practice-entry":""}`}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            <div className="journal-date">{fmt(e.created)}</div>
+            {e.source==="practice"&&<span style={{fontSize:8,fontFamily:"'DM Mono',monospace",letterSpacing:1,color:"var(--secondary)",border:"1px solid var(--secondaryb)",borderRadius:10,padding:"1px 6px"}}>PRACTICE</span>}
+          </div>
+          <button className="delbtn" style={{fontSize:9}} onClick={()=>onDelete(e.id)}>✕</button>
+        </div>
+        {e.img&&<img src={e.img} className="journal-img" alt="journal page"/>}
+        {e.text&&<div className="journal-text">{e.text}</div>}
+      </div>
+    ))}
+  </>);
+}
+
+// ─── WEEKLY REVIEW MODAL ────────────────────────────────────────────────────
+function WeeklyReview({tasks,quests,skills,meds,xpLog,onClose,onNavigate}){
+  const {settings}=useSettings(); const L=settings.labels;
+  const [analysis,setAnalysis]=useState("");
+  const [loading,setLoading]=useState(false);
+
+  const weekAgo=Date.now()-7*86400000;
+  const recentTasks=tasks.filter(t=>t.done&&t.created>weekAgo);
+  const recentQuests=quests.filter(q=>q.done&&q.created>weekAgo);
+  const recentMeds=meds.filter(m=>m.created>weekAgo);
+  const recentXp=(xpLog||[]).filter(e=>e.created>weekAgo).reduce((s,e)=>s+e.amt,0);
+  const activeStreaks=Object.entries(
+    skills.reduce((acc,sk)=>{acc[sk.id]={name:sk.name,count:0};return acc;},{})
+  );
+
+  const runReview=async()=>{
+    setLoading(true);
+    try{
+      const summary={
+        tasksCompleted:recentTasks.length,
+        questsCompleted:recentQuests.length,
+        practiceSessionsLogged:recentMeds.length,
+        totalMinutesPracticed:recentMeds.reduce((s,m)=>s+(m.dur||0),0),
+        xpEarned:recentXp,
+        questTitles:recentQuests.map(q=>q.title).slice(0,5),
+        skills:skills.map(s=>({name:s.name,level:Math.floor(s.xp/6000)+1}))
+      };
+      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"llama-3.3-70b-versatile",max_tokens:800,
+          messages:[{role:"user",content:`You are a supportive RPG life coach doing a weekly review. Be encouraging, specific, and concise. Here's the player's week:\n\n${JSON.stringify(summary,null,2)}\n\nGive a 3-paragraph weekly review: (1) wins this week, (2) patterns you notice, (3) one concrete focus for next week. Keep it personal and motivating.`}]
+        })
+      });
+      const data=await res.json();
+      const msg=data?.choices?.[0]?.message?.content||data?.content?.[0]?.text||"";
+      setAnalysis(msg);
+    }catch{ setAnalysis("Couldn't connect to advisor. Try again."); }
+    finally{ setLoading(false); }
+  };
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"#000a",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,padding:16}}>
+      <div className="review-modal">
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+          <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,letterSpacing:2,color:"var(--primary)"}}>WEEKLY REVIEW</div>
+          <button className="delbtn" onClick={onClose}>✕</button>
+        </div>
+
+        <div className="review-section">
+          <div className="slbl" style={{margin:"0 0 10px"}}>This Week's Stats</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+            {[
+              ["Tasks done",recentTasks.length],
+              ["Quests completed",recentQuests.length],
+              ["Practice sessions",recentMeds.length],
+              ["XP earned",recentXp],
+              ["Minutes practiced",recentMeds.reduce((s,m)=>s+(m.dur||0),0)],
+            ].map(([label,val])=>(
+              <div key={label} style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"10px 14px"}}>
+                <div style={{fontFamily:"'DM Mono',monospace",fontSize:16,color:"var(--primary)"}}>{val}</div>
+                <div style={{fontSize:11,color:"var(--tx2)",marginTop:2}}>{label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {recentQuests.length>0&&(
+          <div className="review-section">
+            <div className="slbl" style={{margin:"0 0 8px"}}>Quests Completed</div>
+            {recentQuests.map(q=>(
+              <div key={q.id} style={{fontSize:12,color:"var(--tx2)",padding:"3px 0",borderBottom:"1px solid var(--b1)"}}>◆ {q.title}</div>
+            ))}
+          </div>
+        )}
+
+        <div className="review-section">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+            <div className="slbl" style={{margin:0}}>AI Analysis</div>
+            {!analysis&&<button className="fsbtn" style={{width:"auto",padding:"6px 14px",margin:0,fontSize:10}} onClick={runReview} disabled={loading}>
+              {loading?"◌ Analysing...":"Get Review"}
+            </button>}
+          </div>
+          {analysis?(
+            <div style={{fontSize:13,color:"var(--tx)",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{analysis}</div>
+          ):(
+            <div style={{fontSize:12,color:"var(--tx3)",fontStyle:"italic"}}>Click "Get Review" for an AI-powered analysis of your week.</div>
+          )}
+        </div>
+
+        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}>
+          {["quests","skills","practice","journal"].map(t=>(
+            <button key={t} className="fsbtn" style={{width:"auto",padding:"6px 14px",margin:0,fontSize:10,background:"var(--s2)",color:"var(--tx2)",border:"1px solid var(--b2)"}}
+              onClick={()=>onNavigate(t)}>
+              Go to {t}
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── CUSTOM IMAGES SUPPORT ──────────────────────────────────────────────────
+// CustomImageUploader: reusable component for uploading images as base64
+function CustomImageUploader({label,value,onChange,aspectHint}){
+  const ref=useRef();
+  const handleFile=e=>{
+    const file=e.target.files?.[0]; if(!file) return;
+    if(file.size>2*1024*1024){ alert("Image too large. Please use an image under 2MB."); return; }
+    const reader=new FileReader();
+    reader.onload=ev=>onChange(ev.target.result);
+    reader.readAsDataURL(file);
+    e.target.value="";
+  };
+  return (
+    <div style={{marginBottom:12}}>
+      <div style={{fontSize:11,color:"var(--tx2)",marginBottom:6}}>{label}{aspectHint&&<span style={{color:"var(--tx3)",marginLeft:6}}>({aspectHint})</span>}</div>
+      <div style={{display:"flex",gap:8,alignItems:"center"}}>
+        {value&&<img src={value} alt={label} style={{width:48,height:48,objectFit:"cover",borderRadius:"var(--r)",border:"1px solid var(--b1)"}}/>}
+        <button className="fsbtn" style={{width:"auto",padding:"6px 14px",margin:0,fontSize:10,background:"var(--s2)",color:"var(--tx2)",border:"1px solid var(--b2)"}}
+          onClick={()=>ref.current?.click()}>
+          {value?"Change image":"Upload image"}
+        </button>
+        {value&&<button className="delbtn" style={{fontSize:9}} onClick={()=>onChange(null)}>Remove</button>}
+        <input ref={ref} type="file" accept="image/png,image/jpeg,image/gif,image/webp" style={{display:"none"}} onChange={handleFile}/>
+      </div>
     </div>
   );
 }
