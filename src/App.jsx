@@ -935,12 +935,12 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
     setQXpLoad(true); setQXpSug(null);
     const typeLabel=form==="main"?"main quest":form==="side"?"side quest":"radiant/repeatable quest";
     try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
+      const res=await fetch("/api/chat",{method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:120,
-          messages:[{role:"user",content:`Quest in a gamified life tracker: "${f.title}"${f.note?`. Intention: "${f.note}"`:""}. Type: ${typeLabel}. Suggest fair XP (main=60-120, side=30-70, radiant=20-40 per run). Reply ONLY with JSON: {"xp": NUMBER, "reason": "one short sentence"}`}]})});
+        body:JSON.stringify({max_tokens:120,
+          messages:[{role:"user",content:`Quest in a gamified life tracker: "${f.title}"${f.note?`. Intention: "${f.note}"`:""}. Type: ${typeLabel}. Suggest fair XP (main=60-120, side=30-70, radiant=20-40 per run). Reply ONLY with JSON, no markdown: {"xp": NUMBER, "reason": "one short sentence"}`}]})});
       const data=await res.json();
-      const txt=data.content?.map(b=>b.text||"").join("")||"";
+      const txt=data.content?.map(b=>b.text||"").join("")||data.choices?.[0]?.message?.content||"";
       const m=txt.match(/\{[\s\S]*\}/);
       if(m) setQXpSug(JSON.parse(m[0]));
     }catch(e){setQXpSug({xp:null,reason:"Couldn't reach AI."});}
@@ -1300,7 +1300,8 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
           })
         });
         const data=await res.json();
-        const parsed=JSON.parse((data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim());
+        const _ptxt=data.content?.map(b=>b.text||"").join("")||data.choices?.[0]?.message?.content||"{}";
+        const parsed=JSON.parse(_ptxt.replace(/```json|```/g,"").trim());
         if(parsed.xp) baseXp=Math.max(1,Math.round(parsed.xp));
         if(parsed.reason) aiReason=parsed.reason;
       }catch{}
@@ -1320,15 +1321,15 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
     const baseXp=f.dur*ppm;
     const skNames=f.skillIds.map(id=>skills.find(s=>s.id===id)?.name).filter(Boolean).join(", ")||"General";
     try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
+      const res=await fetch("/api/chat",{method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:100,
+        body:JSON.stringify({max_tokens:100,
           messages:[{role:"user",content:`Evaluate a practice session for a gamified life tracker. Time-based XP would be ${baseXp}.
 Type: ${ptype.label}, Duration: ${f.dur}min, Skills: ${skNames}${f.note.trim()?`
 Journal: "${f.note}"`:""}
-Suggest fair XP and a short reason. Reply ONLY with JSON: {"xp": NUMBER, "reason": "max 15 words"}`}]})});
+Suggest fair XP and a short reason. Reply ONLY with JSON, no markdown: {"xp": NUMBER, "reason": "max 15 words"}`}]})});
       const data=await res.json();
-      const txt=data.content?.map(b=>b.text||"").join("")||"";
+      const txt=data.content?.map(b=>b.text||"").join("")||data.choices?.[0]?.message?.content||"";
       const m=txt.match(/\{[\s\S]*\}/);
       if(m) setXpPreview(JSON.parse(m[0]));
       else setXpPreview({xp:baseXp,reason:"Couldn't parse AI response."});
@@ -1362,7 +1363,7 @@ Suggest fair XP and a short reason. Reply ONLY with JSON: {"xp": NUMBER, "reason
         })
       });
       const data=await res.json();
-      setAnalysis(data.content?.[0]?.text||"No analysis returned.");
+      setAnalysis(data.content?.map(b=>b.text||"").join("")||data.choices?.[0]?.message?.content||"No analysis returned.");
     }catch{ setAnalysis("Analysis failed — check your connection."); }
     setAnalysing(false);
   };
@@ -1567,14 +1568,14 @@ Types: add_task (fields: title, xpVal 5-100), add_quest (fields: title, note, qu
 
 If not adding anything, do NOT include ACTIONS at all.`;
 
-      const res=await fetch("https://api.anthropic.com/v1/messages",{
+      const res=await fetch("/api/chat",{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,
           system:systemPrompt,
           messages:next.map(m=>({role:m.role,content:m.content}))})
       });
       const data=await res.json();
-      const raw=data.content?.map(b=>b.text||"").join("")||"...";
+      const raw=data.content?.map(b=>b.text||"").join("")||data.choices?.[0]?.message?.content||"...";
       let display=raw;
       const actionMatch=raw.match(/ACTIONS:(\{[\s\S]*\})/);
       if(actionMatch){
@@ -1690,11 +1691,19 @@ function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,o
           system:buildCtx(),tools:buildAdvisorTools(skills,quests),messages:history}),
       });
       const data=await res.json();
-      const toolBlocks=data.content?.filter(b=>b.type==="tool_use")||[];
-      const textBlocks=data.content?.filter(b=>b.type==="text")||[];
-      const replyText=textBlocks.map(b=>b.text).join("")||"";
+      // Handle both Anthropic (data.content) and Groq/OpenAI (data.choices) response formats
+      const isAnthropic=Array.isArray(data.content);
+      const toolBlocks=isAnthropic
+        ? data.content.filter(b=>b.type==="tool_use")
+        : (data.choices?.[0]?.message?.tool_calls||[]).map(tc=>({
+            id:tc.id, name:tc.function?.name,
+            input:JSON.parse(tc.function?.arguments||"{}")
+          }));
+      const replyText=isAnthropic
+        ? data.content.filter(b=>b.type==="text").map(b=>b.text).join("")
+        : data.choices?.[0]?.message?.content||"";
       if(toolBlocks.length>0){
-        const actions=toolBlocks.map(b=>({id:b.id,tool:b.name,input:b.input,status:"pending"}));
+        const actions=toolBlocks.map(b=>({id:b.id,tool:b.name||b.function?.name,input:b.input,status:"pending"}));
         setMsgs(prev=>[...prev,{role:"assistant",content:replyText||"Here\'s what I\'d like to add:",actions}]);
       } else {
         setMsgs(prev=>[...prev,{role:"assistant",content:replyText||"Something went wrong."}]);
@@ -2005,12 +2014,12 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
     if(!ef.title.trim()) return;
     setXpLoading(true); setXpSuggestion(null);
     try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",
+      const res=await fetch("/api/chat",{method:"POST",
         headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:120,
-          messages:[{role:"user",content:`This quest in a gamified life tracker: "${ef.title}"${ef.note?`. Intention: "${ef.note}"`:""}. Type: ${quest.type}. Suggest a fair XP reward (typical range: main=60-120, side=30-70, radiant=20-40 per run). Reply with ONLY a JSON object: {"xp": NUMBER, "reason": "one short sentence"}`}]})});
+        body:JSON.stringify({max_tokens:120,
+          messages:[{role:"user",content:`This quest in a gamified life tracker: "${ef.title}"${ef.note?`. Intention: "${ef.note}"`:""}. Type: ${quest.type}. Suggest a fair XP reward (typical range: main=60-120, side=30-70, radiant=20-40 per run). Reply with ONLY a JSON object, no markdown: {"xp": NUMBER, "reason": "one short sentence"}`}]})});
       const data=await res.json();
-      const txt=data.content?.map(b=>b.text||"").join("")||"";
+      const txt=data.content?.map(b=>b.text||"").join("")||data.choices?.[0]?.message?.content||"";
       const parsed=JSON.parse(txt.match(/\{[\s\S]*\}/)?.[0]||"{}");
       if(parsed.xp) setXpSuggestion(parsed);
     }catch(e){setXpSuggestion({xp:null,reason:"Couldn't reach AI."});}
