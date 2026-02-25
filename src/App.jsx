@@ -520,6 +520,7 @@ export default function App(){
   const addPracticeType=async d=>{await savePT([...practiceTypes,{id:uid(),label:d.label,icon:d.icon||"◎"}]);};
   const deletePracticeType=async id=>{await savePT(practiceTypes.filter(t=>t.id!==id));};
   const saveS=async s=>{setSkills(s);await sset("cx_skills",s);};
+  const reorderSkills=async newOrder=>{setSkills(newOrder);await sset("cx_skills",newOrder);};
   const saveStr=async s=>{setStreaks(s);await sset("cx_streaks",s);};
 
   const addTask=async d=>{
@@ -729,7 +730,7 @@ export default function App(){
           <main className="pg">
             {tab==="planner"  && <PlannerTab period={period} setPeriod={setPeriod} tasks={periodTasks()} weekDays={weekDays} allTasks={tasks} skills={skills} quests={quests} onAddTask={addTask} onToggle={toggleTask} onDelete={deleteTask} onEdit={editTask} onToggleQuest={toggleQuest}/>}
             {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest}/>}
-            {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill}/>}
+            {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill} onReorder={reorderSkills}/>}
             {tab==="practice" && <PracticeTab meds={meds} skills={skills} streaks={streaks} pending={pendingPractice} practiceTypes={practiceTypes} onAddType={addPracticeType} onDeleteType={deletePracticeType} onLog={logMed} onDelete={deleteMed} onClearPending={()=>setPendingPractice(null)}/>}
             {tab==="journal"  && <JournalTab entries={journal} onAdd={addJournalEntry} onDelete={deleteJournalEntry}/>}
             {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} journal={journal} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest}/>}
@@ -940,7 +941,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
         body:JSON.stringify({max_tokens:120,
           messages:[{role:"user",content:`Quest in a gamified life tracker: "${f.title}"${f.note?`. Intention: "${f.note}"`:""}. Type: ${typeLabel}. Suggest fair XP (main=60-120, side=30-70, radiant=20-40 per run). Reply ONLY with JSON, no markdown: {"xp": NUMBER, "reason": "one short sentence"}`}]})});
       const data=await res.json();
-      const txt=data.content?.map(b=>b.text||"").join("")||data.choices?.[0]?.message?.content||"";
+      const txt=data.choices?.[0]?.message?.content||"";
       const m=txt.match(/\{[\s\S]*\}/);
       if(m) setQXpSug(JSON.parse(m[0]));
     }catch(e){setQXpSug({xp:null,reason:"Couldn't reach AI."});}
@@ -1078,11 +1079,14 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
 
 const SKILL_ICONS_EXTRA = ["◈","◉","◎","◆","◬","✦","◌","◊","△","○","□","◇","❋","⊕","◐","◑","⬡","✧","⟡","◿","⚔","🧠","💪","🎯","🎨","📚","🎵","🌱","⚡","🔥","💎","🏆","🎭","🔬","🌟","✍","🎸","🏋","🧘","💻","🗺","🎲","⚙","🛡","🌊","🦾","🧩","🎤","📖","🌙"];
 
-function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,onEdit}){
+function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,onEdit,onReorder}){
   const {settings}=useSettings(); const L=settings.labels;
   const [showForm,setShowForm]=useState(false);
   const [showPresets,setShowPresets]=useState(false);
   const [editingId,setEditingId]=useState(null);
+  const [dragIdx,setDragIdx]=useState(null);
+  const [dragOver,setDragOver]=useState(null);
+  const dragNode=useRef(null);
   const [ef,setEf]=useState({name:"",icon:"◈",color:SKILL_COLORS[0]});
   const [f,setF]=useState({name:"",icon:"◈",color:SKILL_COLORS[0],startLevel:1,customImg:null});
 
@@ -1108,6 +1112,27 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
     const startXp=(Math.max(1,Number(f.startLevel)||1)-1)*skPerLv;
     onAdd({name:f.name.trim(),icon:f.icon,color:f.color,startXp,customImg:f.customImg||null});
     setF({name:"",icon:"◈",color:SKILL_COLORS[0],startLevel:1,customImg:null}); setShowForm(false);
+  };
+  const onDragStart=(e,i)=>{
+    dragNode.current=e.currentTarget;
+    setDragIdx(i);
+    e.dataTransfer.effectAllowed="move";
+    setTimeout(()=>{ if(dragNode.current) dragNode.current.style.opacity="0.35"; },0);
+  };
+  const onDragEnter=(_e,i)=>setDragOver(i);
+  const onDragOver=e=>e.preventDefault();
+  const onDragEnd=()=>{
+    if(dragNode.current) dragNode.current.style.opacity="1";
+    setDragIdx(null); setDragOver(null); dragNode.current=null;
+  };
+  const onDrop=(e,i)=>{
+    e.preventDefault();
+    if(dragIdx===null||dragIdx===i){onDragEnd();return;}
+    const next=[...skills];
+    const [moved]=next.splice(dragIdx,1);
+    next.splice(i,0,moved);
+    onReorder(next);
+    onDragEnd();
   };
   const openEdit=s=>{
     setEf({name:s.name,icon:s.icon,color:s.color,customImg:s.customImg||null});
@@ -1207,38 +1232,51 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
         </div>
       </div>);
     })()}
-    {skills.map(s=>{
+    {skills.map((s,i)=>{
       const lv=skillLv(s.xp,skPerLv), pg=skillProg(s.xp,skPerLv), cur=s.xp%skPerLv;
       const streak=streaks[s.id]||{count:0}; const mult=getMultiplier(streak.count);
       const days=activityMap[s.id]||[];
       const maxMins=Math.max(...days,1);
+      const isDragging=dragIdx===i;
+      const isOver=dragOver===i&&dragIdx!==i;
       return (
-        <div key={s.id} className="skill-card">
-          <div className="sk-hdr">
-            <div className="sk-name">
-              {s.customImg?<img src={s.customImg} style={{width:16,height:16,borderRadius:2,objectFit:"cover",verticalAlign:"middle"}}/>:<span style={{color:s.color,fontSize:15}}>{s.icon}</span>}
-              {" "}{s.name}
+        <div key={s.id}
+          draggable
+          onDragStart={e=>onDragStart(e,i)}
+          onDragEnter={e=>onDragEnter(e,i)}
+          onDragOver={onDragOver}
+          onDragEnd={onDragEnd}
+          onDrop={e=>onDrop(e,i)}
+          style={{transition:"transform .15s",transform:isOver?(dragIdx<i?"translateY(4px)":"translateY(-4px)"):"translateY(0)",cursor:"grab"}}
+        >
+          <div className="skill-card" style={{borderColor:isOver?s.color+"88":"",borderStyle:isOver?"dashed":""}}>
+            <div className="sk-hdr">
+              <div className="sk-name" style={{gap:6}}>
+                <span style={{color:"var(--tx3)",fontSize:11,cursor:"grab",userSelect:"none",flexShrink:0}} title="Drag to reorder">⠿</span>
+                {s.customImg?<img src={s.customImg} style={{width:16,height:16,borderRadius:2,objectFit:"cover",verticalAlign:"middle"}}/>:<span style={{color:s.color,fontSize:15}}>{s.icon}</span>}
+                {" "}{s.name}
+              </div>
+              <div className="sk-meta">
+                {streak.count>=3&&<span className="sk-streak">{streak.count}d {mult>1?`${mult}×`:""}</span>}
+                <div className="sk-lv">{L.levelName} <span>{lv}</span></div>
+                <button className="sk-delbtn" style={{marginLeft:2}} onClick={()=>openEdit(s)}>✎</button>
+                <button className="sk-delbtn" onClick={()=>onDelete(s.id)}>✕</button>
+              </div>
             </div>
-            <div className="sk-meta">
-              {streak.count>=3&&<span className="sk-streak">{streak.count}d {mult>1?`${mult}×`:""}</span>}
-              <div className="sk-lv">{L.levelName} <span>{lv}</span></div>
-              <button className="sk-delbtn" style={{marginLeft:2}} onClick={()=>openEdit(s)}>✎</button>
-              <button className="sk-delbtn" onClick={()=>onDelete(s.id)}>✕</button>
+            <div className="sk-bar-wrap"><div className="sk-bar" style={{width:`${pg}%`,background:s.color}}/></div>
+            <div className="sk-xprow">
+              <span className="sk-xplbl">{cur} / {skPerLv} {L.xpName} this level</span>
+              <span className="sk-xplbl">{s.xp} total</span>
             </div>
+            <div style={{display:"flex",alignItems:"flex-end",gap:2,height:24,marginTop:8}}>
+              {days.map((m,di)=>{
+                const h=m===0?2:Math.max(4,Math.round((m/maxMins)*22));
+                const isToday=di===13;
+                return <div key={di} title={`${m}min`} style={{flex:1,height:h,borderRadius:1,background:isToday?s.color:s.color+"55",transition:"height .2s"}}/>;
+              })}
+            </div>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",marginTop:3,textAlign:"right"}}>14d activity</div>
           </div>
-          <div className="sk-bar-wrap"><div className="sk-bar" style={{width:`${pg}%`,background:s.color}}/></div>
-          <div className="sk-xprow">
-            <span className="sk-xplbl">{cur} / {skPerLv} {L.xpName} this level</span>
-            <span className="sk-xplbl">{s.xp} total</span>
-          </div>
-          <div style={{display:"flex",alignItems:"flex-end",gap:2,height:24,marginTop:8}}>
-            {days.map((m,i)=>{
-              const h=m===0?2:Math.max(4,Math.round((m/maxMins)*22));
-              const isToday=i===13;
-              return <div key={i} title={`${m}min`} style={{flex:1,height:h,borderRadius:1,background:isToday?s.color:s.color+"55",transition:"height .2s"}}/>;
-            })}
-          </div>
-          <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",marginTop:3,textAlign:"right"}}>14d activity</div>
         </div>
       );
     })}
@@ -1300,7 +1338,7 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
           })
         });
         const data=await res.json();
-        const _ptxt=data.content?.map(b=>b.text||"").join("")||data.choices?.[0]?.message?.content||"{}";
+        const _ptxt=data.choices?.[0]?.message?.content||"{}";
         const parsed=JSON.parse(_ptxt.replace(/```json|```/g,"").trim());
         if(parsed.xp) baseXp=Math.max(1,Math.round(parsed.xp));
         if(parsed.reason) aiReason=parsed.reason;
@@ -1329,7 +1367,7 @@ Type: ${ptype.label}, Duration: ${f.dur}min, Skills: ${skNames}${f.note.trim()?`
 Journal: "${f.note}"`:""}
 Suggest fair XP and a short reason. Reply ONLY with JSON, no markdown: {"xp": NUMBER, "reason": "max 15 words"}`}]})});
       const data=await res.json();
-      const txt=data.content?.map(b=>b.text||"").join("")||data.choices?.[0]?.message?.content||"";
+      const txt=data.choices?.[0]?.message?.content||"";
       const m=txt.match(/\{[\s\S]*\}/);
       if(m) setXpPreview(JSON.parse(m[0]));
       else setXpPreview({xp:baseXp,reason:"Couldn't parse AI response."});
@@ -1363,7 +1401,7 @@ Suggest fair XP and a short reason. Reply ONLY with JSON, no markdown: {"xp": NU
         })
       });
       const data=await res.json();
-      setAnalysis(data.content?.map(b=>b.text||"").join("")||data.choices?.[0]?.message?.content||"No analysis returned.");
+      setAnalysis(data.choices?.[0]?.message?.content||"No analysis returned.");
     }catch{ setAnalysis("Analysis failed — check your connection."); }
     setAnalysing(false);
   };
@@ -1575,7 +1613,7 @@ If not adding anything, do NOT include ACTIONS at all.`;
           messages:next.map(m=>({role:m.role,content:m.content}))})
       });
       const data=await res.json();
-      const raw=data.content?.map(b=>b.text||"").join("")||data.choices?.[0]?.message?.content||"...";
+      const raw=data.choices?.[0]?.message?.content||"...";
       let display=raw;
       const actionMatch=raw.match(/ACTIONS:(\{[\s\S]*\})/);
       if(actionMatch){
@@ -1691,19 +1729,17 @@ function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,o
           system:buildCtx(),tools:buildAdvisorTools(skills,quests),messages:history}),
       });
       const data=await res.json();
-      // Handle both Anthropic (data.content) and Groq/OpenAI (data.choices) response formats
-      const isAnthropic=Array.isArray(data.content);
-      const toolBlocks=isAnthropic
-        ? data.content.filter(b=>b.type==="tool_use")
-        : (data.choices?.[0]?.message?.tool_calls||[]).map(tc=>({
-            id:tc.id, name:tc.function?.name,
-            input:JSON.parse(tc.function?.arguments||"{}")
-          }));
-      const replyText=isAnthropic
-        ? data.content.filter(b=>b.type==="text").map(b=>b.text).join("")
-        : data.choices?.[0]?.message?.content||"";
-      if(toolBlocks.length>0){
-        const actions=toolBlocks.map(b=>({id:b.id,tool:b.name||b.function?.name,input:b.input,status:"pending"}));
+      // Groq returns OpenAI format; tool_calls in message if tools used
+      const msg=data.choices?.[0]?.message||{};
+      const toolCalls=msg.tool_calls||[];
+      const replyText=msg.content||"";
+      if(toolCalls.length>0){
+        const actions=toolCalls.map(tc=>({
+          id:tc.id,
+          tool:tc.function?.name,
+          input:(()=>{try{return JSON.parse(tc.function?.arguments||"{}");}catch{return {};}})(),
+          status:"pending"
+        }));
         setMsgs(prev=>[...prev,{role:"assistant",content:replyText||"Here\'s what I\'d like to add:",actions}]);
       } else {
         setMsgs(prev=>[...prev,{role:"assistant",content:replyText||"Something went wrong."}]);
@@ -2019,7 +2055,7 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
         body:JSON.stringify({max_tokens:120,
           messages:[{role:"user",content:`This quest in a gamified life tracker: "${ef.title}"${ef.note?`. Intention: "${ef.note}"`:""}. Type: ${quest.type}. Suggest a fair XP reward (typical range: main=60-120, side=30-70, radiant=20-40 per run). Reply with ONLY a JSON object, no markdown: {"xp": NUMBER, "reason": "one short sentence"}`}]})});
       const data=await res.json();
-      const txt=data.content?.map(b=>b.text||"").join("")||data.choices?.[0]?.message?.content||"";
+      const txt=data.choices?.[0]?.message?.content||"";
       const parsed=JSON.parse(txt.match(/\{[\s\S]*\}/)?.[0]||"{}");
       if(parsed.xp) setXpSuggestion(parsed);
     }catch(e){setXpSuggestion({xp:null,reason:"Couldn't reach AI."});}
