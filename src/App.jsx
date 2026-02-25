@@ -1527,23 +1527,46 @@ function buildAdvisorTools(skills,quests){
 
 function JarvisOverlay({tasks,quests,skills,onAddQuest,onAddTask,onClose}){
   const [input,setInput]=useState("");
-  const [msgs,setMsgs]=useState([{role:"assistant",content:"Jarvis online. Tell me what to add — tasks, quests, skills — or ask anything about your codex."}]);
+  const [msgs,setMsgs]=useState([{role:"assistant",content:"Online."}]);
   const [loading,setLoading]=useState(false);
   const inputRef=useRef(null);
+  const msgEndRef=useRef(null);
   useEffect(()=>{inputRef.current?.focus();},[]);
+  useEffect(()=>{msgEndRef.current?.scrollIntoView({behavior:"smooth"});},[msgs]);
 
   const send=async()=>{
     const txt=input.trim(); if(!txt||loading) return;
     const next=[...msgs,{role:"user",content:txt}];
     setMsgs(next); setInput(""); setLoading(true);
     try{
-      const systemPrompt=`You are Jarvis, an AI assistant embedded in a gamified life tracker called The Codex. 
-The user has: ${tasks.length} tasks, ${quests.length} quests, ${skills.map(s=>s.name).join(", ")||"no skills"}.
-Help the user add items efficiently. When they want to add something, respond with:
-1. A brief confirmation message
-2. A JSON block like: {"actions":[{"type":"add_task","title":"...","xpVal":20},{"type":"add_quest","title":"...","note":"..."}]}
-Supported action types: add_task (fields: title, xpVal), add_quest (fields: title, note).
-If just chatting, skip the JSON. Be concise, direct, slightly witty.`;
+      const activeQuests=quests.filter(q=>!q.done).map(q=>`${q.title} (${q.type})`).slice(0,10).join(", ")||"none";
+      const doneCount=quests.filter(q=>q.done).length;
+      const skillNames=skills.map(s=>`${s.name} lv${Math.floor(s.xp/100)+1}`).join(", ")||"none";
+      const taskCount=tasks.filter(t=>!t.done).length;
+
+      const systemPrompt=`You are JARVIS — an AI embedded in The Codex, a personal gamified life tracker. You are not a chatbot. You are a co-pilot.
+
+CODEX STATE:
+- Active quests: ${activeQuests}
+- Completed quests: ${doneCount}
+- Skills: ${skillNames}
+- Pending tasks: ${taskCount}
+
+PERSONALITY RULES — follow these exactly:
+1. When asked a question, ANSWER IT. Give your actual opinion. Be direct. Be concise. Do not hedge.
+2. You have personality. Dry wit is fine. Bluntness is fine. Padding is not.
+3. NEVER offer to add things to the tracker unprompted. NEVER say "would you like me to add that?" NEVER suggest logging something. If they want it added, they will ask.
+4. NEVER open with "I" as the first word. Vary sentence structure.
+5. Keep responses under 4 sentences unless the user asks for detail.
+
+ADDING ITEMS — only when user explicitly says "add", "create", "log", "track", or similar:
+Append this exact format at the very end, after your message text, on its own line:
+ACTIONS:{"actions":[{"type":"add_task","title":"...","xpVal":20}]}
+or: ACTIONS:{"actions":[{"type":"add_quest","title":"...","note":"...","questType":"main"}]}
+Types: add_task (fields: title, xpVal 5-100), add_quest (fields: title, note, questType: main/side/radiant)
+
+If not adding anything, do NOT include ACTIONS at all.`;
+
       const res=await fetch("https://api.anthropic.com/v1/messages",{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,
@@ -1552,20 +1575,20 @@ If just chatting, skip the JSON. Be concise, direct, slightly witty.`;
       });
       const data=await res.json();
       const raw=data.content?.map(b=>b.text||"").join("")||"...";
-      // Parse and execute actions
-      const jsonMatch=raw.match(/\{[\s\S]*"actions"[\s\S]*\}/);
-      if(jsonMatch){
+      let display=raw;
+      const actionMatch=raw.match(/ACTIONS:(\{[\s\S]*\})/);
+      if(actionMatch){
         try{
-          const parsed=JSON.parse(jsonMatch[0]);
+          const parsed=JSON.parse(actionMatch[1]);
           for(const a of parsed.actions||[]){
-            if(a.type==="add_task") await onAddTask({title:a.title,xpVal:a.xpVal||20,skill:null});
-            if(a.type==="add_quest") await onAddQuest({title:a.title,note:a.note||"",type:"main",due:""});
+            if(a.type==="add_task") await onAddTask({title:a.title,xpVal:Number(a.xpVal)||20,skill:null});
+            if(a.type==="add_quest") await onAddQuest({title:a.title,note:a.note||"",type:a.questType||"main",due:"",skills:[]});
           }
         }catch(e){}
+        display=raw.split("ACTIONS:")[0].trim();
       }
-      const display=raw.replace(/```json[\s\S]*?```/g,"").replace(/\{[\s\S]*"actions"[\s\S]*\}/g,"").trim();
       setMsgs(v=>[...v,{role:"assistant",content:display||"Done."}]);
-    }catch(e){setMsgs(v=>[...v,{role:"assistant",content:"Error connecting. Check API key."}]);}
+    }catch(e){setMsgs(v=>[...v,{role:"assistant",content:"Error — check console."}]);}
     setLoading(false);
   };
 
@@ -1585,7 +1608,8 @@ If just chatting, skip the JSON. Be concise, direct, slightly witty.`;
               {m.content}
             </div>
           ))}
-          {loading&&<div style={{alignSelf:"flex-start",fontSize:11,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontStyle:"italic"}}>thinking...</div>}
+          {loading&&<div style={{alignSelf:"flex-start",fontSize:11,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontStyle:"italic"}}>...</div>}
+          <div ref={msgEndRef}/>
         </div>
         <div style={{padding:"12px 16px",borderTop:"1px solid var(--b1)",display:"flex",gap:8}}>
           <input ref={inputRef} value={input} onChange={e=>setInput(e.target.value)}
@@ -1963,7 +1987,7 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
   const [showSubs,setShowSubs]=useState(false);
   const [newSub,setNewSub]=useState("");
   const defaultQColor=(sIds)=>{ const s=skills.find(sk=>sk.id===(sIds||[])[0]); return s?s.color:null; };
-  const [ef,setEf]=useState({title:quest.title,note:quest.note||"",dueDate:quest.due?new Date(quest.due).toISOString().split("T")[0]:"",skillIds:quest.skills||[],color:quest.color||defaultQColor(quest.skills)||null});
+  const [ef,setEf]=useState({title:quest.title,note:quest.note||"",dueDate:quest.due?new Date(quest.due).toISOString().split("T")[0]:"",skillIds:quest.skills||[],color:quest.color||defaultQColor(quest.skills)||null,priority:quest.priority||"med"});
   const [xpSuggestion,setXpSuggestion]=useState(null);
   const [xpLoading,setXpLoading]=useState(false);
   const toggleESkill=id=>setEf(v=>{
@@ -1974,7 +1998,7 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
   const saveEdit=()=>{
     if(!ef.title.trim()) return;
     const due=ef.dueDate?new Date(ef.dueDate+"T09:00").getTime():null;
-    onEdit(quest.id,{title:ef.title.trim(),note:ef.note.trim(),due,skills:ef.skillIds,color:ef.color||null});
+    onEdit(quest.id,{title:ef.title.trim(),note:ef.note.trim(),due,skills:ef.skillIds,color:ef.color||null,priority:ef.priority});
     setEditing(false); setXpSuggestion(null);
   };
   const suggestQuestXp=async()=>{
@@ -2012,9 +2036,17 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
       {skills.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
         {skills.map(s=><button key={s.id} onClick={()=>toggleESkill(s.id)} style={{background:ef.skillIds.includes(s.id)?s.color+"22":"var(--bg)",border:`1px solid ${ef.skillIds.includes(s.id)?s.color+"66":"var(--b2)"}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:.8,color:ef.skillIds.includes(s.id)?s.color:"var(--tx3)",transition:"all .15s"}}>{s.icon} {s.name}</button>)}
       </div>}
+      <div className="frow" style={{alignItems:"center",gap:6}}>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,textTransform:"uppercase",color:"var(--tx3)",flexShrink:0}}>Priority</div>
+        {["high","med","low"].map(p=>(
+          <button key={p} onClick={()=>setEf(v=>({...v,priority:p}))} style={{background:ef.priority===p?"var(--s2)":"var(--bg)",border:`1px solid ${ef.priority===p?"var(--b3)":"var(--b1)"}`,borderRadius:4,padding:"4px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:.8,color:ef.priority===p?({high:"#e05555",med:"var(--primary)",low:"var(--tx3)"}[p]):"var(--tx3)",transition:"all .15s",textTransform:"uppercase"}}>
+            {p}
+          </button>
+        ))}
+        <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0,flexShrink:0,marginLeft:"auto"}} onClick={()=>{setEditing(false);setXpSuggestion(null);}}>✕</button>
+      </div>
       <div className="frow">
         <input className="fi" type="date" style={{colorScheme:"dark"}} value={ef.dueDate} onChange={e=>setEf(v=>({...v,dueDate:e.target.value}))}/>
-        <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0,flexShrink:0}} onClick={()=>{setEditing(false);setXpSuggestion(null);}}>✕</button>
       </div>
       <div style={{marginBottom:8}}>
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:6}}>Quest color</div>
