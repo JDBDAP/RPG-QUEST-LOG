@@ -447,8 +447,9 @@ function Collapsible({question,children}){
 }
 
 export default function App(){
-  const [session,setSession]=useState(undefined); // undefined=loading, null=guest, obj=authed
+  const [session,setSession]=useState(null);
   const [userId,setUserId]=useState(null);
+  const [showAuth,setShowAuth]=useState(false);
   const [settings,setSettings]=useState(DEFAULT_SETTINGS);
   const [tab,setTab]=useState("planner");
   const [period,setPeriod]=useState("daily");
@@ -532,11 +533,11 @@ export default function App(){
     (async()=>{
       const s=await getSession();
       if(s){ setSession(s); setUserId(s.user.id); await loadData(s.user.id); }
-      else { setSession(null); await loadData(null); }
+      else { await loadData(null); }
     })();
     // Listen for auth changes (login/logout from another tab etc)
     const unsub=onAuthChange(async s=>{
-      if(s){ setSession(s); setUserId(s.user.id); await loadData(s.user.id); }
+      if(s){ setSession(s); setUserId(s.user.id); setShowAuth(false); await loadData(s.user.id); }
       else { setSession(null); setUserId(null); }
     });
     return unsub;
@@ -802,19 +803,15 @@ export default function App(){
     {id:"settings", icon:"⚙", label:L.settingsTab},
   ];
 
-  // Session undefined = still checking auth state
-  if(session===undefined&&!loaded) return <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,height:"100vh",fontFamily:"'DM Mono',monospace",fontSize:10,letterSpacing:2,background:"#0c0c0c",color:"#555"}}>
+  if(!loaded) return <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,height:"100vh",fontFamily:"'DM Mono',monospace",fontSize:10,letterSpacing:2,background:"#0c0c0c",color:"#555"}}>
     <span>LOADING</span>
     <button onClick={()=>{localStorage.removeItem("cx_settings");window.location.reload();}} style={{background:"none",border:"1px solid #333",borderRadius:4,color:"#444",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1,padding:"6px 12px",cursor:"pointer"}}>reset theme if stuck</button>
   </div>;
 
-  // Show auth screen when explicitly triggered (sign in button clicked, or first visit with supabase)
-  if(session===undefined&&loaded) return <AuthScreen onAuth={async s=>{
-    if(s){ setSession(s); setUserId(s.user.id); await loadData(s.user.id); }
-    else { setSession(null); setUserId(null); }
+  if(showAuth) return <AuthScreen onAuth={async s=>{
+    if(s){ setSession(s); setUserId(s.user.id); setShowAuth(false); await loadData(s.user.id); }
+    else { setShowAuth(false); }
   }}/>;
-
-  if(!loaded) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",fontFamily:"'DM Mono',monospace",fontSize:10,letterSpacing:2,background:"#0c0c0c",color:"#555"}}>LOADING</div>;
 
   return (
     <SettingsCtx.Provider value={{settings,saveSettings}}>
@@ -847,7 +844,7 @@ export default function App(){
               <div style={{display:"flex",alignItems:"center",gap:8}}>
                 <span className="lv-badge">{L.levelName} {level}</span>
                 {userId&&<button onClick={handleSignOut} title="Sign out" style={{background:"none",border:"none",cursor:"pointer",color:"var(--tx3)",fontSize:11,padding:"2px 4px",fontFamily:"'DM Mono',monospace",letterSpacing:.5}}>↪ out</button>}
-                {!userId&&session===null&&<button onClick={()=>setSession(undefined)} title="Sign in" style={{background:"none",border:"none",cursor:"pointer",color:"var(--primary)",fontSize:9,padding:"2px 4px",fontFamily:"'DM Mono',monospace",letterSpacing:1}}>sign in</button>}
+                {!userId&&<button onClick={()=>setShowAuth(true)} title="Sign in" style={{background:"none",border:"none",cursor:"pointer",color:"var(--tx2,#999999)",fontSize:9,padding:"2px 4px",fontFamily:"'DM Mono',monospace",letterSpacing:1,textDecoration:"underline"}}>sign in</button>}
               </div>
             </div>
             <div className="xp-row">
@@ -1469,7 +1466,7 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
     {showForm&&<>{renderForm()}<button className="fsbtn" style={{marginTop:4}} onClick={()=>setShowForm(false)}>Cancel</button></>}
 
     {showPresets&&!showForm&&(
-      <div className="fwrap" style={{marginBottom:10}}>
+      <div className="fwrap" style={{marginBottom:10,maxHeight:320,overflowY:"auto"}}>
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:10}}>Skill presets</div>
         {SKILL_PRESETS.map(p=>(
           <div key={p.name} style={{background:"var(--bg)",border:"1px solid var(--b1)",borderRadius:4,padding:"10px 12px",marginBottom:6}}>
@@ -1864,10 +1861,19 @@ PERSONALITY RULES — follow these exactly:
 
 ADDING ITEMS — only when user explicitly says "add", "create", "log", "track", or similar:
 Append this exact format at the very end, after your message text, on its own line:
-ACTIONS:{"actions":[{"type":"add_task","title":"...","xpVal":20}]}
-or: ACTIONS:{"actions":[{"type":"add_quest","title":"...","note":"...","questType":"main"}]}
-Types: add_task (fields: title, xpVal 5-100), add_quest (fields: title, note, questType: main/side/radiant)
+ACTIONS:{"actions":[{"type":"..."}]}
 
+Action types:
+- add_task: fields: title (string), xpVal (5-100), period ("daily"/"weekly"/"monthly")
+- add_quest: fields: title (string), note (string), questType ("main"/"side"/"radiant")
+- log_session: fields: sessionType ("mindfulness"/"presence"/"grounding"/"visualization"/"ritual"/"breathwork"/"contemplation"/"open"), duration (minutes, number), note (string)
+
+Examples:
+ACTIONS:{"actions":[{"type":"add_task","title":"Read 20 pages","xpVal":25,"period":"daily"}]}
+ACTIONS:{"actions":[{"type":"add_quest","title":"Finish chapter 3","note":"part of writing arc","questType":"side"}]}
+ACTIONS:{"actions":[{"type":"log_session","sessionType":"mindfulness","duration":20,"note":"morning sit"}]}
+
+Multiple actions allowed: ACTIONS:{"actions":[{"type":"add_task",...},{"type":"log_session",...}]}
 If not adding anything, do NOT include ACTIONS at all.`;
 
       const res=await fetch("/api/chat",{
@@ -1884,8 +1890,9 @@ If not adding anything, do NOT include ACTIONS at all.`;
         try{
           const parsed=JSON.parse(actionMatch[1]);
           for(const a of parsed.actions||[]){
-            if(a.type==="add_task") await onAddTask({title:a.title,xpVal:Number(a.xpVal)||20,skill:null});
+            if(a.type==="add_task") await onAddTask({title:a.title,xpVal:Number(a.xpVal)||20,period:a.period||"daily",skill:null});
             if(a.type==="add_quest") await onAddQuest({title:a.title,note:a.note||"",type:a.questType||"main",due:"",skills:[]});
+            if(a.type==="log_session") await onLogMed({type:a.sessionType||"open",dur:Number(a.duration)||20,note:a.note||"",skillIds:[],baseXp:Number(a.duration)||20});
           }
         }catch(e){}
         display=raw.split("ACTIONS:")[0].trim();
