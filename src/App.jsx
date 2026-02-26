@@ -456,7 +456,14 @@ export default function App(){
 
   useEffect(()=>{
     (async()=>{
-      const s=await sget("cx_settings"); if(s) setSettings(p=>deepMerge(p,s));
+      const s=await sget("cx_settings");
+      if(s){
+        const merged=deepMerge(DEFAULT_SETTINGS,s);
+        // guard against corrupted/white theme (bg should be a dark or valid hex)
+        if(!merged.theme?.bg||merged.theme.bg==="#ffffff"||merged.theme.bg==="white"||merged.theme.bg==="")
+          merged.theme=DEFAULT_SETTINGS.theme;
+        setSettings(merged);
+      }
       const t=await sget("cx_tasks");    if(t) setTasks(t);
       const q=await sget("cx_quests");   if(q) setQuests(q);
       const sk=await sget("cx_skills");  if(sk) setSkills(sk);
@@ -521,6 +528,7 @@ export default function App(){
   const deletePracticeType=async id=>{await savePT(practiceTypes.filter(t=>t.id!==id));};
   const saveS=async s=>{setSkills(s);await sset("cx_skills",s);};
   const reorderSkills=async newOrder=>{setSkills(newOrder);await sset("cx_skills",newOrder);};
+
   const saveStr=async s=>{setStreaks(s);await sset("cx_streaks",s);};
 
   const addTask=async d=>{
@@ -595,13 +603,22 @@ export default function App(){
   };
 
   const addSkill=async d=>{
-    await saveS([...skills,{id:uid(),name:d.name,icon:d.icon,color:d.color,xp:d.startXp||0}]);
-    showToast("Skill created");
+    await saveS([...skills,{id:uid(),name:d.name,icon:d.icon,color:d.color,xp:d.startXp||0,type:d.type||"skill",parentIds:d.parentIds||[]}]);
+    showToast(d.type==="subskill"?"Subskill created":"Skill created");
   };
   const addSkillBatch=async arr=>{
-    const newSkills=arr.map(d=>({id:uid(),name:d.name,icon:d.icon,color:d.color,xp:d.startXp||0,customImg:d.customImg||null}));
+    const newSkills=arr.map(d=>({id:uid(),name:d.name,icon:d.icon,color:d.color,xp:d.startXp||0,customImg:d.customImg||null,type:"skill",parentIds:[]}));
     await saveS([...skills,...newSkills]);
     showToast(`Added ${newSkills.length} skills`);
+  };
+  // Link/unlink a subskill to a parent skill
+  const linkSubskill=async(subId,parentId)=>{
+    const updated=skills.map(s=>{
+      if(s.id!==subId) return s;
+      const already=s.parentIds?.includes(parentId);
+      return {...s,parentIds:already?(s.parentIds||[]).filter(x=>x!==parentId):[...(s.parentIds||[]),parentId]};
+    });
+    await saveS(updated);
   };
   const deleteSkill=async id=>{
     setConfirm({msg:"Delete this skill?",sub:"All XP earned will be lost.",
@@ -613,28 +630,51 @@ export default function App(){
   };
 
   const logMed=async d=>{
-    const skillIds=d.skillIds||[]; const primary=skillIds[0]||null;
+    // If a subskill was selected, expand skillIds to include all parent skills
+    const subId=d.subskillId||null;
+    const sub=subId?skills.find(s=>s.id===subId&&s.type==="subskill"):null;
+    let skillIds=d.skillIds||[];
+    if(sub&&sub.parentIds?.length){
+      skillIds=[...new Set([...skillIds,...sub.parentIds])];
+    }
+    const primary=skillIds[0]||null;
     let newStr=streaks;
     for(const sid of skillIds){ newStr=updateStreak(newStr,sid); }
     if(skillIds.length) await saveStr(newStr);
-    const {amt,multiplier,leveledUp}=await award(d.baseXp,primary,xp,skills,newStr,d.type);
+    // Award XP to all parent skills (multi-skill distribution)
+    let curSkillsState=skills; let leveledUpAll=[];
+    const skPerLvLocal=settings.xp.skillPerLevel||6000;
+    const streak=primary?(newStr[primary]||{count:0}):{count:0};
+    const multiplier=getMultiplier(streak.count);
+    const amt=Math.round(d.baseXp*multiplier);
+    const nx=xp+amt; setXp(nx); await sset("cx_xp",nx);
+    for(const sid of skillIds){
+      curSkillsState=curSkillsState.map(s=>{
+        if(s.id!==sid) return s;
+        const oldLv=skillLv(s.xp,skPerLvLocal),newXp=s.xp+amt,newLv=skillLv(newXp,skPerLvLocal);
+        if(newLv>oldLv) leveledUpAll.push({name:s.name,level:newLv});
+        return {...s,xp:newXp};
+      });
+    }
+    if(skillIds.length){setSkills(curSkillsState);await sset("cx_skills",curSkillsState);}
+    const sk=curSkillsState.find(s=>s.id===primary);
+    await saveXpLog({id:uid(),amt,label:d.type+(sub?` · ${sub.name}`:""),skill:sk?.name||null,multiplier,created:Date.now()});
     const sessionCreated=d.sessionDate||Date.now();
-    const session={id:uid(),type:d.type,dur:d.dur,skillIds,note:d.note,
+    const session={id:uid(),type:d.type,dur:d.dur,skillIds,subskillId:subId,note:d.note,
       aiReason:d.aiReason,xpAwarded:amt,multiplier,created:sessionCreated};
     await saveM([session,...meds]);
     // Auto-save note to journal as a practice segment
     if(d.note&&d.note.trim()){
-      const sk=skills.filter(s=>skillIds.includes(s.id));
+      const sk=curSkillsState.filter(s=>skillIds.includes(s.id));
       const skLabel=sk.map(s=>`${s.icon} ${s.name}`).join(", ");
       const header=`[${d.type}${skLabel?` · ${skLabel}`:""}${d.dur?` · ${d.dur}min`:""}]`;
       const next=[{id:uid(),text:`${header}\n${d.note.trim()}`,img:null,source:"practice",created:sessionCreated},...journal];
       setJournal(next); await sset("cx_journal",next);
     }
-    const streak=newStr[primary]||{count:0};
     let msg=`+${amt} ${L.xpName}`;
     if(multiplier>1) msg+=` · ${streak.count}d ${L.comboName||"Combo"} ${multiplier}×`;
     showToast(msg);
-    if(leveledUp) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),600);
+    leveledUpAll.forEach((lu,i)=>setTimeout(()=>showToast(`◆ ${lu.name} Level ${lu.level}`),(i+1)*600));
     setPendingPractice(null);
   };
   const deleteMed=async id=>saveM(meds.filter(m=>m.id!==id));
@@ -689,7 +729,10 @@ export default function App(){
     {id:"settings", icon:"⚙", label:L.settingsTab},
   ];
 
-  if(!loaded) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",fontFamily:"\'DM Mono\',monospace",fontSize:10,letterSpacing:2,background:"#0c0c0c",color:"#555"}}>LOADING</div>;
+  if(!loaded) return <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,height:"100vh",fontFamily:"'DM Mono',monospace",fontSize:10,letterSpacing:2,background:"#0c0c0c",color:"#555"}}>
+    <span>LOADING</span>
+    <button onClick={()=>{localStorage.removeItem("cx_settings");window.location.reload();}} style={{background:"none",border:"1px solid #333",borderRadius:4,color:"#444",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1,padding:"6px 12px",cursor:"pointer"}}>reset theme if stuck</button>
+  </div>;
 
   return (
     <SettingsCtx.Provider value={{settings,saveSettings}}>
@@ -730,7 +773,7 @@ export default function App(){
           <main className="pg">
             {tab==="planner"  && <PlannerTab period={period} setPeriod={setPeriod} tasks={periodTasks()} weekDays={weekDays} allTasks={tasks} skills={skills} quests={quests} onAddTask={addTask} onToggle={toggleTask} onDelete={deleteTask} onEdit={editTask} onToggleQuest={toggleQuest}/>}
             {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest}/>}
-            {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill} onReorder={reorderSkills}/>}
+            {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill} onReorder={reorderSkills} onLink={linkSubskill}/>}
             {tab==="practice" && <PracticeTab meds={meds} skills={skills} streaks={streaks} pending={pendingPractice} practiceTypes={practiceTypes} onAddType={addPracticeType} onDeleteType={deletePracticeType} onLog={logMed} onDelete={deleteMed} onClearPending={()=>setPendingPractice(null)}/>}
             {tab==="journal"  && <JournalTab entries={journal} onAdd={addJournalEntry} onDelete={deleteJournalEntry}/>}
             {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} journal={journal} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest}/>}
@@ -1079,27 +1122,40 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
 
 const SKILL_ICONS_EXTRA = ["◈","◉","◎","◆","◬","✦","◌","◊","△","○","□","◇","❋","⊕","◐","◑","⬡","✧","⟡","◿","⚔","🧠","💪","🎯","🎨","📚","🎵","🌱","⚡","🔥","💎","🏆","🎭","🔬","🌟","✍","🎸","🏋","🧘","💻","🗺","🎲","⚙","🛡","🌊","🦾","🧩","🎤","📖","🌙"];
 
-function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,onEdit,onReorder}){
+function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,onEdit,onReorder,onLink}){
   const {settings}=useSettings(); const L=settings.labels;
-  const [showForm,setShowForm]=useState(false);
-  const [showPresets,setShowPresets]=useState(false);
+  const mainSkills=skills.filter(s=>s.type!=="subskill");
+  const subSkills=skills.filter(s=>s.type==="subskill");
+
+  // view state
+  const [viewMode,setViewMode]=useState("grid");
+  const [expandedId,setExpandedId]=useState(null);
   const [editingId,setEditingId]=useState(null);
-  const [dragIdx,setDragIdx]=useState(null);
-  const [dragOver,setDragOver]=useState(null);
-  const dragNode=useRef(null);
-  const [ef,setEf]=useState({name:"",icon:"◈",color:SKILL_COLORS[0]});
+  const [ef,setEf]=useState({name:"",icon:"◈",color:SKILL_COLORS[0],customImg:null});
+
+  // add form state (shared, type toggled)
+  const [showForm,setShowForm]=useState(false);
+  const [formType,setFormType]=useState("skill");
+  const [showPresets,setShowPresets]=useState(false);
   const [f,setF]=useState({name:"",icon:"◈",color:SKILL_COLORS[0],startLevel:1,customImg:null});
 
-  // build last-14-days activity map per skill
+  // drag state — two modes:
+  //   "reorder": dragging within same section to reorder
+  //   "link":    dragging a subskill onto a skill to link/unlink
+  const [dragId,setDragId]=useState(null);
+  const [dragType,setDragType]=useState(null); // "skill"|"subskill"
+  const [dragOverId,setDragOverId]=useState(null);
+  const [linkTarget,setLinkTarget]=useState(null); // skill id being hovered for linking
+
+  // 14-day activity map
   const activityMap=useMemo(()=>{
-    const map={};
-    const now=Date.now(); const DAY=86400000;
+    const map={}; const now=Date.now(); const DAY=86400000;
     skills.forEach(s=>{
       const days=[];
       for(let i=13;i>=0;i--){
-        const dayStart=new Date(now-i*DAY); dayStart.setHours(0,0,0,0);
-        const dayEnd=new Date(dayStart); dayEnd.setHours(23,59,59,999);
-        const mins=meds.filter(m=>(m.skillIds||[]).includes(s.id)&&m.created>=dayStart.getTime()&&m.created<=dayEnd.getTime()).reduce((a,m)=>a+m.dur,0);
+        const ds=new Date(now-i*DAY); ds.setHours(0,0,0,0);
+        const de=new Date(ds); de.setHours(23,59,59,999);
+        const mins=meds.filter(m=>(m.skillIds||[]).includes(s.id)&&m.created>=ds.getTime()&&m.created<=de.getTime()).reduce((a,m)=>a+m.dur,0);
         days.push(mins);
       }
       map[s.id]=days;
@@ -1110,34 +1166,10 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
   const submit=()=>{
     if(!f.name.trim()) return;
     const startXp=(Math.max(1,Number(f.startLevel)||1)-1)*skPerLv;
-    onAdd({name:f.name.trim(),icon:f.icon,color:f.color,startXp,customImg:f.customImg||null});
+    onAdd({name:f.name.trim(),icon:f.icon,color:f.color,startXp,customImg:f.customImg||null,type:formType,parentIds:[]});
     setF({name:"",icon:"◈",color:SKILL_COLORS[0],startLevel:1,customImg:null}); setShowForm(false);
   };
-  const onDragStart=(e,i)=>{
-    dragNode.current=e.currentTarget;
-    setDragIdx(i);
-    e.dataTransfer.effectAllowed="move";
-    setTimeout(()=>{ if(dragNode.current) dragNode.current.style.opacity="0.35"; },0);
-  };
-  const onDragEnter=(_e,i)=>setDragOver(i);
-  const onDragOver=e=>e.preventDefault();
-  const onDragEnd=()=>{
-    if(dragNode.current) dragNode.current.style.opacity="1";
-    setDragIdx(null); setDragOver(null); dragNode.current=null;
-  };
-  const onDrop=(e,i)=>{
-    e.preventDefault();
-    if(dragIdx===null||dragIdx===i){onDragEnd();return;}
-    const next=[...skills];
-    const [moved]=next.splice(dragIdx,1);
-    next.splice(i,0,moved);
-    onReorder(next);
-    onDragEnd();
-  };
-  const openEdit=s=>{
-    setEf({name:s.name,icon:s.icon,color:s.color,customImg:s.customImg||null});
-    setEditingId(s.id);
-  };
+  const openEdit=s=>{setEf({name:s.name,icon:s.icon,color:s.color,customImg:s.customImg||null});setEditingId(s.id);};
   const submitEdit=()=>{
     if(!ef.name.trim()) return;
     onEdit(editingId,{name:ef.name.trim(),icon:ef.icon,color:ef.color,customImg:ef.customImg||null});
@@ -1154,66 +1186,221 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
     setShowPresets(false);
   };
 
+  // ── drag handlers ──────────────────────────────────────────────────────────
+  const handleDragStart=(e,id,type)=>{
+    setDragId(id); setDragType(type);
+    e.dataTransfer.effectAllowed="move";
+    setTimeout(()=>{const el=document.getElementById("sk-"+id);if(el)el.style.opacity="0.35";},0);
+  };
+  const handleDragEnd=()=>{
+    const el=document.getElementById("sk-"+dragId);if(el)el.style.opacity="1";
+    setDragId(null); setDragType(null); setDragOverId(null); setLinkTarget(null);
+  };
+  const handleDragOverSkill=(e,id)=>{
+    e.preventDefault();
+    if(dragType==="subskill") setLinkTarget(id);
+    else setDragOverId(id);
+  };
+  const handleDragOverSub=(e,id)=>{
+    e.preventDefault();
+    if(dragType==="subskill") setDragOverId(id);
+  };
+  const handleDropOnSkill=(e,targetId)=>{
+    e.preventDefault();
+    if(dragType==="subskill"&&dragId&&targetId){
+      onLink(dragId,targetId); // toggle link
+    } else if(dragType==="skill"&&dragId&&dragId!==targetId){
+      const arr=[...mainSkills];
+      const from=arr.findIndex(s=>s.id===dragId);
+      const to=arr.findIndex(s=>s.id===targetId);
+      if(from!==-1&&to!==-1){const [m]=arr.splice(from,1);arr.splice(to,0,m);onReorder([...arr,...subSkills]);}
+    }
+    handleDragEnd();
+  };
+  const handleDropOnSub=(e,targetId)=>{
+    e.preventDefault();
+    if(dragType==="subskill"&&dragId&&dragId!==targetId){
+      const arr=[...subSkills];
+      const from=arr.findIndex(s=>s.id===dragId);
+      const to=arr.findIndex(s=>s.id===targetId);
+      if(from!==-1&&to!==-1){const [m]=arr.splice(from,1);arr.splice(to,0,m);onReorder([...mainSkills,...arr]);}
+    }
+    handleDragEnd();
+  };
+
+  // ── shared form renderer ───────────────────────────────────────────────────
+  const renderForm=()=>(<div className="fwrap">
+    <div style={{display:"flex",gap:6,marginBottom:10}}>
+      {["skill","subskill"].map(t=>(
+        <button key={t} onClick={()=>setFormType(t)}
+          style={{flex:1,padding:"6px 0",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,textTransform:"uppercase",
+            background:formType===t?"var(--primary)":"var(--bg)",color:formType===t?"#000":"var(--tx3)",
+            border:`1px solid ${formType===t?"var(--primary)":"var(--b2)"}`,borderRadius:3,cursor:"pointer"}}>
+          {t}
+        </button>
+      ))}
+    </div>
+    <div className="frow"><input className="fi full" placeholder={formType==="subskill"?"e.g. Breathwork, HIIT, Focus blocks...":"e.g. Guitar, Spanish, CS2..."} autoFocus value={f.name} onChange={e=>setF(v=>({...v,name:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
+    {formType==="skill"&&<div className="frow" style={{alignItems:"center",gap:8}}>
+      <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,textTransform:"uppercase",color:"var(--tx3)",flexShrink:0}}>Starting {L.levelName}</div>
+      <input className="fi" type="number" min={1} max={99} style={{maxWidth:65,textAlign:"center"}} value={f.startLevel} onChange={e=>setF(v=>({...v,startLevel:e.target.value}))}/>
+      <div style={{fontSize:11,color:"var(--tx3)",fontStyle:"italic",flex:1}}>{Number(f.startLevel)>1?`Pre-loads ${((Number(f.startLevel)||1)-1)*skPerLv} ${L.xpName}`:"Starting fresh"}</div>
+    </div>}
+    <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:7,marginTop:4}}>Icon</div>
+    <div className="icon-grid">{SKILL_ICONS_EXTRA.map(ic=><button key={ic} className={`icon-opt ${f.icon===ic?"on":""}`} onClick={()=>setF(v=>({...v,icon:ic,customImg:null}))}>{ic}</button>)}</div>
+    <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5}}>Or upload image</div>
+    <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",marginBottom:8}}>
+      {f.customImg?<img src={f.customImg} style={{width:32,height:32,borderRadius:4,objectFit:"cover",border:"1px solid var(--b2)"}}/>:<span style={{fontSize:11,color:"var(--tx3)"}}>No image</span>}
+      <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>handleImg(e,setF)}/>
+      <span className="fsbtn" style={{width:"auto",padding:"4px 10px",margin:0,fontSize:9}}>Choose</span>
+      {f.customImg&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setF(v=>({...v,customImg:null,icon:"◈"}))}>✕</button>}
+    </label>
+    <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:7}}>Color</div>
+    <div className="color-grid">{SKILL_COLORS.map(c=><div key={c} className={`color-opt ${f.color===c?"on":""}`} style={{background:c}} onClick={()=>setF(v=>({...v,color:c}))}/>)}</div>
+    <button className="fsbtn" onClick={submit}>Create {formType}</button>
+  </div>);
+
+  // ── skill card renderer ────────────────────────────────────────────────────
+  const renderSkillCard=(s,i,section)=>{
+    const lv=skillLv(s.xp,skPerLv),pg=skillProg(s.xp,skPerLv),cur=s.xp%skPerLv;
+    const streak=streaks[s.id]||{count:0}; const mult=getMultiplier(streak.count);
+    const days=activityMap[s.id]||[]; const maxMins=Math.max(...days,1);
+    const isExpanded=expandedId===s.id;
+    const isLinkHover=linkTarget===s.id&&dragType==="subskill";
+    const isReorderHover=dragOverId===s.id&&dragType===section;
+    const linked=section==="skill"?subSkills.filter(ss=>(ss.parentIds||[]).includes(s.id)):[];
+    const parents=section==="subskill"?(s.parentIds||[]).map(pid=>skills.find(sk=>sk.id===pid)).filter(Boolean):[];
+
+    if(viewMode==="list"){
+      return (
+        <div key={s.id} id={"sk-"+s.id}
+          draggable onDragStart={e=>handleDragStart(e,s.id,section)}
+          onDragOver={e=>section==="skill"?handleDragOverSkill(e,s.id):handleDragOverSub(e,s.id)}
+          onDrop={e=>section==="skill"?handleDropOnSkill(e,s.id):handleDropOnSub(e,s.id)}
+          onDragEnd={handleDragEnd}
+          onClick={()=>setExpandedId(isExpanded?null:s.id)}
+          style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",
+            background:"var(--s1)",border:`1px solid ${isLinkHover?s.color:isReorderHover?s.color+"44":"var(--b1)"}`,
+            borderRadius:"var(--r)",marginBottom:4,cursor:"pointer",transition:"border-color .15s",
+            borderStyle:isLinkHover?"dashed":"solid"}}>
+          <span style={{color:"var(--tx3)",fontSize:9,flexShrink:0}}>⠿</span>
+          {s.customImg?<img src={s.customImg} style={{width:14,height:14,borderRadius:2,objectFit:"cover"}}/>:<span style={{color:s.color,fontSize:13,flexShrink:0}}>{s.icon}</span>}
+          <span style={{flex:1,fontFamily:"'DM Mono',monospace",fontSize:10,color:"var(--tx)"}}>{s.name}</span>
+          {streak.count>=3&&<span className="sk-streak" style={{fontSize:8}}>{streak.count}d{mult>1?` ${mult}×`:""}</span>}
+          <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)",flexShrink:0}}>{L.levelName} {lv}</span>
+          <div style={{width:60,height:4,background:"var(--b1)",borderRadius:2,flexShrink:0}}>
+            <div style={{width:`${pg}%`,height:"100%",background:s.color,borderRadius:2}}/>
+          </div>
+          {section==="subskill"&&parents.length>0&&<div style={{display:"flex",gap:3}}>
+            {parents.map(p=><span key={p.id} style={{color:p.color,fontSize:10}} title={p.name}>{p.icon}</span>)}
+          </div>}
+          <button className="sk-delbtn" style={{marginLeft:2}} onClick={e=>{e.stopPropagation();openEdit(s);}}>✎</button>
+          <button className="sk-delbtn" onClick={e=>{e.stopPropagation();onDelete(s.id);}}>✕</button>
+        </div>
+      );
+    }
+
+    // grid card
+    return (
+      <div key={s.id} id={"sk-"+s.id}
+        draggable onDragStart={e=>handleDragStart(e,s.id,section)}
+        onDragOver={e=>section==="skill"?handleDragOverSkill(e,s.id):handleDragOverSub(e,s.id)}
+        onDrop={e=>section==="skill"?handleDropOnSkill(e,s.id):handleDropOnSub(e,s.id)}
+        onDragEnd={handleDragEnd}
+        style={{transition:"transform .12s",transform:isReorderHover?(i<(dragOverId?mainSkills.findIndex(x=>x.id===dragOverId):0)?"translateY(-4px)":"translateY(4px)"):"none"}}>
+        <div className="skill-card" style={{borderColor:isLinkHover?s.color:isReorderHover?s.color+"44":"",borderStyle:isLinkHover?"dashed":"solid",cursor:"default"}}>
+          <div className="sk-hdr">
+            <div className="sk-name" style={{gap:5}}>
+              <span style={{color:"var(--tx3)",fontSize:9,cursor:"grab",userSelect:"none",flexShrink:0}} title="Drag to reorder">⠿</span>
+              {s.customImg?<img src={s.customImg} style={{width:14,height:14,borderRadius:2,objectFit:"cover"}}/>:<span style={{color:s.color,fontSize:14}}>{s.icon}</span>}
+              <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.name}</span>
+            </div>
+            <div className="sk-meta">
+              {streak.count>=3&&<span className="sk-streak">{streak.count}d{mult>1?` ${mult}×`:""}</span>}
+              <div className="sk-lv">{L.levelName} <span>{lv}</span></div>
+              <button className="sk-delbtn" style={{marginLeft:2}} onClick={()=>openEdit(s)}>✎</button>
+              <button className="sk-delbtn" onClick={()=>onDelete(s.id)}>✕</button>
+            </div>
+          </div>
+          <div className="sk-bar-wrap"><div className="sk-bar" style={{width:`${pg}%`,background:s.color}}/></div>
+          <div className="sk-xprow">
+            <span className="sk-xplbl">{cur}/{skPerLv} {L.xpName}</span>
+            <span className="sk-xplbl">{s.xp} total</span>
+          </div>
+          {/* parent tags for subskills */}
+          {section==="subskill"&&(<div style={{display:"flex",flexWrap:"wrap",gap:3,marginTop:5}}>
+            {parents.length===0
+              ? <span style={{fontSize:9,color:"var(--tx3)",fontStyle:"italic"}}>not linked — drag onto a skill</span>
+              : parents.map(p=><span key={p.id} style={{fontSize:9,color:p.color,background:p.color+"18",border:`1px solid ${p.color}44`,borderRadius:10,padding:"1px 6px"}}>{p.icon} {p.name}</span>)}
+          </div>)}
+          {/* expand toggle */}
+          <button onClick={()=>setExpandedId(isExpanded?null:s.id)}
+            style={{background:"none",border:"none",width:"100%",textAlign:"center",color:"var(--tx3)",fontSize:9,cursor:"pointer",padding:"4px 0 0",letterSpacing:1}}>
+            {isExpanded?"▲ less":"▼ more"}
+          </button>
+          {isExpanded&&(<div style={{marginTop:6,paddingTop:6,borderTop:"1px solid var(--b1)"}}>
+            {/* 14-day chart */}
+            <div style={{display:"flex",alignItems:"flex-end",gap:2,height:24}}>
+              {days.map((m,di)=>{
+                const h=m===0?2:Math.max(4,Math.round((m/maxMins)*22));
+                return <div key={di} title={`${m}min`} style={{flex:1,height:h,borderRadius:1,background:di===13?s.color:s.color+"55",transition:"height .2s"}}/>;
+              })}
+            </div>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",marginTop:2,marginBottom:6,textAlign:"right"}}>14d activity</div>
+            {/* linked items */}
+            {section==="skill"&&linked.length>0&&(<>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:1.5,textTransform:"uppercase",color:"var(--tx3)",marginBottom:4}}>Subskills</div>
+              {linked.map(ss=><div key={ss.id} style={{display:"flex",alignItems:"center",gap:6,padding:"3px 0",borderBottom:"1px solid var(--b1)"}}>
+                <span style={{color:ss.color,fontSize:11}}>{ss.icon}</span>
+                <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"var(--tx2)",flex:1}}>{ss.name}</span>
+                <button onClick={()=>onLink(ss.id,s.id)} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:9}} title="Unlink">✕</button>
+              </div>)}
+            </>)}
+            {section==="skill"&&linked.length===0&&<div style={{fontSize:9,color:"var(--tx3)",fontStyle:"italic"}}>No subskills linked. Drag a subskill here.</div>}
+          </div>)}
+        </div>
+      </div>
+    );
+  };
+
   return (<>
     <div className="slbl">{L.skillsTab}</div>
     <div className="sk-quote">
       <div className="sk-quote-text">"Every shortcut you take, every session you skip, every number you inflate — you're not fooling the system. You're just lying to the only person whose opinion of you actually matters."</div>
       <div className="sk-quote-attr">— The only opponent on this stat sheet is you</div>
     </div>
-    <p style={{fontSize:12,color:"var(--tx2)",fontStyle:"italic",marginBottom:14,lineHeight:1.5}}>{L.skillsDesc}</p>
-    {showForm?(
-      <div className="fwrap">
-        <div className="frow"><input className="fi full" placeholder="e.g. Guitar, Spanish, CS2..." autoFocus value={f.name} onChange={e=>setF(v=>({...v,name:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
-        <div className="frow" style={{alignItems:"center",gap:8}}>
-          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,textTransform:"uppercase",color:"var(--tx3)",flexShrink:0}}>Starting {L.levelName}</div>
-          <input className="fi" type="number" min={1} max={99} style={{maxWidth:65,textAlign:"center"}} value={f.startLevel} onChange={e=>setF(v=>({...v,startLevel:e.target.value}))}/>
-          <div style={{fontSize:11,color:"var(--tx3)",fontStyle:"italic",flex:1}}>{Number(f.startLevel)>1?`Pre-loads ${((Number(f.startLevel)||1)-1)*skPerLv} ${L.xpName}`:"Starting fresh"}</div>
-        </div>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:7,marginTop:4}}>Icon</div>
-        <div className="icon-grid">{SKILL_ICONS_EXTRA.map(ic=><button key={ic} className={`icon-opt ${f.icon===ic?"on":""}`} onClick={()=>setF(v=>({...v,icon:ic,customImg:null}))}>{ic}</button>)}</div>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5}}>Or upload image</div>
-        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",marginBottom:8}}>
-          {f.customImg?<img src={f.customImg} style={{width:32,height:32,borderRadius:4,objectFit:"cover",border:"1px solid var(--b2)"}}/>:<span style={{fontSize:11,color:"var(--tx3)"}}>No image</span>}
-          <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>handleImg(e,setF)}/>
-          <span className="fsbtn" style={{width:"auto",padding:"4px 10px",margin:0,fontSize:9}}>Choose</span>
-          {f.customImg&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setF(v=>({...v,customImg:null,icon:"◈"}))}>✕ clear</button>}
-        </label>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:7}}>Color</div>
-        <div className="color-grid">{SKILL_COLORS.map(c=><div key={c} className={`color-opt ${f.color===c?"on":""}`} style={{background:c}} onClick={()=>setF(v=>({...v,color:c}))}/>)}</div>
-        <button className="fsbtn" onClick={submit}>Create Skill</button>
-      </div>
-    ):(
-      <div style={{display:"flex",gap:6,marginBottom:12}}>
-        <button className="addbtn" style={{flex:1,margin:0}} onClick={()=>setShowForm(true)}><span>+</span> Create skill</button>
-        <button className="addbtn" style={{flex:"none",margin:0,padding:"0 12px",borderColor:"var(--b2)",color:"var(--tx3)"}} onClick={()=>setShowPresets(v=>!v)}>presets</button>
-      </div>
-    )}
+    {/* toolbar */}
+    <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"center"}}>
+      {!showForm&&<><button className="addbtn" style={{flex:1,margin:0}} onClick={()=>{setFormType("skill");setShowForm(true);}}><span>+</span> Skill</button>
+      <button className="addbtn" style={{flex:1,margin:0,borderColor:"var(--b2)",color:"var(--tx3)"}} onClick={()=>{setFormType("subskill");setShowForm(true);}}><span>+</span> Subskill</button>
+      <button className="addbtn" style={{flex:"none",margin:0,padding:"0 10px",borderColor:"var(--b2)",color:"var(--tx3)"}} onClick={()=>setShowPresets(v=>!v)}>presets</button></>}
+      <button onClick={()=>setViewMode(v=>v==="grid"?"list":"grid")}
+        style={{background:"none",border:"1px solid var(--b2)",borderRadius:3,padding:"5px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)",flexShrink:0}}>
+        {viewMode==="grid"?"≡ list":"▦ grid"}
+      </button>
+    </div>
+
+    {showForm&&<>{renderForm()}<button className="fsbtn" style={{marginTop:4}} onClick={()=>setShowForm(false)}>Cancel</button></>}
+
     {showPresets&&!showForm&&(
       <div className="fwrap" style={{marginBottom:10}}>
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:10}}>Skill presets</div>
         {SKILL_PRESETS.map(p=>(
           <div key={p.name} style={{background:"var(--bg)",border:"1px solid var(--b1)",borderRadius:4,padding:"10px 12px",marginBottom:6}}>
             <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1,color:"var(--tx2)",marginBottom:7}}>{p.name}</div>
-            <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
-              {p.skills.map(s=><span key={s.name} style={{color:s.color,fontSize:11}}>{s.icon} {s.name}</span>)}
-            </div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>{p.skills.map(s=><span key={s.name} style={{color:s.color,fontSize:11}}>{s.icon} {s.name}</span>)}</div>
             <button className="fsbtn secondary" style={{margin:0,padding:"6px 12px",width:"auto",fontSize:10}} onClick={()=>applyPreset(p)}>Add these skills</button>
           </div>
         ))}
         <button className="fsbtn" style={{marginTop:4}} onClick={()=>setShowPresets(false)}>Close</button>
       </div>
     )}
-    {skills.length===0&&!showForm&&!showPresets&&(
-      <div style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"16px",textAlign:"center",marginBottom:12}}>
-        <div style={{fontSize:24,marginBottom:8}}>◈</div>
-        <div style={{fontSize:13,color:"var(--tx2)",marginBottom:4}}>No skills yet</div>
-        <div style={{fontSize:11,color:"var(--tx3)",lineHeight:1.5,marginBottom:10}}>Skills are the dimensions you're developing. Define them yourself — or load a preset to get started quickly.</div>
-      </div>
-    )}
+
+    {/* edit form */}
     {editingId&&(()=>{
       const es=skills.find(s=>s.id===editingId); if(!es) return null;
       return (<div className="fwrap" style={{marginBottom:12}}>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:10}}>Edit skill</div>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:10}}>Edit {es.type||"skill"}</div>
         <input className="fi full" value={ef.name} onChange={e=>setEf(v=>({...v,name:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submitEdit()}/>
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:7,marginTop:8}}>Icon</div>
         <div className="icon-grid">{SKILL_ICONS_EXTRA.map(ic=><button key={ic} className={`icon-opt ${ef.icon===ic?"on":""}`} onClick={()=>setEf(v=>({...v,icon:ic,customImg:null}))}>{ic}</button>)}</div>
@@ -1227,59 +1414,33 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:7}}>Color</div>
         <div className="color-grid">{SKILL_COLORS.map(c=><div key={c} className={`color-opt ${ef.color===c?"on":""}`} style={{background:c}} onClick={()=>setEf(v=>({...v,color:c}))}/>)}</div>
         <div style={{display:"flex",gap:6}}>
-          <button className="fsbtn" style={{flex:1,marginTop:4}} onClick={submitEdit}>Save changes</button>
+          <button className="fsbtn" style={{flex:1,marginTop:4}} onClick={submitEdit}>Save</button>
           <button className="fsbtn" style={{flex:"none",width:"auto",padding:"8px 12px",marginTop:4}} onClick={()=>setEditingId(null)}>Cancel</button>
         </div>
       </div>);
     })()}
-    {skills.map((s,i)=>{
-      const lv=skillLv(s.xp,skPerLv), pg=skillProg(s.xp,skPerLv), cur=s.xp%skPerLv;
-      const streak=streaks[s.id]||{count:0}; const mult=getMultiplier(streak.count);
-      const days=activityMap[s.id]||[];
-      const maxMins=Math.max(...days,1);
-      const isDragging=dragIdx===i;
-      const isOver=dragOver===i&&dragIdx!==i;
-      return (
-        <div key={s.id}
-          draggable
-          onDragStart={e=>onDragStart(e,i)}
-          onDragEnter={e=>onDragEnter(e,i)}
-          onDragOver={onDragOver}
-          onDragEnd={onDragEnd}
-          onDrop={e=>onDrop(e,i)}
-          style={{transition:"transform .15s",transform:isOver?(dragIdx<i?"translateY(4px)":"translateY(-4px)"):"translateY(0)",cursor:"grab"}}
-        >
-          <div className="skill-card" style={{borderColor:isOver?s.color+"88":"",borderStyle:isOver?"dashed":""}}>
-            <div className="sk-hdr">
-              <div className="sk-name" style={{gap:6}}>
-                <span style={{color:"var(--tx3)",fontSize:11,cursor:"grab",userSelect:"none",flexShrink:0}} title="Drag to reorder">⠿</span>
-                {s.customImg?<img src={s.customImg} style={{width:16,height:16,borderRadius:2,objectFit:"cover",verticalAlign:"middle"}}/>:<span style={{color:s.color,fontSize:15}}>{s.icon}</span>}
-                {" "}{s.name}
-              </div>
-              <div className="sk-meta">
-                {streak.count>=3&&<span className="sk-streak">{streak.count}d {mult>1?`${mult}×`:""}</span>}
-                <div className="sk-lv">{L.levelName} <span>{lv}</span></div>
-                <button className="sk-delbtn" style={{marginLeft:2}} onClick={()=>openEdit(s)}>✎</button>
-                <button className="sk-delbtn" onClick={()=>onDelete(s.id)}>✕</button>
-              </div>
-            </div>
-            <div className="sk-bar-wrap"><div className="sk-bar" style={{width:`${pg}%`,background:s.color}}/></div>
-            <div className="sk-xprow">
-              <span className="sk-xplbl">{cur} / {skPerLv} {L.xpName} this level</span>
-              <span className="sk-xplbl">{s.xp} total</span>
-            </div>
-            <div style={{display:"flex",alignItems:"flex-end",gap:2,height:24,marginTop:8}}>
-              {days.map((m,di)=>{
-                const h=m===0?2:Math.max(4,Math.round((m/maxMins)*22));
-                const isToday=di===13;
-                return <div key={di} title={`${m}min`} style={{flex:1,height:h,borderRadius:1,background:isToday?s.color:s.color+"55",transition:"height .2s"}}/>;
-              })}
-            </div>
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",marginTop:3,textAlign:"right"}}>14d activity</div>
-          </div>
-        </div>
-      );
-    })}
+
+    {/* ── SKILLS section ───────────────────────────────────────────── */}
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+      <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)"}}>Skills</div>
+      <div style={{fontSize:9,color:"var(--tx3)"}}>{mainSkills.length} total</div>
+    </div>
+    {mainSkills.length===0&&!showForm&&<div style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:12,textAlign:"center",marginBottom:10,fontSize:11,color:"var(--tx3)"}}>No skills yet — create one above or load a preset</div>}
+    <div style={viewMode==="grid"?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}:{marginBottom:16}}>
+      {mainSkills.map((s,i)=>renderSkillCard(s,i,"skill"))}
+    </div>
+
+    {/* ── SUBSKILLS section ─────────────────────────────────────────── */}
+    <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6,marginTop:4}}>
+      <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)"}}>Subskills</div>
+      <div style={{fontSize:9,color:"var(--tx3)"}}>{subSkills.length} total · drag onto a skill to link</div>
+    </div>
+    {subSkills.length===0&&<div style={{background:"var(--s1)",border:"1px dashed var(--b1)",borderRadius:"var(--r)",padding:12,textAlign:"center",marginBottom:10,fontSize:11,color:"var(--tx3)"}}>Subskills are cross-disciplinary practices — create one then drag it onto any skill to link XP</div>}
+    <div style={viewMode==="grid"?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}:{marginBottom:12}}>
+      {subSkills.map((s,i)=>renderSkillCard(s,i,"subskill"))}
+    </div>
+
+    {/* XP log */}
     {xpLog&&xpLog.length>0&&<>
       <div className="gap"/>
       <div className="slbl">Recent XP</div>
@@ -1307,7 +1468,7 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
   const [xpPreview,setXpPreview]=useState(null);
   const [xpPrevLoad,setXpPrevLoad]=useState(false);
   const [newType,setNewType]=useState({label:"",icon:"◎"});
-  const [f,setF]=useState({typeId:"",skillIds:[],dur:15,note:"",sessionDate:"",sessionTime:"",showDate:false});
+  const [f,setF]=useState({typeId:"",skillIds:[],subskillId:null,dur:15,note:"",sessionDate:"",sessionTime:"",showDate:false});
 
   const toggleSkill=id=>setF(v=>({...v,skillIds:v.skillIds.includes(id)?v.skillIds.filter(s=>s!==id):[...v.skillIds,id]}));
 
@@ -1347,7 +1508,7 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
     }
     let sessionDate=null;
     if(f.showDate&&f.sessionDate) sessionDate=new Date(`${f.sessionDate}${f.sessionTime?"T"+f.sessionTime:"T12:00"}`).getTime();
-    await onLog({type:f.typeId,skillIds:f.skillIds,dur:f.dur,note:f.note.trim(),baseXp,aiReason,sessionDate});
+    await onLog({type:f.typeId,skillIds:f.skillIds,subskillId:f.subskillId,dur:f.dur,note:f.note.trim(),baseXp,aiReason,sessionDate});
     setF(v=>({...v,note:"",sessionDate:"",sessionTime:"",showDate:false}));
     setShowForm(false);
   };
@@ -1451,15 +1612,32 @@ Suggest fair XP and a short reason. Reply ONLY with JSON, no markdown: {"xp": NU
             <button className="fsbtn" style={{width:"auto",padding:"7px 10px",margin:0}} onClick={()=>setShowTypeForm(false)}>✕</button>
           </div>
         )}
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:7}}>Skills (optional)</div>
-        <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:10}}>
-          {skills.map(s=>(
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5}}>Skills (optional)</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:6}}>
+          {skills.filter(s=>s.type!=="subskill").map(s=>(
             <button key={s.id} onClick={()=>toggleSkill(s.id)}
               style={{background:f.skillIds.includes(s.id)?s.color+"22":"var(--bg)",border:`1px solid ${f.skillIds.includes(s.id)?s.color+"66":"var(--b2)"}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:.8,color:f.skillIds.includes(s.id)?s.color:"var(--tx3)",transition:"all .15s"}}>
               {s.icon} {s.name}
             </button>
           ))}
         </div>
+        {skills.filter(s=>s.type==="subskill").length>0&&<>
+          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5,marginTop:4}}>Or log a subskill <span style={{fontWeight:"normal",textTransform:"none",letterSpacing:0}}>(XP goes to all linked skills)</span></div>
+          <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:10}}>
+            {skills.filter(s=>s.type==="subskill").map(s=>{
+              const isSelected=f.subskillId===s.id;
+              const parents=(s.parentIds||[]).map(pid=>skills.find(sk=>sk.id===pid)).filter(Boolean);
+              return (
+                <button key={s.id}
+                  onClick={()=>setF(v=>({...v,subskillId:isSelected?null:s.id,skillIds:isSelected?v.skillIds:(s.parentIds||[])}))}
+                  style={{background:isSelected?s.color+"22":"var(--bg)",border:`1px solid ${isSelected?s.color+"66":"var(--b2)"}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:.8,color:isSelected?s.color:"var(--tx3)",transition:"all .15s",display:"flex",alignItems:"center",gap:4}}>
+                  <span>{s.icon} {s.name}</span>
+                  {parents.length>0&&<span style={{opacity:.6}}>{parents.map(p=>p.icon).join("")}</span>}
+                </button>
+              );
+            })}
+          </div>
+        </>}
         <div className="dur-hdr">
           <span>Duration</span>
           <div style={{display:"flex",alignItems:"center",gap:6}}>
