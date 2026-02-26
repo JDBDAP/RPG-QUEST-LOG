@@ -78,7 +78,7 @@ const useSettings = () => useContext(SettingsCtx);
 
 const DEFAULT_SETTINGS = {
   appName: "",
-  profile: { name: "", setup: false },
+  profile: { name: "", setup: false, public: false, friendCode: "", digestEnabled: false },
   labels: {
     plannerTab:"Planner", questsTab:"Quests", skillsTab:"Skills",
     practiceTab:"Practice", advisorTab:"Advisor", settingsTab:"Settings", journalTab:"Journal",
@@ -120,6 +120,16 @@ const PALETTES = [
 ];
 
 const SKILL_ICONS  = ["◈","◉","◎","◆","◬","✦","◌","◊","△","○","□","◇","❋","⊕","◐","◑","⬡","✧","⟡","◿"];
+const SKILL_CATEGORIES = [
+  {id:"fitness",    label:"Fitness",      icon:"💪"},
+  {id:"creativity", label:"Creativity",   icon:"✦"},
+  {id:"spirituality",label:"Spirituality",icon:"◉"},
+  {id:"learning",   label:"Learning",     icon:"◎"},
+  {id:"finance",    label:"Finance",      icon:"◆"},
+  {id:"social",     label:"Social",       icon:"◈"},
+  {id:"productivity",label:"Productivity",icon:"□"},
+  {id:"other",      label:"Other",        icon:"◇"},
+];
 const SKILL_COLORS = [
   // Muted (original palette)
   "#6a8fb5","#6a9e6a","#9e6ab5","#c8a96e","#5b9e9e","#b5906a",
@@ -242,6 +252,34 @@ function deepMerge(def,saved){
 
 async function sget(k){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch{ return null; } }
 async function sset(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch{} }
+
+// ── COMMUNITY / MULTIPLAYER STORAGE ────────────────────────────────────────
+function genFriendCode(userId){
+  // deterministic short code from userId
+  let h=0;
+  for(let i=0;i<userId.length;i++) h=(Math.imul(31,h)+userId.charCodeAt(i))|0;
+  return (Math.abs(h)%1000000).toString().padStart(6,"0");
+}
+
+async function communitySet(userId,data){
+  try{ await window.storage.set("profile:"+userId,JSON.stringify(data),true); }catch(e){console.warn("community write",e);}
+}
+async function communityGet(userId){
+  try{ const r=await window.storage.get("profile:"+userId,true); return r?JSON.parse(r.value):null; }catch{ return null; }
+}
+async function communityList(){
+  try{
+    const r=await window.storage.list("profile:",true);
+    if(!r?.keys) return [];
+    const results=await Promise.all(r.keys.map(async k=>{
+      try{ const v=await window.storage.get(k,true); return v?JSON.parse(v.value):null; }catch{ return null; }
+    }));
+    return results.filter(Boolean);
+  }catch(e){ console.warn("community list",e); return []; }
+}
+async function communityDelete(userId){
+  try{ await window.storage.delete("profile:"+userId,true); }catch{}
+}
 
 // Map cx_ keys to Supabase column names
 const KEY_MAP={
@@ -520,6 +558,20 @@ function Collapsible({question,children}){
   );
 }
 
+function CommunityTab({userId,settings,skills,quests,meds,journal,streaks,xp,friends,myFriendCode,profiles,onPublishProfile,onAddFriend,onRemoveFriend,onRefresh,onEditSkillPublish,onEditQuestPublish,onSaveSettings,showToast}){
+  const {settings:s}=useSettings(); const L=s.labels;
+  return (
+    <div style={{paddingBottom:8}}>
+      <div className="slbl" style={{marginBottom:12}}>⬡ Community</div>
+      <div className="empty-state">
+        <div className="es-icon">⬡</div>
+        <div className="es-title">Coming Soon</div>
+        <div className="es-desc">The community board is under construction. Share your progress, find practice partners, and see how others are building their skills.</div>
+      </div>
+    </div>
+  );
+}
+
 export default function App(){
   const [session,setSession]=useState(null);
   const [userId,setUserId]=useState(null);
@@ -544,6 +596,10 @@ export default function App(){
   const [journal,setJournal]=useState([]);
   const [xpLog,setXpLog]=useState([]);
   const [showReview,setShowReview]=useState(false);
+  const [showCommunity,setShowCommunity]=useState(false);
+  const [friends,setFriends]=useState([]); // [{userId,name,code}]
+  const [communityProfiles,setCommunityProfiles]=useState([]);
+  const [myFriendCode,setMyFriendCode]=useState("");
   const toastRef=useRef(null);
 
   // Load data from Supabase if logged in, otherwise localStorage
@@ -579,6 +635,7 @@ export default function App(){
     const sv=await sget("cx_seen");    if(sv) setSeenTabs(sv);
     const jn=await sget("cx_journal"); if(jn) setJournal(jn);
     const xl=await sget("cx_xplog");   if(xl) setXpLog(xl);
+    const fr=await sget("cx_friends"); if(fr) setFriends(fr);
     setLoaded(true);
   };
 
@@ -611,7 +668,7 @@ export default function App(){
     })();
     // Listen for auth changes (login/logout from another tab etc)
     const unsub=onAuthChange(async s=>{
-      if(s){ setSession(s); setUserId(s.user.id); setShowAuth(false); await loadData(s.user.id); }
+      if(s){ setSession(s); setUserId(s.user.id); setMyFriendCode(genFriendCode(s.user.id)); setShowAuth(false); await loadData(s.user.id); }
       else { setSession(null); setUserId(null); }
     });
     return unsub;
@@ -778,6 +835,71 @@ export default function App(){
     setJournal(next); await dbSet("cx_journal",next,userId);
   };
 
+  // ── COMMUNITY FUNCTIONS ──────────────────────────────────────────────────
+  const publishProfile=async(overrideSettings)=>{
+    if(!userId) return;
+    const s=overrideSettings||settings;
+    if(!s.profile.public){ await communityDelete(userId); return; }
+    const pubSkills=skills.filter(sk=>sk.published);
+    const pubQuests=quests.filter(q=>q.published);
+    const radiantStats=pubQuests.filter(q=>q.type==="radiant").map(q=>{
+      const sessions=(meds||[]).filter(m=>m.questId===q.id);
+      return {id:q.id,title:q.title,color:q.color,completions30:sessions.filter(m=>m.created>Date.now()-30*86400000).length,notesPublic:q.notesPublic||false,note:q.notesPublic?q.note:"",intention:q.intention||""};
+    });
+    const profileData={
+      userId, code:genFriendCode(userId),
+      name:s.profile.public?s.profile.name:"Anonymous",
+      level:Math.floor(xp/(settings.xp.globalPerLevel||600))+1,
+      xp, totalPractice:(meds||[]).length,
+      journalCount:(journal||[]).length,
+      streaks,
+      publishedAt:Date.now(),
+      skills:pubSkills.map(sk=>{
+        const streak=streaks[sk.id]?.count||0;
+        const lv=Math.floor((sk.xp||0)/(settings.xp.skillPerLevel||6000))+1;
+        return {id:sk.id,name:sk.name,icon:sk.icon,color:sk.color,category:sk.category||"other",intention:sk.intention||"",level:lv,streak,notesPublic:sk.notesPublic||false,xp:sk.xp||0};
+      }),
+      radiantQuests:radiantStats,
+    };
+    await communitySet(userId,profileData);
+  };
+
+  const addFriend=async(code)=>{
+    const trimCode=code.trim();
+    if(!trimCode) return;
+    // Search community for this code
+    const all=await communityList();
+    const found=all.find(p=>p.code===trimCode);
+    if(!found){ showToast("Friend code not found"); return; }
+    if(found.userId===userId){ showToast("That's your own code!"); return; }
+    if(friends.find(f=>f.userId===found.userId)){ showToast("Already friends"); return; }
+    const next=[...friends,{userId:found.userId,name:found.name,code:trimCode,addedAt:Date.now()}];
+    setFriends(next); await sset("cx_friends",next);
+    showToast(`Added ${found.name||"friend"}`);
+  };
+
+  const removeFriend=async(fUserId)=>{
+    const next=friends.filter(f=>f.userId!==fUserId);
+    setFriends(next); await sset("cx_friends",next);
+  };
+
+  const refreshCommunity=async()=>{
+    const all=await communityList();
+    setCommunityProfiles(all);
+  };
+
+  const editSkillPublish=async(skillId,patch)=>{
+    const next=skills.map(sk=>sk.id===skillId?{...sk,...patch}:sk);
+    await saveS(next);
+    setTimeout(publishProfile,100);
+  };
+
+  const editQuestPublish=async(questId,patch)=>{
+    const next=quests.map(q=>q.id===questId?{...q,...patch}:q);
+    await saveQ(next);
+    setTimeout(publishProfile,100);
+  };
+
   const addSkill=async d=>{
     await saveS([...skills,{id:uid(),name:d.name,icon:d.icon,color:d.color,xp:d.startXp||0,type:d.type||"skill",parentIds:d.parentIds||[]}]);
     showToast(d.type==="subskill"?"Subskill created":"Skill created");
@@ -902,6 +1024,7 @@ export default function App(){
     {id:"practice", icon:"◉", label:L.practiceTab},
     {id:"journal",  icon:"✦", label:L.journalTab},
     {id:"advisor",  icon:"◎", label:L.advisorTab},
+    {id:"community",icon:"⬡", label:"Community"},
     {id:"settings", icon:"⚙", label:L.settingsTab},
   ];
 
@@ -963,6 +1086,7 @@ export default function App(){
             {tab==="journal"  && <JournalTab entries={journal} onAdd={addJournalEntry} onDelete={deleteJournalEntry}/>}
             {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} journal={journal} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest}/>}
             {tab==="settings" && <SettingsTab showToast={showToast} onExport={exportData} onImport={importData} userId={userId} onSignIn={()=>setShowAuth(true)} onSignOut={handleSignOut}/>}
+            {tab==="community" && <CommunityTab userId={userId} settings={settings} skills={skills} quests={quests} meds={meds} journal={journal} streaks={streaks} xp={xp} friends={friends} myFriendCode={myFriendCode} profiles={communityProfiles} onPublishProfile={publishProfile} onAddFriend={addFriend} onRemoveFriend={removeFriend} onRefresh={refreshCommunity} onEditSkillPublish={editSkillPublish} onEditQuestPublish={editQuestPublish} onSaveSettings={saveSettings} showToast={showToast}/>}
           </main>
           </div>
           {/* Weekly Review floating button */}
@@ -1416,7 +1540,7 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
   const [viewMode,setViewMode]=useState("grid");
   const [expandedId,setExpandedId]=useState(null);
   const [editingId,setEditingId]=useState(null);
-  const [ef,setEf]=useState({name:"",icon:"◈",color:SKILL_COLORS[0],customImg:null,intention:""});
+  const [ef,setEf]=useState({name:"",icon:"◈",color:SKILL_COLORS[0],customImg:null,intention:"",category:"other",published:false,notesPublic:false});
 
   // add form state (shared, type toggled)
   const [showForm,setShowForm]=useState(false);
@@ -1491,10 +1615,10 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
     onAdd({name:f.name.trim(),icon:f.icon,color:f.color,startXp,customImg:f.customImg||null,type:formType,parentIds:[]});
     setF({name:"",icon:"◈",color:SKILL_COLORS[0],startLevel:1,customImg:null}); setShowForm(false);
   };
-  const openEdit=s=>{setEf({name:s.name,icon:s.icon,color:s.color,customImg:s.customImg||null,intention:s.intention||""});setEditingId(s.id);};
+  const openEdit=s=>{setEf({name:s.name,icon:s.icon,color:s.color,customImg:s.customImg||null,intention:s.intention||"",category:s.category||"other",published:s.published||false,notesPublic:s.notesPublic||false});setEditingId(s.id);};
   const submitEdit=()=>{
     if(!ef.name.trim()) return;
-    onEdit(editingId,{name:ef.name.trim(),icon:ef.icon,color:ef.color,customImg:ef.customImg||null,intention:ef.intention||""});
+    onEdit(editingId,{name:ef.name.trim(),icon:ef.icon,color:ef.color,customImg:ef.customImg||null,intention:ef.intention||"",category:ef.category||"other",published:ef.published||false,notesPublic:ef.notesPublic||false});
     setEditingId(null);
   };
   const handleImg=(e,setter)=>{
@@ -1676,6 +1800,25 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
         <input className="fi full" value={ef.name} onChange={e=>setEf(v=>({...v,name:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submitEdit()} style={{marginBottom:8}}/>
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5,marginTop:2}}>Intention <span style={{opacity:.5,letterSpacing:0,textTransform:"none"}}>(for AI advisor)</span></div>
         <textarea className="fi full" rows={2} placeholder="e.g. build consistent meditation practice, run 5k by March..." value={ef.intention} onChange={e=>setEf(v=>({...v,intention:e.target.value}))} style={{resize:"vertical",lineHeight:1.4}}/>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5,marginTop:8}}>Category</div>
+        <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
+          {SKILL_CATEGORIES.map(cat=>(
+            <button key={cat.id} onClick={()=>setEf(v=>({...v,category:cat.id}))}
+              style={{padding:"3px 8px",borderRadius:"var(--r)",border:`1px solid ${ef.category===cat.id?"var(--primary)":"var(--b2)"}`,background:ef.category===cat.id?"var(--primaryf)":"var(--s2)",color:ef.category===cat.id?"var(--primary)":"var(--tx2)",fontSize:10,cursor:"pointer",fontFamily:"'DM Mono',monospace"}}>
+              {cat.icon} {cat.label}
+            </button>
+          ))}
+        </div>
+        <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:8,paddingTop:4,borderTop:"1px solid var(--b1)"}}>
+          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",flex:1}}>
+            <input type="checkbox" checked={ef.published||false} onChange={e=>setEf(v=>({...v,published:e.target.checked}))} style={{accentColor:"var(--primary)"}}/>
+            <span style={{fontSize:11,color:"var(--tx2)"}}>Publish to community</span>
+          </label>
+          {ef.published&&<label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
+            <input type="checkbox" checked={ef.notesPublic||false} onChange={e=>setEf(v=>({...v,notesPublic:e.target.checked}))} style={{accentColor:"var(--primary)"}}/>
+            <span style={{fontSize:11,color:"var(--tx2)"}}>Share notes</span>
+          </label>}
+        </div>
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:7,marginTop:8}}>Icon</div>
         <div className="icon-grid">{SKILL_ICONS_EXTRA.map(ic=><button key={ic} className={`icon-opt ${ef.icon===ic?"on":""}`} onClick={()=>setEf(v=>({...v,icon:ic,customImg:null}))}>{ic}</button>)}</div>
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5}}>Or upload image</div>
@@ -2527,7 +2670,7 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
   const [showSubs,setShowSubs]=useState(false);
   const [newSub,setNewSub]=useState("");
   const defaultQColor=(sIds)=>{ const s=skills.find(sk=>sk.id===(sIds||[])[0]); return s?s.color:null; };
-  const [ef,setEf]=useState({title:quest.title,note:quest.note||"",dueDate:quest.due?new Date(quest.due).toISOString().split("T")[0]:"",skillIds:quest.skills||[],color:quest.color||defaultQColor(quest.skills)||null,priority:quest.priority||"med",cooldown:quest.cooldown??60*60*1000});
+  const [ef,setEf]=useState({title:quest.title,note:quest.note||"",dueDate:quest.due?new Date(quest.due).toISOString().split("T")[0]:"",skillIds:quest.skills||[],color:quest.color||defaultQColor(quest.skills)||null,priority:quest.priority||"med",cooldown:quest.cooldown??60*60*1000,published:quest.published||false,notesPublic:quest.notesPublic||false});
   const [xpSuggestion,setXpSuggestion]=useState(null);
   const [xpLoading,setXpLoading]=useState(false);
   const [subXpSug,setSubXpSug]=useState(null);
@@ -2542,7 +2685,7 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
   const saveEdit=()=>{
     if(!ef.title.trim()) return;
     const due=ef.dueDate?new Date(ef.dueDate+"T09:00").getTime():null;
-    onEdit(quest.id,{title:ef.title.trim(),note:ef.note.trim(),due,skills:ef.skillIds,color:ef.color||null,priority:ef.priority,cooldown:quest.type==="radiant"?ef.cooldown:undefined});
+    onEdit(quest.id,{title:ef.title.trim(),note:ef.note.trim(),due,skills:ef.skillIds,color:ef.color||null,priority:ef.priority,cooldown:quest.type==="radiant"?ef.cooldown:undefined,published:ef.published||false,notesPublic:ef.notesPublic||false});
     setEditing(false); setXpSuggestion(null);
   };
   const suggestQuestXp=async()=>{
