@@ -4,76 +4,6 @@ import { supabase, getSession, onAuthChange, signOut, loadUserData, saveField, m
 
 const GFONTS = `@import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;1,300&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');`;
 const SettingsCtx = createContext(null);
-const COOLDOWN_OPTIONS=[
-  {label:"Instant",ms:0},
-  {label:"15 min",ms:15*60*1000},
-  {label:"30 min",ms:30*60*1000},
-  {label:"1 hr",ms:60*60*1000},
-  {label:"2 hr",ms:2*60*60*1000},
-  {label:"4 hr",ms:4*60*60*1000},
-  {label:"6 hr",ms:6*60*60*1000},
-  {label:"8 hr",ms:8*60*60*1000},
-  {label:"12 hr",ms:12*60*60*1000},
-  {label:"24 hr",ms:24*60*60*1000},
-];
-
-// ── Universal pointer-based drag hook (works on mobile + desktop) ─────────────
-function useDrag({items, onReorder, idKey="id"}){
-  const dragId=useRef(null);
-  const dragOver=useRef(null);
-  const clone=useRef(null);
-  const startY=useRef(0);
-  const [activeId,setActiveId]=useState(null);
-  const [overId,setOverId]=useState(null);
-
-  const onPointerDown=(e,id)=>{
-    // only left-click / touch
-    if(e.button&&e.button!==0) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    dragId.current=id; startY.current=e.clientY;
-    setActiveId(id);
-  };
-  const onPointerMove=(e,id)=>{
-    if(!dragId.current||dragId.current===id) return;
-    e.preventDefault();
-    dragOver.current=id; setOverId(id);
-  };
-  const onPointerUp=(e,id)=>{
-    if(!dragId.current) return;
-    if(dragId.current!==id&&dragOver.current){
-      const arr=[...items];
-      const from=arr.findIndex(x=>x[idKey]===dragId.current);
-      const to=arr.findIndex(x=>x[idKey]===dragOver.current);
-      if(from!==-1&&to!==-1){const[m]=arr.splice(from,1);arr.splice(to,0,m);onReorder(arr);}
-    }
-    dragId.current=null; dragOver.current=null;
-    setActiveId(null); setOverId(null);
-  };
-  const getProps=(id)=>({
-    onPointerDown:(e)=>onPointerDown(e,id),
-    onPointerMove:(e)=>onPointerMove(e,id),
-    onPointerUp:(e)=>onPointerUp(e,id),
-    style:{
-      opacity:activeId===id?0.4:1,
-      outline:overId===id&&activeId!==id?"2px dashed var(--primary)":"none",
-      outlineOffset:2,
-      touchAction:"none",
-      transition:"opacity .1s",
-      cursor:"grab",
-    }
-  });
-  return {getProps, activeId, overId};
-}
-
-// Renders skill icon — image if customImg, otherwise text icon
-// sz = pixel size, For text-only contexts use s.customImg ? "◈" : s.icon
-function SkIcon({s, sz=14, style={}}){
-  if(!s) return null;
-  if(s.customImg) return <img src={s.customImg} style={{width:sz,height:sz,borderRadius:2,objectFit:"cover",flexShrink:0,...style}}/>;
-  return <span style={{color:s.color,fontSize:sz,lineHeight:1,flexShrink:0,...style}}>{s.icon}</span>;
-}
-// For contexts that can't render JSX (option text etc) — just show name without broken icon
-function skillLabel(s){ return s.customImg ? s.name : `${s.icon} ${s.name}`; }
 const useSettings = () => useContext(SettingsCtx);
 
 const DEFAULT_SETTINGS = {
@@ -435,10 +365,6 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 .toast{position:fixed;bottom:66px;left:50%;transform:translateX(-50%) translateY(6px);background:var(--s2);border:1px solid var(--b2);border-radius:20px;padding:6px 16px;font-family:\'DM Mono\',monospace;font-size:10px;letter-spacing:1px;color:var(--tx);opacity:0;transition:all .22s;pointer-events:none;white-space:nowrap;z-index:200;}
 .toast.on{opacity:1;transform:translateX(-50%) translateY(0);}
 .empty{text-align:center;padding:32px 0;font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:2px;color:var(--tx3);text-transform:uppercase;}
-.empty-state{text-align:center;padding:24px 16px;border:1px dashed var(--b2);border-radius:var(--r);margin-bottom:8px;}
-.es-icon{font-size:22px;margin-bottom:8px;opacity:.4;}
-.es-title{font-family:\'DM Mono\',monospace;font-size:11px;color:var(--tx2);margin-bottom:6px;letter-spacing:.5px;}
-.es-desc{font-size:11px;color:var(--tx3);line-height:1.6;max-width:280px;margin:0 auto;}
 .overlay{position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:100;display:flex;align-items:center;justify-content:center;}
 .modal{background:var(--s1);border:1px solid var(--b2);border-radius:8px;padding:20px;max-width:300px;width:90%;}
 .modal-title{font-size:14px;margin-bottom:8px;}.modal-sub{font-size:12px;color:var(--tx2);margin-bottom:16px;line-height:1.5;}
@@ -695,38 +621,19 @@ export default function App(){
   const deleteTask=async id=>saveT(tasks.filter(t=>t.id!==id));
 
   const addQuest=async d=>{
-    const xpVal=d.xpVal||( d.type==="main"?Number(L.mainXp)||80:d.type==="side"?Number(L.sideXp)||50:Number(L.radiantXp)||30 );
+    const xpVal=d.type==="main"?Number(L.mainXp)||80:d.type==="side"?Number(L.sideXp)||50:Number(L.radiantXp)||30;
     const qSkills=d.skills||(d.skill?[d.skill]:[]);
-    await saveQ([{id:uid(),...d,skills:qSkills,xpVal,done:false,priority:d.priority||"med",cooldown:d.type==="radiant"?(d.cooldown??60*60*1000):undefined,created:Date.now()},...quests]);
+    await saveQ([{id:uid(),...d,skills:qSkills,xpVal,done:false,priority:d.priority||"med",created:Date.now()},...quests]);
     showToast("Quest accepted");
   };
-  const radiantAvailable=(q)=>{
-    if(q.type!=="radiant") return true;
-    const cd=q.cooldown??60*60*1000; // default 1hr if not set
-    if(cd===0||!q.lastDone) return true;
-    return Date.now()-q.lastDone >= cd;
-  };
-  const radiantCooldownLabel=(q)=>{
-    if(!q.lastDone||radiantAvailable(q)) return null;
-    const cd=q.cooldown??60*60*1000;
-    const ms=cd-(Date.now()-q.lastDone);
-    const mins=Math.ceil(ms/60000);
-    return mins>=60?`${Math.ceil(mins/60)}h`:`${mins}m`;
-  };
-
   const toggleQuest=async id=>{
     const q=quests.find(q=>q.id===id); if(!q) return;
     if(q.type==="radiant"){
-      if(!radiantAvailable(q)){
-        showToast(`Available in ${radiantCooldownLabel(q)}`); return;
-      }
       const qSkills=q.skills||[]; const primary=qSkills[0]||null;
       let newStr=streaks;
       if(primary){ newStr=updateStreak(streaks,primary); await saveStr(newStr); }
       const {amt,multiplier,leveledUp}=await award(q.xpVal,primary,xp,skills,newStr,`◉ ${q.title}`);
       const streak=newStr[primary]||{count:0};
-      // Store lastDone timestamp on the quest
-      await saveQ(quests.map(qq=>qq.id===id?{...qq,lastDone:Date.now()}:qq));
       let msg=`+${amt} ${L.xpName}`;
       if(multiplier>1) msg+=` · ${streak.count}d ${L.comboName||"Combo"} ${multiplier}×`;
       showToast(msg);
@@ -745,19 +652,10 @@ export default function App(){
     }
   };
   const deleteQuest=async id=>saveQ(quests.filter(q=>q.id!==id));
-  const addSubquest=async(questId,title,xpVal=10)=>{
-    await saveQ(quests.map(q=>q.id!==questId?q:{...q,subquests:[...(q.subquests||[]),{id:uid(),title,xpVal,done:false}]}));
+  const addSubquest=async(questId,title)=>{
+    await saveQ(quests.map(q=>q.id!==questId?q:{...q,subquests:[...(q.subquests||[]),{id:uid(),title,done:false}]}));
   };
   const toggleSubquest=async(questId,subId)=>{
-    const parentQ=quests.find(q=>q.id===questId);
-    const sub=(parentQ?.subquests||[]).find(s=>s.id===subId);
-    const wasUndone=sub&&!sub.done;
-    if(wasUndone&&sub.xpVal){
-      const primary=(parentQ.skills||[])[0]||null;
-      const {amt,leveledUp}=await award(sub.xpVal,primary,xp,skills,streaks,`◇ ${sub.title}`);
-      showToast(`+${amt} ${settings.labels.xpName}`);
-      if(leveledUp) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);
-    }
     await saveQ(quests.map(q=>{
       if(q.id!==questId) return q;
       return {...q,subquests:(q.subquests||[]).map(s=>s.id===subId?{...s,done:!s.done}:s)};
@@ -957,7 +855,7 @@ export default function App(){
           <div className="main-wrap">
           <main className="pg">
             {tab==="planner"  && <PlannerTab period={period} setPeriod={setPeriod} tasks={periodTasks()} weekDays={weekDays} allTasks={tasks} skills={skills} quests={quests} onAddTask={addTask} onToggle={toggleTask} onDelete={deleteTask} onEdit={editTask} onToggleQuest={toggleQuest}/>}
-            {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest} onReorder={q=>saveQ(q)} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>}
+            {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest}/>}
             {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill} onReorder={reorderSkills} onLink={linkSubskill}/>}
             {tab==="practice" && <PracticeTab meds={meds} skills={skills} streaks={streaks} pending={pendingPractice} practiceTypes={practiceTypes} onAddType={addPracticeType} onDeleteType={deletePracticeType} onLog={logMed} onDelete={deleteMed} onClearPending={()=>setPendingPractice(null)}/>}
             {tab==="journal"  && <JournalTab entries={journal} onAdd={addJournalEntry} onDelete={deleteJournalEntry}/>}
@@ -1032,8 +930,6 @@ function QuestPlannerCard({quest,skills,onToggle}){
   const {settings}=useSettings(); const L=settings.labels;
   const qSkills=(quest.skills||[]).map(id=>skills.find(s=>s.id===id)).filter(Boolean);
   const isRadiant=quest.type==="radiant";
-  const rAvail=isRadiant&&radiantAvailable?radiantAvailable(quest):true;
-  const rCool=isRadiant&&radiantCooldownLabel?radiantCooldownLabel(quest):null;
   const dueFmt=quest.due?new Date(quest.due).toLocaleDateString("en-US",{month:"short",day:"numeric"}):null;
   const now=Date.now();
   const overdue=quest.due&&quest.due<now&&!quest.done;
@@ -1048,7 +944,7 @@ function QuestPlannerCard({quest,skills,onToggle}){
         <div className={`ctitle ${quest.done?"done":""}`}>{quest.title}</div>
         <div className="cmeta">
           <span className="ctag" style={{color:"var(--primary)",borderColor:"var(--primaryb)"}}>◆ {isRadiant?"Radiant":"Quest"}</span>
-          {qSkills.map(sk=><span key={sk.id} className="ctag" style={{borderColor:sk.color+"44",color:sk.color,display:"inline-flex",alignItems:"center",gap:3}}><SkIcon s={sk} sz={10}/>{sk.name}</span>)}
+          {qSkills.map(sk=><span key={sk.id} className="ctag" style={{borderColor:sk.color+"44",color:sk.color}}>{sk.icon} {sk.name}</span>)}
           <span className="ctag">{quest.xpVal} {L.xpName}</span>
           {dueFmt&&<span className="ctag" style={{color:overdue?"var(--danger)":"var(--tx3)"}}>{overdue?"⚠ due ":"due "}{dueFmt}</span>}
         </div>
@@ -1093,7 +989,7 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
         <div className="frow">
           <select className="fsel" value={f.skill} onChange={e=>setF(v=>({...v,skill:e.target.value}))}>
             <option value="">No skill</option>
-            {skills.map(s=><option key={s.id} value={s.id}>{skillLabel(s)}</option>)}
+            {skills.map(s=><option key={s.id} value={s.id}>{s.icon} {s.name}</option>)}
           </select>
           <select className="fsel" value={f.xpVal} onChange={e=>setF(v=>({...v,xpVal:Number(e.target.value)}))}>
             {[5,10,20,30,50,80].map(v=><option key={v} value={v}>{v} {L.xpName}</option>)}
@@ -1136,13 +1032,7 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
             {mq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest}/>)}
             {(active.length>0||done.length>0)&&<div className="gap"/>}</>:null;
         })()}
-        {active.length===0&&done.length===0&&todayQuests.length===0&&(
-      <div className="empty-state">
-        <div className="es-icon">☐</div>
-        <div className="es-title">No tasks yet</div>
-        <div className="es-desc">Tasks are small repeatable actions — daily, weekly, monthly. Link them to skills and quests to build momentum toward your bigger goals.</div>
-      </div>
-    )}
+        {active.length===0&&done.length===0&&todayQuests.length===0&&<div className="empty">No tasks yet</div>}
         <div className="clist">{active.map(t=><TaskCard key={t.id} task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div>
         {done.length>0&&<><div className="gap"/><div className="slbl">{L.done}</div>
           <div className="clist">{done.map(t=><TaskCard key={t.id} task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div></>}
@@ -1151,20 +1041,20 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
   </>);
 }
 
-function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,onToggleSubquest,onDeleteSubquest,onReorder,radiantAvailable,radiantCooldownLabel}){
+function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,onToggleSubquest,onDeleteSubquest}){
   const {settings}=useSettings(); const L=settings.labels;
   const [form,setForm]=useState(null);
   const [search,setSearch]=useState("");
   const [filterPrio,setFilterPrio]=useState("");
-  const [f,setF]=useState({title:"",skillIds:[],note:"",dueDate:"",type:"main",priority:"med",color:null,cooldown:60*60*1000});
+  const [f,setF]=useState({title:"",skillIds:[],note:"",dueDate:"",type:"main",priority:"med",color:null});
   const [qXpSug,setQXpSug]=useState(null);
   const [qXpLoad,setQXpLoad]=useState(false);
-  const openForm=t=>{ setForm(t); setF({title:"",skillIds:[],note:"",dueDate:"",type:t,priority:"med",color:null,cooldown:60*60*1000}); setQXpSug(null); };
+  const openForm=t=>{ setForm(t); setF({title:"",skillIds:[],note:"",dueDate:"",type:t,priority:"med",color:null}); setQXpSug(null); };
   const toggleQSkill=id=>setF(v=>{const next=v.skillIds.includes(id)?v.skillIds.filter(x=>x!==id):[...v.skillIds,id];const auto=next.length>0?(skills.find(s=>s.id===next[0])?.color)||null:null;return {...v,skillIds:next,color:v.color!==null?v.color:auto};});
   const submit=()=>{
     if(!f.title.trim()) return;
     const due=f.dueDate?new Date(f.dueDate+"T09:00").getTime():null;
-    onAdd({title:f.title.trim(),type:form,skills:f.skillIds,note:f.note.trim(),due,priority:f.priority,color:f.color||null,xpVal:qXpSug?.xp||null,cooldown:f.cooldown});
+    onAdd({title:f.title.trim(),type:form,skills:f.skillIds,note:f.note.trim(),due,priority:f.priority,color:f.color||null});
     setForm(null); setQXpSug(null);
   };
   const suggestNewQuestXp=async()=>{
@@ -1192,9 +1082,6 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
   const mainD=quests.filter(q=>q.type==="main"&&q.done&&filterQ(q));
   const side=quests.filter(q=>q.type==="side"&&filterQ(q));
   const radiant=quests.filter(q=>q.type==="radiant"&&filterQ(q));
-
-  // Quest drag-to-reorder via pointer events (mobile + desktop)
-  const {getProps:getQDragProps}=useDrag({items:quests,onReorder,idKey:"id"});
   return (<>
     <div className="search-row">
       <input className="search-input" placeholder="Search quests..." value={search} onChange={e=>setSearch(e.target.value)}/>
@@ -1217,13 +1104,8 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
           <option value="med">⬤ Med</option>
           <option value="low">⬤ Low</option>
         </select>
+        <input className="fi" type="date" style={{colorScheme:"dark",width:140}} value={f.dueDate} onChange={e=>setF(v=>({...v,dueDate:e.target.value}))}/>
         <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0}} onClick={()=>setForm(null)}>✕</button>
-      </div>
-      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,textTransform:"uppercase",color:"var(--tx3)",flexShrink:0}}>Resets after</div>
-        <select className="fsel" style={{flex:1}} value={f.cooldown} onChange={e=>setF(v=>({...v,cooldown:Number(e.target.value)}))}>
-          {COOLDOWN_OPTIONS.map(o=><option key={o.ms} value={o.ms}>{o.label}</option>)}
-        </select>
       </div>
       <textarea className="fi" rows={2} placeholder="Intention (optional)..." value={f.note} onChange={e=>setF(v=>({...v,note:e.target.value}))} style={{resize:"vertical",minHeight:44,fontFamily:"inherit",fontSize:12,marginBottom:4,width:"100%",boxSizing:"border-box"}}/>
       <div style={{marginBottom:6}}>
@@ -1239,28 +1121,13 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
       {qXpSug&&<div style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:4,padding:"8px 10px",marginBottom:6,fontSize:11,color:"var(--tx2)",lineHeight:1.5}}>
         {qXpSug.xp?<><span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",fontWeight:"bold"}}>+{qXpSug.xp} XP</span> — {qXpSug.reason}</>:qXpSug.reason}
       </div>}
-            <button className="fsbtn" onClick={submit}>{qXpSug?.xp?`Accept · +${qXpSug.xp} ${L.xpName} (AI)`:`Accept · +${L.mainXp} ${L.xpName}`}</button>
+            <button className="fsbtn" onClick={submit}>{`Accept · +${L.mainXp} ${L.xpName}`}</button>
     </div>)
       :<button className="addbtn" onClick={()=>openForm("main")}><span>+</span> New {L.mainQuest.toLowerCase()}</button>}
-    <div className="clist">{mainA.map(q=>(
-      <div key={q.id} {...getQDragProps(q.id)}>
-        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest}/>
-      </div>
-    ))}</div>
+    <div className="clist">{mainA.map(q=><QuestCard key={q.id} quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest}/>)}</div>
     {mainD.length>0&&<><div className="gap"/><div className="slbl">{L.completed}</div>
-      <div className="clist">{mainD.map(q=>(
-      <div key={q.id} {...getQDragProps(q.id)}>
-        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest}/>
-      </div>
-    ))}</div></>}
-    {quests.filter(q=>q.type==="main").length===0&&form!=="main"&&(
-      <div className="empty-state">
-        <div className="es-icon">◆</div>
-        <div className="es-title">No {L.mainQuest.toLowerCase()}s yet</div>
-        <div className="es-desc">Main quests are your big goals. Add one to anchor your practice.</div>
-        <button className="fsbtn" style={{width:"auto",padding:"8px 16px",margin:"8px auto 0"}} onClick={()=>openForm("main")}>+ Add Quest</button>
-      </div>
-    )}
+      <div className="clist">{mainD.map(q=><QuestCard key={q.id} quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest}/>)}</div></>}
+    {quests.filter(q=>q.type==="main").length===0&&form!=="main"&&<div className="empty">No {L.mainQuest.toLowerCase()}s yet</div>}
     <div className="gap"/>
     <div className="slbl">{L.sideQuest}s</div>
     <p style={{fontSize:12,color:"var(--tx2)",fontStyle:"italic",marginBottom:12,lineHeight:1.5}}>Optional objectives. Complete for bonus XP, no pressure.</p>
@@ -1292,22 +1159,11 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
       {qXpSug&&<div style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:4,padding:"8px 10px",marginBottom:6,fontSize:11,color:"var(--tx2)",lineHeight:1.5}}>
         {qXpSug.xp?<><span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",fontWeight:"bold"}}>+{qXpSug.xp} XP</span> — {qXpSug.reason}</>:qXpSug.reason}
       </div>}
-            <button className="fsbtn secondary" onClick={submit}>{qXpSug?.xp?`Accept · +${qXpSug.xp} ${L.xpName} (AI)`:`Accept · +${L.sideXp} ${L.xpName}`}</button>
+            <button className="fsbtn secondary" onClick={submit}>{`Accept · +${L.sideXp} ${L.xpName}`}</button>
     </div>)
       :<button className="addbtn" onClick={()=>openForm("side")}><span>+</span> New {L.sideQuest.toLowerCase()}</button>}
-    <div className="clist">{side.map(q=>(
-      <div key={q.id} {...getQDragProps(q.id)}>
-        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest}/>
-      </div>
-    ))}</div>
-    {side.length===0&&form!=="side"&&(
-      <div className="empty-state">
-        <div className="es-icon">◇</div>
-        <div className="es-title">No {L.sideQuest.toLowerCase()}s yet</div>
-        <div className="es-desc">Side quests are smaller tasks and experiments — books to read, habits to try, skills to learn. Lower stakes, still worth tracking.</div>
-        <button className="fsbtn" style={{width:"auto",padding:"8px 16px",margin:"8px auto 0"}} onClick={()=>openForm("side")}>+ Add Side Quest</button>
-      </div>
-    )}
+    <div className="clist">{side.map(q=><QuestCard key={q.id} quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest}/>)}</div>
+    {side.length===0&&form!=="side"&&<div className="empty">No {L.sideQuest.toLowerCase()}s yet</div>}
     <div className="gap"/>
     <div className="slbl">{L.radiantQuest}s</div>
     <p style={{fontSize:12,color:"var(--tx2)",fontStyle:"italic",marginBottom:12,lineHeight:1.5}}>{L.radiantDesc}</p>
@@ -1339,66 +1195,15 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
       {qXpSug&&<div style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:4,padding:"8px 10px",marginBottom:6,fontSize:11,color:"var(--tx2)",lineHeight:1.5}}>
         {qXpSug.xp?<><span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",fontWeight:"bold"}}>+{qXpSug.xp} XP</span> — {qXpSug.reason}</>:qXpSug.reason}
       </div>}
-            <button className="fsbtn secondary" onClick={submit}>{qXpSug?.xp?`Commit · +${qXpSug.xp} ${L.xpName} per run (AI)`:`Commit · +${L.radiantXp} ${L.xpName} per run`}</button>
+            <button className="fsbtn secondary" onClick={submit}>{`Commit · +${L.radiantXp} ${L.xpName} per completion`}</button>
     </div>)
       :<button className="addbtn" onClick={()=>openForm("radiant")}><span>+</span> New {L.radiantQuest.toLowerCase()}</button>}
-    <div className="clist">{radiant.map(q=>(
-      <div key={q.id} {...getQDragProps(q.id)}>
-        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>
-      </div>
-    ))}</div>
-    {radiant.length===0&&form!=="radiant"&&(
-      <div className="empty-state">
-        <div className="es-icon">◉</div>
-        <div className="es-title">No {L.radiantQuest.toLowerCase()}s yet</div>
-        <div className="es-desc">Radiant quests repeat. Meditate daily, stretch every morning, drink water. Each completion awards XP and resets after 1 hour.</div>
-        <button className="fsbtn" style={{width:"auto",padding:"8px 16px",margin:"8px auto 0"}} onClick={()=>openForm("radiant")}>+ Add Radiant Quest</button>
-      </div>
-    )}
+    <div className="clist">{radiant.map(q=><QuestCard key={q.id} quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest}/>)}</div>
+    {radiant.length===0&&form!=="radiant"&&<div className="empty">No {L.radiantQuest.toLowerCase()}s yet</div>}
   </>);
 }
 
 const SKILL_ICONS_EXTRA = ["◈","◉","◎","◆","◬","✦","◌","◊","△","○","□","◇","❋","⊕","◐","◑","⬡","✧","⟡","◿","⚔","🧠","💪","🎯","🎨","📚","🎵","🌱","⚡","🔥","💎","🏆","🎭","🔬","🌟","✍","🎸","🏋","🧘","💻","🗺","🎲","⚙","🛡","🌊","🦾","🧩","🎤","📖","🌙"];
-
-// GitHub-style 90-day streak heatmap
-function HeatMap({days, color}){
-  const maxVal=Math.max(...days,1);
-  // 13 weeks x 7 days = 91 cells, use last 90
-  const cells=[...days].slice(-90);
-  // pad to multiple of 7
-  while(cells.length%7!==0) cells.unshift(0);
-  const weeks=[];
-  for(let i=0;i<cells.length;i+=7) weeks.push(cells.slice(i,i+7));
-  const dayLabels=["S","M","T","W","T","F","S"];
-  return (
-    <div style={{overflowX:"auto",marginTop:6}}>
-      <div style={{display:"flex",gap:2,alignItems:"flex-start"}}>
-        <div style={{display:"flex",flexDirection:"column",gap:2,marginRight:2,paddingTop:0}}>
-          {dayLabels.map((d,i)=>(
-            <div key={i} style={{height:10,fontSize:7,color:"var(--tx3)",lineHeight:"10px",width:8,textAlign:"center"}}>{i%2===0?d:""}</div>
-          ))}
-        </div>
-        {weeks.map((week,wi)=>(
-          <div key={wi} style={{display:"flex",flexDirection:"column",gap:2}}>
-            {week.map((val,di)=>{
-              const intensity=val===0?0:Math.max(0.15,val/maxVal);
-              const bg=val===0?"var(--b1)":`${color}${Math.round(intensity*255).toString(16).padStart(2,"0")}`;
-              const title=val?`${val} min`:"No activity";
-              return <div key={di} title={title} style={{width:10,height:10,borderRadius:2,background:bg,transition:"background .1s"}}/>;
-            })}
-          </div>
-        ))}
-      </div>
-      <div style={{display:"flex",justifyContent:"flex-end",gap:4,marginTop:4,alignItems:"center"}}>
-        <span style={{fontSize:7,color:"var(--tx3)"}}>less</span>
-        {[0,.25,.5,.75,1].map(v=>(
-          <div key={v} style={{width:10,height:10,borderRadius:2,background:v===0?"var(--b1)":`${color}${Math.round(v*255).toString(16).padStart(2,"0")}`}}/>
-        ))}
-        <span style={{fontSize:7,color:"var(--tx3)"}}>more</span>
-      </div>
-    </div>
-  );
-}
 
 function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,onEdit,onReorder,onLink}){
   const {settings}=useSettings(); const L=settings.labels;
@@ -1409,7 +1214,7 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
   const [viewMode,setViewMode]=useState("grid");
   const [expandedId,setExpandedId]=useState(null);
   const [editingId,setEditingId]=useState(null);
-  const [ef,setEf]=useState({name:"",icon:"◈",color:SKILL_COLORS[0],customImg:null,intention:""});
+  const [ef,setEf]=useState({name:"",icon:"◈",color:SKILL_COLORS[0],customImg:null});
 
   // add form state (shared, type toggled)
   const [showForm,setShowForm]=useState(false);
@@ -1417,57 +1222,20 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
   const [showPresets,setShowPresets]=useState(false);
   const [f,setF]=useState({name:"",icon:"◈",color:SKILL_COLORS[0],startLevel:1,customImg:null});
 
-  // drag state — pointer events (mobile + desktop)
+  // drag state — two modes:
+  //   "reorder": dragging within same section to reorder
+  //   "link":    dragging a subskill onto a skill to link/unlink
   const [dragId,setDragId]=useState(null);
   const [dragType,setDragType]=useState(null); // "skill"|"subskill"
   const [dragOverId,setDragOverId]=useState(null);
-  const [linkTarget,setLinkTarget]=useState(null);
+  const [linkTarget,setLinkTarget]=useState(null); // skill id being hovered for linking
 
-  const skPointerDown=(e,id,type)=>{
-    e.currentTarget.setPointerCapture(e.pointerId);
-    setDragId(id); setDragType(type);
-  };
-  const skPointerMove=(e,id,section)=>{
-    if(!dragId||dragId===id) return;
-    e.preventDefault();
-    if(dragType==="subskill"&&section==="skill") setLinkTarget(id);
-    else{ setDragOverId(id); setLinkTarget(null); }
-  };
-  const skPointerUp=(e,targetId,section)=>{
-    if(!dragId){ return; }
-    if(dragType==="subskill"&&section==="skill"&&dragId!==targetId){
-      onLink(dragId,targetId);
-    } else if(dragType===section&&dragId!==targetId){
-      const arr=section==="skill"?[...mainSkills]:[...subSkills];
-      const from=arr.findIndex(s=>s.id===dragId);
-      const to=arr.findIndex(s=>s.id===targetId);
-      if(from!==-1&&to!==-1){
-        const[m]=arr.splice(from,1); arr.splice(to,0,m);
-        onReorder(section==="skill"?[...arr,...subSkills]:[...mainSkills,...arr]);
-      }
-    }
-    setDragId(null); setDragType(null); setDragOverId(null); setLinkTarget(null);
-  };
-  const getSkDragProps=(id,section)=>({
-    onPointerDown:(e)=>skPointerDown(e,id,section),
-    onPointerMove:(e)=>skPointerMove(e,id,section),
-    onPointerUp:(e)=>skPointerUp(e,id,section),
-    style:{
-      opacity:dragId===id?0.4:1,
-      outline:(dragType==="subskill"&&linkTarget===id)?`2px dashed ${(skills.find(s=>s.id===id)||{}).color||"var(--primary)"}`:
-               (dragOverId===id&&dragType===section)?"2px dashed var(--primary)":"none",
-      outlineOffset:2,
-      touchAction:"none",
-      transition:"opacity .1s",
-    }
-  });
-
-  // activity map — 90 days for heatmap, 14-day slice for bar chart
+  // 14-day activity map
   const activityMap=useMemo(()=>{
     const map={}; const now=Date.now(); const DAY=86400000;
     skills.forEach(s=>{
       const days=[];
-      for(let i=89;i>=0;i--){
+      for(let i=13;i>=0;i--){
         const ds=new Date(now-i*DAY); ds.setHours(0,0,0,0);
         const de=new Date(ds); de.setHours(23,59,59,999);
         const mins=meds.filter(m=>(m.skillIds||[]).includes(s.id)&&m.created>=ds.getTime()&&m.created<=de.getTime()).reduce((a,m)=>a+m.dur,0);
@@ -1484,10 +1252,10 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
     onAdd({name:f.name.trim(),icon:f.icon,color:f.color,startXp,customImg:f.customImg||null,type:formType,parentIds:[]});
     setF({name:"",icon:"◈",color:SKILL_COLORS[0],startLevel:1,customImg:null}); setShowForm(false);
   };
-  const openEdit=s=>{setEf({name:s.name,icon:s.icon,color:s.color,customImg:s.customImg||null,intention:s.intention||""});setEditingId(s.id);};
+  const openEdit=s=>{setEf({name:s.name,icon:s.icon,color:s.color,customImg:s.customImg||null});setEditingId(s.id);};
   const submitEdit=()=>{
     if(!ef.name.trim()) return;
-    onEdit(editingId,{name:ef.name.trim(),icon:ef.icon,color:ef.color,customImg:ef.customImg||null,intention:ef.intention||""});
+    onEdit(editingId,{name:ef.name.trim(),icon:ef.icon,color:ef.color,customImg:ef.customImg||null});
     setEditingId(null);
   };
   const handleImg=(e,setter)=>{
@@ -1501,7 +1269,47 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
     setShowPresets(false);
   };
 
-  // drag handled by pointer events (skPointerDown/Move/Up)
+  // ── drag handlers ──────────────────────────────────────────────────────────
+  const handleDragStart=(e,id,type)=>{
+    setDragId(id); setDragType(type);
+    e.dataTransfer.effectAllowed="move";
+    setTimeout(()=>{const el=document.getElementById("sk-"+id);if(el)el.style.opacity="0.35";},0);
+  };
+  const handleDragEnd=()=>{
+    const el=document.getElementById("sk-"+dragId);if(el)el.style.opacity="1";
+    setDragId(null); setDragType(null); setDragOverId(null); setLinkTarget(null);
+  };
+  const handleDragOverSkill=(e,id)=>{
+    e.preventDefault();
+    if(dragType==="subskill") setLinkTarget(id);
+    else setDragOverId(id);
+  };
+  const handleDragOverSub=(e,id)=>{
+    e.preventDefault();
+    if(dragType==="subskill") setDragOverId(id);
+  };
+  const handleDropOnSkill=(e,targetId)=>{
+    e.preventDefault();
+    if(dragType==="subskill"&&dragId&&targetId){
+      onLink(dragId,targetId); // toggle link
+    } else if(dragType==="skill"&&dragId&&dragId!==targetId){
+      const arr=[...mainSkills];
+      const from=arr.findIndex(s=>s.id===dragId);
+      const to=arr.findIndex(s=>s.id===targetId);
+      if(from!==-1&&to!==-1){const [m]=arr.splice(from,1);arr.splice(to,0,m);onReorder([...arr,...subSkills]);}
+    }
+    handleDragEnd();
+  };
+  const handleDropOnSub=(e,targetId)=>{
+    e.preventDefault();
+    if(dragType==="subskill"&&dragId&&dragId!==targetId){
+      const arr=[...subSkills];
+      const from=arr.findIndex(s=>s.id===dragId);
+      const to=arr.findIndex(s=>s.id===targetId);
+      if(from!==-1&&to!==-1){const [m]=arr.splice(from,1);arr.splice(to,0,m);onReorder([...mainSkills,...arr]);}
+    }
+    handleDragEnd();
+  };
 
   // ── shared form renderer ───────────────────────────────────────────────────
   const renderForm=()=>(<div className="fwrap">
@@ -1539,7 +1347,7 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
   const renderSkillCard=(s,i,section)=>{
     const lv=skillLv(s.xp,skPerLv),pg=skillProg(s.xp,skPerLv),cur=s.xp%skPerLv;
     const streak=streaks[s.id]||{count:0}; const mult=getMultiplier(streak.count);
-    const allDays=activityMap[s.id]||[]; const days=allDays.slice(-14); const maxMins=Math.max(...days,1);
+    const days=activityMap[s.id]||[]; const maxMins=Math.max(...days,1);
     const isExpanded=expandedId===s.id;
     const isLinkHover=linkTarget===s.id&&dragType==="subskill";
     const isReorderHover=dragOverId===s.id&&dragType===section;
@@ -1549,15 +1357,17 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
     if(viewMode==="list"){
       return (
         <div key={s.id} id={"sk-"+s.id}
-          {...getSkDragProps(s.id,section)}
+          draggable onDragStart={e=>handleDragStart(e,s.id,section)}
+          onDragOver={e=>section==="skill"?handleDragOverSkill(e,s.id):handleDragOverSub(e,s.id)}
+          onDrop={e=>section==="skill"?handleDropOnSkill(e,s.id):handleDropOnSub(e,s.id)}
+          onDragEnd={handleDragEnd}
           onClick={()=>setExpandedId(isExpanded?null:s.id)}
           style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",
-            background:"var(--s1)",border:`1px solid ${isLinkHover?s.color:"var(--b1)"}`,
-            borderRadius:"var(--r)",marginBottom:4,
-            borderStyle:isLinkHover?"dashed":"solid",
-            ...getSkDragProps(s.id,section).style}}>
-          <span style={{color:"var(--tx3)",fontSize:9,flexShrink:0,cursor:"grab",userSelect:"none"}} title="Drag to reorder">⠿</span>
-          <SkIcon s={s} sz={13}/>
+            background:"var(--s1)",border:`1px solid ${isLinkHover?s.color:isReorderHover?s.color+"44":"var(--b1)"}`,
+            borderRadius:"var(--r)",marginBottom:4,cursor:"pointer",transition:"border-color .15s",
+            borderStyle:isLinkHover?"dashed":"solid"}}>
+          <span style={{color:"var(--tx3)",fontSize:9,flexShrink:0}}>⠿</span>
+          {s.customImg?<img src={s.customImg} style={{width:14,height:14,borderRadius:2,objectFit:"cover"}}/>:<span style={{color:s.color,fontSize:13,flexShrink:0}}>{s.icon}</span>}
           <span style={{flex:1,fontFamily:"'DM Mono',monospace",fontSize:10,color:"var(--tx)"}}>{s.name}</span>
           {streak.count>=3&&<span className="sk-streak" style={{fontSize:8}}>{streak.count}d{mult>1?` ${mult}×`:""}</span>}
           <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)",flexShrink:0}}>{L.levelName} {lv}</span>
@@ -1565,7 +1375,7 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
             <div style={{width:`${pg}%`,height:"100%",background:s.color,borderRadius:2}}/>
           </div>
           {section==="subskill"&&parents.length>0&&<div style={{display:"flex",gap:3}}>
-            {parents.map(p=><SkIcon key={p.id} s={p} sz={12} style={{marginRight:2}} />)}
+            {parents.map(p=><span key={p.id} style={{color:p.color,fontSize:10}} title={p.name}>{p.icon}</span>)}
           </div>}
           <button className="sk-delbtn" style={{marginLeft:2}} onClick={e=>{e.stopPropagation();openEdit(s);}}>✎</button>
           <button className="sk-delbtn" onClick={e=>{e.stopPropagation();onDelete(s.id);}}>✕</button>
@@ -1576,12 +1386,16 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
     // grid card
     return (
       <div key={s.id} id={"sk-"+s.id}
-        {...getSkDragProps(s.id,section)}>
+        draggable onDragStart={e=>handleDragStart(e,s.id,section)}
+        onDragOver={e=>section==="skill"?handleDragOverSkill(e,s.id):handleDragOverSub(e,s.id)}
+        onDrop={e=>section==="skill"?handleDropOnSkill(e,s.id):handleDropOnSub(e,s.id)}
+        onDragEnd={handleDragEnd}
+        style={{transition:"transform .12s",transform:isReorderHover?(i<(dragOverId?mainSkills.findIndex(x=>x.id===dragOverId):0)?"translateY(-4px)":"translateY(4px)"):"none"}}>
         <div className="skill-card" style={{borderColor:isLinkHover?s.color:isReorderHover?s.color+"44":"",borderStyle:isLinkHover?"dashed":"solid",cursor:"default"}}>
           <div className="sk-hdr">
             <div className="sk-name" style={{gap:5}}>
               <span style={{color:"var(--tx3)",fontSize:9,cursor:"grab",userSelect:"none",flexShrink:0}} title="Drag to reorder">⠿</span>
-              <SkIcon s={s} sz={14}/>
+              {s.customImg?<img src={s.customImg} style={{width:14,height:14,borderRadius:2,objectFit:"cover"}}/>:<span style={{color:s.color,fontSize:14}}>{s.icon}</span>}
               <span style={{overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{s.name}</span>
             </div>
             <div className="sk-meta">
@@ -1608,10 +1422,14 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
             {isExpanded?"▲ less":"▼ more"}
           </button>
           {isExpanded&&(<div style={{marginTop:6,paddingTop:6,borderTop:"1px solid var(--b1)"}}>
-            {/* 90-day heatmap */}
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:1.5,textTransform:"uppercase",color:"var(--tx3)",marginBottom:2}}>90 day activity</div>
-            <HeatMap days={activityMap[s.id]||[]} color={s.color}/>
-            <div style={{marginBottom:6}}/>
+            {/* 14-day chart */}
+            <div style={{display:"flex",alignItems:"flex-end",gap:2,height:24}}>
+              {days.map((m,di)=>{
+                const h=m===0?2:Math.max(4,Math.round((m/maxMins)*22));
+                return <div key={di} title={`${m}min`} style={{flex:1,height:h,borderRadius:1,background:di===13?s.color:s.color+"55",transition:"height .2s"}}/>;
+              })}
+            </div>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",marginTop:2,marginBottom:6,textAlign:"right"}}>14d activity</div>
             {/* linked items */}
             {section==="skill"&&linked.length>0&&(<>
               <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:1.5,textTransform:"uppercase",color:"var(--tx3)",marginBottom:4}}>Subskills</div>
@@ -1666,9 +1484,7 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
       const es=skills.find(s=>s.id===editingId); if(!es) return null;
       return (<div className="fwrap" style={{marginBottom:12}}>
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:10}}>Edit {es.type||"skill"}</div>
-        <input className="fi full" value={ef.name} onChange={e=>setEf(v=>({...v,name:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submitEdit()} style={{marginBottom:8}}/>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5,marginTop:2}}>Intention <span style={{opacity:.5,letterSpacing:0,textTransform:"none"}}>(for AI advisor)</span></div>
-        <textarea className="fi full" rows={2} placeholder="e.g. build consistent meditation practice, run 5k by March..." value={ef.intention} onChange={e=>setEf(v=>({...v,intention:e.target.value}))} style={{resize:"vertical",lineHeight:1.4}}/>
+        <input className="fi full" value={ef.name} onChange={e=>setEf(v=>({...v,name:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submitEdit()}/>
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:7,marginTop:8}}>Icon</div>
         <div className="icon-grid">{SKILL_ICONS_EXTRA.map(ic=><button key={ic} className={`icon-opt ${ef.icon===ic?"on":""}`} onClick={()=>setEf(v=>({...v,icon:ic,customImg:null}))}>{ic}</button>)}</div>
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5}}>Or upload image</div>
@@ -1692,13 +1508,7 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
       <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)"}}>Skills</div>
       <div style={{fontSize:9,color:"var(--tx3)"}}>{mainSkills.length} total</div>
     </div>
-    {mainSkills.length===0&&!showForm&&(
-      <div className="empty-state">
-        <div className="es-icon">◈</div>
-        <div className="es-title">No skills yet</div>
-        <div className="es-desc">Skills track your growth over time. Add one above, or load a preset to get started. XP flows here from every practice session and quest.</div>
-      </div>
-    )}
+    {mainSkills.length===0&&!showForm&&<div style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:12,textAlign:"center",marginBottom:10,fontSize:11,color:"var(--tx3)"}}>No skills yet — create one above or load a preset</div>}
     <div style={viewMode==="grid"?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}:{marginBottom:16}}>
       {mainSkills.map((s,i)=>renderSkillCard(s,i,"skill"))}
     </div>
@@ -1741,7 +1551,7 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
   const [xpPreview,setXpPreview]=useState(null);
   const [xpPrevLoad,setXpPrevLoad]=useState(false);
   const [newType,setNewType]=useState({label:"",icon:"◎"});
-  const [f,setF]=useState({typeId:"",skillIds:[],subskillIds:[],dur:15,note:"",sessionDate:"",sessionTime:"",showDate:false});
+  const [f,setF]=useState({typeId:"",skillIds:[],subskillId:null,dur:15,note:"",sessionDate:"",sessionTime:"",showDate:false});
 
   const toggleSkill=id=>setF(v=>({...v,skillIds:v.skillIds.includes(id)?v.skillIds.filter(s=>s!==id):[...v.skillIds,id]}));
 
@@ -1752,7 +1562,7 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
   useEffect(()=>{
     if(pending){
       const sids=pending.skillId?[pending.skillId]:[];
-      setF(v=>({...v,skillIds:sids,subskillIds:[]}));
+      setF(v=>({...v,skillIds:sids}));
       setShowForm(true);
     }
   },[pending]);
@@ -1781,8 +1591,8 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
     }
     let sessionDate=null;
     if(f.showDate&&f.sessionDate) sessionDate=new Date(`${f.sessionDate}${f.sessionTime?"T"+f.sessionTime:"T12:00"}`).getTime();
-    await onLog({type:f.typeId,skillIds:f.skillIds,subskillIds:f.subskillIds,dur:f.dur,note:f.note.trim(),baseXp,aiReason,sessionDate});
-    setF(v=>({...v,note:"",subskillIds:[],sessionDate:"",sessionTime:"",showDate:false}));
+    await onLog({type:f.typeId,skillIds:f.skillIds,subskillId:f.subskillId,dur:f.dur,note:f.note.trim(),baseXp,aiReason,sessionDate});
+    setF(v=>({...v,note:"",sessionDate:"",sessionTime:"",showDate:false}));
     setShowForm(false);
   };
 
@@ -1898,20 +1708,14 @@ Suggest fair XP and a short reason. Reply ONLY with JSON, no markdown: {"xp": NU
           <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5,marginTop:4}}>Or log a subskill <span style={{fontWeight:"normal",textTransform:"none",letterSpacing:0}}>(XP goes to all linked skills)</span></div>
           <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:10}}>
             {skills.filter(s=>s.type==="subskill").map(s=>{
-              const isSelected=(f.subskillIds||[]).includes(s.id);
+              const isSelected=f.subskillId===s.id;
               const parents=(s.parentIds||[]).map(pid=>skills.find(sk=>sk.id===pid)).filter(Boolean);
               return (
                 <button key={s.id}
-                  onClick={()=>setF(v=>{
-                    const isNowSel=v.subskillIds.includes(s.id);
-                    const next=isNowSel?v.subskillIds.filter(x=>x!==s.id):[...v.subskillIds,s.id];
-                    // merge all parent IDs from selected subskills
-                    const allParents=[...new Set(next.flatMap(sid=>{const sk=skills.find(x=>x.id===sid);return sk?.parentIds||[];}))];
-                    return {...v,subskillIds:next,skillIds:[...new Set([...v.skillIds,...allParents])]};
-                  })}
+                  onClick={()=>setF(v=>({...v,subskillId:isSelected?null:s.id,skillIds:isSelected?v.skillIds:(s.parentIds||[])}))}
                   style={{background:isSelected?s.color+"22":"var(--bg)",border:`1px solid ${isSelected?s.color+"66":"var(--b2)"}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:.8,color:isSelected?s.color:"var(--tx3)",transition:"all .15s",display:"flex",alignItems:"center",gap:4}}>
-                  <span><SkIcon s={s} sz={10}/> {s.name}</span>
-                  {parents.length>0&&<span style={{opacity:.6}}>{parents.map(p=><SkIcon key={p.id} s={p} sz={9}/>)}</span>}
+                  <span>{s.icon} {s.name}</span>
+                  {parents.length>0&&<span style={{opacity:.6}}>{parents.map(p=>p.icon).join("")}</span>}
                 </button>
               );
             })}
@@ -1973,13 +1777,7 @@ Suggest fair XP and a short reason. Reply ONLY with JSON, no markdown: {"xp": NU
         <button onClick={()=>{setAnalysisOpen(false);setAnalysis(null);}} style={{background:"none",border:"none",color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:1,cursor:"pointer",marginTop:8,padding:0}}>dismiss</button>
       </div>
     )}
-    {meds.length===0&&(
-      <div className="empty-state">
-        <div className="es-icon">◎</div>
-        <div className="es-title">No sessions logged yet</div>
-        <div className="es-desc">Log your first practice session — meditation, movement, study, anything you do intentionally. XP is awarded based on time and reflection quality.</div>
-      </div>
-    )}
+    {meds.length===0&&<div className="empty">No sessions logged</div>}
     {meds.map(m=>{
       const ptype=practiceTypes.find(t=>t.id===m.type)||{label:m.type,icon:"◎"};
       const mSkills=(m.skillIds||[]).map(id=>skills.find(s=>s.id===id)).filter(Boolean);
@@ -2000,7 +1798,7 @@ function MedCard({med,ptype,mSkills,onDelete}){
         <div className="med-name">{ptype.label}</div>
         <div className="med-sub">
           {med.dur} min · +{med.xpAwarded||med.dur*ppm} {L.xpName}{med.multiplier>1&&` · ${med.multiplier}×`}
-          {mSkills.map(s=><span key={s.id} style={{marginLeft:4,color:s.color,display:"inline-flex",alignItems:"center",gap:3}}><SkIcon s={s} sz={11}/>{s.name}</span>)}
+          {mSkills.map(s=><span key={s.id} style={{marginLeft:4,color:s.color}}>{s.icon} {s.name}</span>)}
         </div>
         {med.aiReason&&<div className="med-reason">✦ {med.aiReason}</div>}
         {med.note&&<>
@@ -2043,41 +1841,40 @@ function JarvisOverlay({tasks,quests,skills,onAddQuest,onAddTask,onClose}){
     try{
       const activeQuests=quests.filter(q=>!q.done).map(q=>`${q.title} (${q.type})`).slice(0,10).join(", ")||"none";
       const doneCount=quests.filter(q=>q.done).length;
-      const skPerLvLocal=settings?.xp?.skillPerLevel||6000;
-      const skillDetails=skills.filter(s=>s.type!=="subskill").map(s=>{
-        const lv=Math.floor(s.xp/skPerLvLocal*100)+1;
-        return s.intention?`${s.name} (lv${lv}): ${s.intention}`:`${s.name} (lv${lv})`;
-      }).join("\n")||"none";
+      const skillNames=skills.map(s=>`${s.name} lv${Math.floor(s.xp/100)+1}`).join(", ")||"none";
       const taskCount=tasks.filter(t=>!t.done).length;
 
-      const systemPrompt=`You are JARVIS — a sharp, direct AI co-pilot inside The Codex, a personal gamified life tracker.
+      const systemPrompt=`You are JARVIS — an AI embedded in The Codex, a personal gamified life tracker. You are not a chatbot. You are a co-pilot.
 
-## USER'S CODEX STATE
-Active quests: ${activeQuests}
-Completed quests: ${doneCount}
-Pending tasks: ${taskCount}
-Skills and intentions:
-${skillDetails}
+CODEX STATE:
+- Active quests: ${activeQuests}
+- Completed quests: ${doneCount}
+- Skills: ${skillNames}
+- Pending tasks: ${taskCount}
 
-## YOUR BEHAVIOR
-- You are a co-pilot, not a chatbot. Be direct. Have opinions. Use dry wit when appropriate.
-- Answer questions in 2-4 sentences max unless the user asks for detail.
-- NEVER start a sentence with "I" as the first word.
-- NEVER offer to add things unprompted.
-- Most messages are just conversation. Reply conversationally. No ACTIONS block.
+PERSONALITY RULES — follow these exactly:
+1. When asked a question, ANSWER IT. Give your actual opinion. Be direct. Be concise. Do not hedge.
+2. You have personality. Dry wit is fine. Bluntness is fine. Padding is not.
+3. NEVER offer to add things to the tracker unprompted. NEVER say "would you like me to add that?" NEVER suggest logging something. If they want it added, they will ask.
+4. NEVER open with "I" as the first word. Vary sentence structure.
+5. Keep responses under 4 sentences unless the user asks for detail.
 
-## ADDING TO THE TRACKER
-Only append an ACTIONS block when the user explicitly uses words like: add, create, log, track, make, set up.
-The ACTIONS block must be the LAST line of your response, nothing after it.
-Format: ACTIONS:{"actions":[...]}
+ADDING ITEMS — only when user explicitly says "add", "create", "log", "track", or similar:
+Append this exact format at the very end, after your message text, on its own line:
+ACTIONS:{"actions":[{"type":"..."}]}
 
-Types:
-- {"type":"add_task","title":"...","xpVal":25,"period":"daily"}
-- {"type":"add_quest","title":"...","note":"...","questType":"main"}
-- {"type":"log_session","sessionType":"mindfulness","duration":20,"note":"..."}
+Action types:
+- add_task: fields: title (string), xpVal (5-100), period ("daily"/"weekly"/"monthly")
+- add_quest: fields: title (string), note (string), questType ("main"/"side"/"radiant")
+- log_session: fields: sessionType ("mindfulness"/"presence"/"grounding"/"visualization"/"ritual"/"breathwork"/"contemplation"/"open"), duration (minutes, number), note (string)
 
-## CRITICAL RULE
-If the user is asking a question or just talking — reply ONLY with plain text. No ACTIONS block at all. Not even empty.`;
+Examples:
+ACTIONS:{"actions":[{"type":"add_task","title":"Read 20 pages","xpVal":25,"period":"daily"}]}
+ACTIONS:{"actions":[{"type":"add_quest","title":"Finish chapter 3","note":"part of writing arc","questType":"side"}]}
+ACTIONS:{"actions":[{"type":"log_session","sessionType":"mindfulness","duration":20,"note":"morning sit"}]}
+
+Multiple actions allowed: ACTIONS:{"actions":[{"type":"add_task",...},{"type":"log_session",...}]}
+If not adding anything, do NOT include ACTIONS at all.`;
 
       const res=await fetch("/api/chat",{
         method:"POST",headers:{"Content-Type":"application/json"},
@@ -2486,7 +2283,7 @@ function TaskCard({task,skills,quests,onToggle,onDelete,onEdit}){
       <div className="frow">
         <select className="fsel" value={f.skill} onChange={e=>setF(v=>({...v,skill:e.target.value}))}>
           <option value="">No skill</option>
-          {skills.map(s=><option key={s.id} value={s.id}>{skillLabel(s)}</option>)}
+          {skills.map(s=><option key={s.id} value={s.id}>{s.icon} {s.name}</option>)}
         </select>
         <select className="fsel" value={f.xpVal} onChange={e=>setF(v=>({...v,xpVal:e.target.value}))}>
           {[5,10,20,30,50,80].map(v=><option key={v} value={v}>{v} {L.xpName}</option>)}
@@ -2513,14 +2310,14 @@ function TaskCard({task,skills,quests,onToggle,onDelete,onEdit}){
   );
 }
 
-function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggleSubquest,onDeleteSubquest,radiantAvailable,radiantCooldownLabel}){
+function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggleSubquest,onDeleteSubquest}){
   const {settings}=useSettings(); const L=settings.labels;
   const qSkills=(quest.skills||[]).map(id=>skills.find(s=>s.id===id)).filter(Boolean);
   const [editing,setEditing]=useState(false);
   const [showSubs,setShowSubs]=useState(false);
   const [newSub,setNewSub]=useState("");
   const defaultQColor=(sIds)=>{ const s=skills.find(sk=>sk.id===(sIds||[])[0]); return s?s.color:null; };
-  const [ef,setEf]=useState({title:quest.title,note:quest.note||"",dueDate:quest.due?new Date(quest.due).toISOString().split("T")[0]:"",skillIds:quest.skills||[],color:quest.color||defaultQColor(quest.skills)||null,priority:quest.priority||"med",cooldown:quest.cooldown??60*60*1000});
+  const [ef,setEf]=useState({title:quest.title,note:quest.note||"",dueDate:quest.due?new Date(quest.due).toISOString().split("T")[0]:"",skillIds:quest.skills||[],color:quest.color||defaultQColor(quest.skills)||null,priority:quest.priority||"med"});
   const [xpSuggestion,setXpSuggestion]=useState(null);
   const [xpLoading,setXpLoading]=useState(false);
   const toggleESkill=id=>setEf(v=>{
@@ -2531,7 +2328,7 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
   const saveEdit=()=>{
     if(!ef.title.trim()) return;
     const due=ef.dueDate?new Date(ef.dueDate+"T09:00").getTime():null;
-    onEdit(quest.id,{title:ef.title.trim(),note:ef.note.trim(),due,skills:ef.skillIds,color:ef.color||null,priority:ef.priority,cooldown:quest.type==="radiant"?ef.cooldown:undefined});
+    onEdit(quest.id,{title:ef.title.trim(),note:ef.note.trim(),due,skills:ef.skillIds,color:ef.color||null,priority:ef.priority});
     setEditing(false); setXpSuggestion(null);
   };
   const suggestQuestXp=async()=>{
@@ -2549,27 +2346,10 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
     }catch(e){setXpSuggestion({xp:null,reason:"Couldn't reach AI."});}
     setXpLoading(false);
   };
-  const [subXpSug,setSubXpSug]=useState(null);
-  const [subXpLoad,setSubXpLoad]=useState(false);
-  const suggestSubXp=async(title)=>{
-    if(!title.trim()) return;
-    setSubXpLoad(true); setSubXpSug(null);
-    try{
-      const res=await fetch("/api/chat",{method:"POST",
-        headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({max_tokens:80,
-          messages:[{role:"user",content:`Subquest/step in a gamified life tracker. Parent quest: "${quest.title}" (${quest.type}). Subquest: "${title}". Suggest fair XP for completing this one step (range 5-40). Reply ONLY with JSON: {"xp": NUMBER, "reason": "max 8 words"}`}]})});
-      const data=await res.json();
-      const txt=data.choices?.[0]?.message?.content||"";
-      const m=txt.match(/\{[\s\S]*\}/);
-      if(m) setSubXpSug(JSON.parse(m[0]));
-    }catch(e){setSubXpSug({xp:10,reason:"Default XP"});}
-    setSubXpLoad(false);
-  };
   const submitSub=()=>{
     if(!newSub.trim()) return;
-    onAddSubquest(quest.id,newSub.trim(),subXpSug?.xp||10);
-    setNewSub(""); setSubXpSug(null);
+    onAddSubquest(quest.id,newSub.trim());
+    setNewSub("");
   };
   const subs=quest.subquests||[];
   const subsDone=subs.filter(s=>s.done).length;
@@ -2598,12 +2378,6 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
       <div className="frow">
         <input className="fi" type="date" style={{colorScheme:"dark"}} value={ef.dueDate} onChange={e=>setEf(v=>({...v,dueDate:e.target.value}))}/>
       </div>
-      {quest.type==="radiant"&&<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,textTransform:"uppercase",color:"var(--tx3)",flexShrink:0}}>Resets after</div>
-        <select className="fsel" style={{flex:1}} value={ef.cooldown} onChange={e=>setEf(v=>({...v,cooldown:Number(e.target.value)}))}>
-          {COOLDOWN_OPTIONS.map(o=><option key={o.ms} value={o.ms}>{o.label}</option>)}
-        </select>
-      </div>}
       <div style={{marginBottom:8}}>
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:6}}>Quest color</div>
         <div style={{display:"flex",flexWrap:"wrap",gap:5,alignItems:"center"}}>
@@ -2631,9 +2405,9 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
           if(qc) return {borderColor:qc,borderLeftWidth:3};
           return {};
         })()}>
-        <button className="chk" style={isRadiant?{color:rAvail?"var(--secondary)":"var(--tx3)",borderColor:rAvail?"var(--secondaryb)":"var(--b1)",fontSize:rCool?7:undefined}:{}}
-          onClick={()=>onToggle(quest.id)} title={rCool?`Available in ${rCool}`:undefined}>
-          {isRadiant?(rCool?rCool:"◉"):quest.done?"✓":""}
+        <button className="chk" style={isRadiant?{color:"var(--secondary)",borderColor:"var(--secondaryb)"}:{}}
+          onClick={()=>onToggle(quest.id)}>
+          {isRadiant?"◉":quest.done?"✓":""}
         </button>
         <div className="cbody">
           <div style={{display:"flex",alignItems:"center",gap:4}}>
@@ -2643,9 +2417,8 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
           {subs.length>0&&<div className="sub-progress"><div className="sub-progress-fill" style={{width:`${subs.length?Math.round(subsDone/subs.length*100):0}%`}}/></div>}
           {quest.note&&<div className="cnote">{quest.note}</div>}
           <div className="cmeta">
-            {qSkills.map(sk=><span key={sk.id} className="ctag" style={{borderColor:sk.color+"44",color:sk.color,display:"inline-flex",alignItems:"center",gap:3}}><SkIcon s={sk} sz={10}/>{sk.name}</span>)}
+            {qSkills.map(sk=><span key={sk.id} className="ctag" style={{borderColor:sk.color+"44",color:sk.color}}>{sk.icon} {sk.name}</span>)}
             <span className="ctag">{quest.xpVal} {L.xpName}{isRadiant?" / run":""}</span>
-            {isRadiant&&<span className="ctag" style={{color:"var(--secondary)",borderColor:"var(--secondaryb)"}}>◉ {COOLDOWN_OPTIONS.find(o=>o.ms===(quest.cooldown??60*60*1000))?.label||"1 hr"}</span>}
             {dueFmt&&<span className="ctag" style={{
               color:overdue?"var(--danger)":dueSoon?"var(--primary)":"var(--tx3)",
               borderColor:overdue?"var(--dangerf)":dueSoon?"var(--primaryb)":"var(--b1)"
@@ -2666,27 +2439,15 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
             <div key={s.id} style={{display:"flex",alignItems:"center",gap:7,padding:"5px 0",borderBottom:"1px solid var(--b1)"}}>
               <button className={`chk ${s.done?"on":""}`} style={{width:14,height:14,fontSize:8,flexShrink:0,minWidth:14}} onClick={()=>onToggleSubquest(quest.id,s.id)}>{s.done?"✓":""}</button>
               <span style={{flex:1,fontSize:12,color:s.done?"var(--tx3)":"var(--tx)",textDecoration:s.done?"line-through":"none"}}>{s.title}</span>
-              {s.xpVal&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:s.done?"var(--tx3)":"var(--primary)",flexShrink:0}}>+{s.xpVal}</span>}
               <button className="delbtn" style={{fontSize:9}} onClick={()=>onDeleteSubquest(quest.id,s.id)}>✕</button>
             </div>
           ))}
-          <div style={{display:"flex",gap:5,paddingTop:6,flexDirection:"column"}}>
-            <div style={{display:"flex",gap:5}}>
-              <input className="fi" placeholder="Add step..." value={newSub}
-                onChange={e=>{setNewSub(e.target.value);setSubXpSug(null);}}
-                onKeyDown={e=>e.key==="Enter"&&(newSub.trim()&&!subXpSug?suggestSubXp(newSub):submitSub())}
-                style={{fontSize:11,padding:"4px 8px",flex:1}}/>
-              <button className="fsbtn" style={{width:"auto",padding:"4px 8px",margin:0,fontSize:9,opacity:.7}}
-                onClick={()=>suggestSubXp(newSub)} disabled={!newSub.trim()||subXpLoad} title="AI XP estimate">
-                {subXpLoad?"...":"⟡"}
-              </button>
-              <button className="fsbtn" style={{width:"auto",padding:"4px 12px",margin:0,fontSize:11}} onClick={submitSub} disabled={!newSub.trim()}>+</button>
-            </div>
-            {subXpSug&&<div style={{fontSize:10,color:"var(--tx3)",paddingLeft:2,display:"flex",alignItems:"center",gap:6}}>
-              <span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace"}}>+{subXpSug.xp} XP</span>
-              <span>{subXpSug.reason}</span>
-              <button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:9,padding:0}} onClick={()=>setSubXpSug(null)}>✕</button>
-            </div>}
+          <div style={{display:"flex",gap:5,paddingTop:6}}>
+            <input className="fi" placeholder="Add step..." value={newSub}
+              onChange={e=>setNewSub(e.target.value)}
+              onKeyDown={e=>e.key==="Enter"&&submitSub()}
+              style={{fontSize:11,padding:"4px 8px",flex:1}}/>
+            <button className="fsbtn" style={{width:"auto",padding:"4px 12px",margin:0,fontSize:11}} onClick={submitSub}>+</button>
           </div>
         </div>
       )}
