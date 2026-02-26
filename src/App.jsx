@@ -860,7 +860,7 @@ export default function App(){
             {tab==="practice" && <PracticeTab meds={meds} skills={skills} streaks={streaks} pending={pendingPractice} practiceTypes={practiceTypes} onAddType={addPracticeType} onDeleteType={deletePracticeType} onLog={logMed} onDelete={deleteMed} onClearPending={()=>setPendingPractice(null)}/>}
             {tab==="journal"  && <JournalTab entries={journal} onAdd={addJournalEntry} onDelete={deleteJournalEntry}/>}
             {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} journal={journal} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest}/>}
-            {tab==="settings" && <SettingsTab showToast={showToast} onExport={exportData} onImport={importData}/>}
+            {tab==="settings" && <SettingsTab showToast={showToast} onExport={exportData} onImport={importData} userId={userId} onSignIn={()=>setShowAuth(true)} onSignOut={handleSignOut}/>}
           </main>
           </div>
           {/* Weekly Review floating button */}
@@ -2087,7 +2087,7 @@ function ActionCard({action,skills,onAccept,onCancel}){
   );
 }
 
-function SettingsTab({showToast,onExport,onImport}){
+function SettingsTab({showToast,onExport,onImport,userId,onSignIn,onSignOut}){
   const {settings,saveSettings}=useSettings();
   const importRef=useRef(null);
   const [draft,setDraft]=useState(()=>JSON.parse(JSON.stringify(settings)));
@@ -2120,6 +2120,20 @@ function SettingsTab({showToast,onExport,onImport}){
   );
 
   return (<div style={{paddingBottom:8}}>
+    {/* Account */}
+    <div className="slbl" style={{marginBottom:8}}>Account</div>
+    <div className="fwrap" style={{marginBottom:18}}>
+      {userId
+        ? <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+            <span style={{fontSize:11,color:"var(--tx2)",fontFamily:"'DM Mono',monospace"}}>Signed in</span>
+            <button className="fsbtn" style={{width:"auto",padding:"6px 16px",margin:0}} onClick={onSignOut}>Sign Out</button>
+          </div>
+        : <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            <div style={{fontSize:11,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",marginBottom:4}}>Sign in to sync your data across devices</div>
+            <button className="fsbtn" style={{margin:0}} onClick={onSignIn}>Sign In / Create Account</button>
+          </div>
+      }
+    </div>
     <div className="slbl">Profile</div>
     <div className="sgroup">
       <div className="srow">
