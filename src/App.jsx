@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useRef, createContext, useContext, useMemo } from "react";
+import AuthScreen from "./AuthScreen";
+import { supabase, getSession, onAuthChange, signOut, loadUserData, saveField, migrateLocalStorage } from "./supabase";
 
 const GFONTS = `@import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;1,300&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');`;
 const SettingsCtx = createContext(null);
@@ -170,6 +172,19 @@ function deepMerge(def,saved){
 
 async function sget(k){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch{ return null; } }
 async function sset(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch{} }
+
+// Map cx_ keys to Supabase column names
+const KEY_MAP={
+  cx_settings:"settings", cx_tasks:"tasks", cx_quests:"quests",
+  cx_skills:"skills", cx_meds:"meds", cx_ptypes:"practice_types",
+  cx_xp:"xp", cx_streaks:"streaks", cx_seen:"seen_tabs",
+  cx_journal:"journal", cx_xplog:"xp_log",
+};
+// Save to both localStorage (offline cache) and Supabase (if logged in)
+async function dbSet(k,v,userId){
+  await sset(k,v);
+  if(userId&&supabase){ const col=KEY_MAP[k]; if(col) await saveField(userId,col,v); }
+}
 
 function buildCSS(C,T,FS=14){
   const t={...THEME_PRESETS[0],...T};
@@ -432,6 +447,8 @@ function Collapsible({question,children}){
 }
 
 export default function App(){
+  const [session,setSession]=useState(undefined); // undefined=loading, null=guest, obj=authed
+  const [userId,setUserId]=useState(null);
   const [settings,setSettings]=useState(DEFAULT_SETTINGS);
   const [tab,setTab]=useState("planner");
   const [period,setPeriod]=useState("daily");
@@ -454,36 +471,92 @@ export default function App(){
   const [showReview,setShowReview]=useState(false);
   const toastRef=useRef(null);
 
-  useEffect(()=>{
-    (async()=>{
-      const s=await sget("cx_settings");
-      if(s){
-        const merged=deepMerge(DEFAULT_SETTINGS,s);
-        // guard against corrupted/white theme (bg should be a dark or valid hex)
-        if(!merged.theme?.bg||merged.theme.bg==="#ffffff"||merged.theme.bg==="white"||merged.theme.bg==="")
-          merged.theme=DEFAULT_SETTINGS.theme;
-        setSettings(merged);
+  // Load data from Supabase if logged in, otherwise localStorage
+  const loadData=async(uid)=>{
+    if(uid&&supabase){
+      // Check if user has existing Supabase data
+      const db=await loadUserData(uid);
+      if(!db){
+        // First login — migrate localStorage to Supabase
+        await migrateLocalStorage(uid);
+        // Load again after migration
+        const migrated=await loadUserData(uid);
+        if(migrated) return applyData(migrated,true);
+      } else {
+        return applyData(db,true);
       }
-      const t=await sget("cx_tasks");    if(t) setTasks(t);
-      const q=await sget("cx_quests");   if(q) setQuests(q);
-      const sk=await sget("cx_skills");  if(sk) setSkills(sk);
-      const m=await sget("cx_meds");     if(m) setMeds(m);
-      const pt=await sget("cx_ptypes");  if(pt) setPracticeTypes(pt);
-      const x=await sget("cx_xp");       if(x!==null) setXp(x);
-      const st=await sget("cx_streaks"); if(st) setStreaks(st);
-      const sv=await sget("cx_seen");    if(sv) setSeenTabs(sv);
-      const jn=await sget("cx_journal"); if(jn) setJournal(jn);
-      const xl=await sget("cx_xplog");   if(xl) setXpLog(xl);
-      setLoaded(true);
+    }
+    // Guest / no Supabase data — fall back to localStorage
+    const s=await sget("cx_settings");
+    if(s){
+      const merged=deepMerge(DEFAULT_SETTINGS,s);
+      if(!merged.theme?.bg||merged.theme.bg==="#ffffff"||merged.theme.bg==="white"||merged.theme.bg==="")
+        merged.theme=DEFAULT_SETTINGS.theme;
+      setSettings(merged);
+    }
+    const t=await sget("cx_tasks");    if(t) setTasks(t);
+    const q=await sget("cx_quests");   if(q) setQuests(q);
+    const sk=await sget("cx_skills");  if(sk) setSkills(sk);
+    const m=await sget("cx_meds");     if(m) setMeds(m);
+    const pt=await sget("cx_ptypes");  if(pt) setPracticeTypes(pt);
+    const x=await sget("cx_xp");       if(x!==null) setXp(x);
+    const st=await sget("cx_streaks"); if(st) setStreaks(st);
+    const sv=await sget("cx_seen");    if(sv) setSeenTabs(sv);
+    const jn=await sget("cx_journal"); if(jn) setJournal(jn);
+    const xl=await sget("cx_xplog");   if(xl) setXpLog(xl);
+    setLoaded(true);
+  };
+
+  const applyData=(db,fromSupabase)=>{
+    if(db.settings){
+      const merged=deepMerge(DEFAULT_SETTINGS,db.settings);
+      if(!merged.theme?.bg||merged.theme.bg==="#ffffff"||merged.theme.bg==="white"||merged.theme.bg==="")
+        merged.theme=DEFAULT_SETTINGS.theme;
+      setSettings(merged);
+    }
+    if(db.tasks)          setTasks(db.tasks);
+    if(db.quests)         setQuests(db.quests);
+    if(db.skills)         setSkills(db.skills);
+    if(db.meds)           setMeds(db.meds);
+    if(db.practice_types) setPracticeTypes(db.practice_types);
+    if(db.xp!=null)       setXp(db.xp);
+    if(db.streaks)        setStreaks(db.streaks);
+    if(db.seen_tabs)      setSeenTabs(db.seen_tabs);
+    if(db.journal)        setJournal(db.journal);
+    if(db.xp_log)         setXpLog(db.xp_log);
+    setLoaded(true);
+  };
+
+  useEffect(()=>{
+    // Check for existing session on mount
+    (async()=>{
+      const s=await getSession();
+      if(s){ setSession(s); setUserId(s.user.id); await loadData(s.user.id); }
+      else { setSession(null); await loadData(null); }
     })();
+    // Listen for auth changes (login/logout from another tab etc)
+    const unsub=onAuthChange(async s=>{
+      if(s){ setSession(s); setUserId(s.user.id); await loadData(s.user.id); }
+      else { setSession(null); setUserId(null); }
+    });
+    return unsub;
   },[]);
 
-  const saveSettings=async s=>{setSettings(s);await sset("cx_settings",s);};
+  const saveSettings=async s=>{setSettings(s);await dbSet("cx_settings",s,userId);};
+  const handleSignOut=async()=>{
+    await signOut();
+    setSession(null); setUserId(null);
+    // Clear state so next user starts fresh
+    setTasks([]); setQuests([]); setSkills([]); setMeds([]);
+    setPracticeTypes(DEFAULT_PRACTICE_TYPES); setXp(0);
+    setStreaks({}); setJournal([]); setXpLog([]);
+    setSettings(DEFAULT_SETTINGS);
+  };
   const handleTabChange=async id=>{
     setTab(id);
     if(!seenTabs[id]&&TAB_EXPLAINERS[id]){
       const next={...seenTabs,[id]:true};
-      setSeenTabs(next); await sset("cx_seen",next);
+      setSeenTabs(next); await dbSet("cx_seen",next,userId);
       setExplainer(TAB_EXPLAINERS[id]);
     }
   };
@@ -496,7 +569,7 @@ export default function App(){
   },[]);
 
   const saveXpLog=async(entry)=>{
-    setXpLog(prev=>{const next=[entry,...prev].slice(0,100);sset("cx_xplog",next);return next;});
+    setXpLog(prev=>{const next=[entry,...prev].slice(0,100);dbSet("cx_xplog",next,userId);return next;});
   };
 
   const award=useCallback(async(baseAmt,skillId,curXp,curSkills,curStreaks,label)=>{
@@ -504,7 +577,7 @@ export default function App(){
     const streak=skillId?(curStreaks[skillId]||{count:0}):{count:0};
     const multiplier=getMultiplier(streak.count);
     const amt=Math.round(baseAmt*multiplier);
-    const nx=curXp+amt; setXp(nx); await sset("cx_xp",nx);
+    const nx=curXp+amt; setXp(nx); await dbSet("cx_xp",nx,userId);
     let leveledUp=null, newSkills=curSkills;
     if(skillId){
       newSkills=curSkills.map(s=>{
@@ -513,23 +586,23 @@ export default function App(){
         if(newLv>oldLv) leveledUp={name:s.name,level:newLv};
         return {...s,xp:newXp};
       });
-      setSkills(newSkills); await sset("cx_skills",newSkills);
+      setSkills(newSkills); await dbSet("cx_skills",newSkills,userId);
     }
     const sk=curSkills.find(s=>s.id===skillId);
     await saveXpLog({id:uid(),amt,label:label||"Task",skill:sk?.name||null,multiplier,created:Date.now()});
     return {amt,multiplier,leveledUp,newSkills};
   },[settings.xp.skillPerLevel]);
 
-  const saveT=async t=>{setTasks(t);await sset("cx_tasks",t);};
-  const saveQ=async q=>{setQuests(q);await sset("cx_quests",q);};
-  const saveM=async m=>{setMeds(m);await sset("cx_meds",m);};
-  const savePT=async t=>{setPracticeTypes(t);await sset("cx_ptypes",t);};
+  const saveT=async t=>{setTasks(t);await dbSet("cx_tasks",t,userId);};
+  const saveQ=async q=>{setQuests(q);await dbSet("cx_quests",q,userId);};
+  const saveM=async m=>{setMeds(m);await dbSet("cx_meds",m,userId);};
+  const savePT=async t=>{setPracticeTypes(t);await dbSet("cx_ptypes",t,userId);};
   const addPracticeType=async d=>{await savePT([...practiceTypes,{id:uid(),label:d.label,icon:d.icon||"◎"}]);};
   const deletePracticeType=async id=>{await savePT(practiceTypes.filter(t=>t.id!==id));};
-  const saveS=async s=>{setSkills(s);await sset("cx_skills",s);};
-  const reorderSkills=async newOrder=>{setSkills(newOrder);await sset("cx_skills",newOrder);};
+  const saveS=async s=>{setSkills(s);await dbSet("cx_skills",s,userId);};
+  const reorderSkills=async newOrder=>{setSkills(newOrder);await dbSet("cx_skills",newOrder,userId);};
 
-  const saveStr=async s=>{setStreaks(s);await sset("cx_streaks",s);};
+  const saveStr=async s=>{setStreaks(s);await dbSet("cx_streaks",s,userId);};
 
   const addTask=async d=>{
     await saveT([{id:uid(),...d,done:false,dayKey:d.period==="daily"?todayKey():null,created:Date.now()},...tasks]);
@@ -594,12 +667,12 @@ export default function App(){
 
   const addJournalEntry=async(entry)=>{
     const next=[{id:uid(),...entry,created:Date.now()},...journal];
-    setJournal(next); await sset("cx_journal",next);
+    setJournal(next); await dbSet("cx_journal",next,userId);
     showToast("Entry saved");
   };
   const deleteJournalEntry=async(id)=>{
     const next=journal.filter(e=>e.id!==id);
-    setJournal(next); await sset("cx_journal",next);
+    setJournal(next); await dbSet("cx_journal",next,userId);
   };
 
   const addSkill=async d=>{
@@ -647,7 +720,7 @@ export default function App(){
     const streak=primary?(newStr[primary]||{count:0}):{count:0};
     const multiplier=getMultiplier(streak.count);
     const amt=Math.round(d.baseXp*multiplier);
-    const nx=xp+amt; setXp(nx); await sset("cx_xp",nx);
+    const nx=xp+amt; setXp(nx); await dbSet("cx_xp",nx,userId);
     for(const sid of skillIds){
       curSkillsState=curSkillsState.map(s=>{
         if(s.id!==sid) return s;
@@ -656,7 +729,7 @@ export default function App(){
         return {...s,xp:newXp};
       });
     }
-    if(skillIds.length){setSkills(curSkillsState);await sset("cx_skills",curSkillsState);}
+    if(skillIds.length){setSkills(curSkillsState);await dbSet("cx_skills",curSkillsState,userId);}
     const sk=curSkillsState.find(s=>s.id===primary);
     await saveXpLog({id:uid(),amt,label:d.type+(sub?` · ${sub.name}`:""),skill:sk?.name||null,multiplier,created:Date.now()});
     const sessionCreated=d.sessionDate||Date.now();
@@ -669,7 +742,7 @@ export default function App(){
       const skLabel=sk.map(s=>`${s.icon} ${s.name}`).join(", ");
       const header=`[${d.type}${skLabel?` · ${skLabel}`:""}${d.dur?` · ${d.dur}min`:""}]`;
       const next=[{id:uid(),text:`${header}\n${d.note.trim()}`,img:null,source:"practice",created:sessionCreated},...journal];
-      setJournal(next); await sset("cx_journal",next);
+      setJournal(next); await dbSet("cx_journal",next,userId);
     }
     let msg=`+${amt} ${L.xpName}`;
     if(multiplier>1) msg+=` · ${streak.count}d ${L.comboName||"Combo"} ${multiplier}×`;
@@ -686,12 +759,12 @@ export default function App(){
     const file=e.target.files?.[0]; if(!file) return;
     try{
       const data=JSON.parse(await file.text());
-      if(data.tasks){setTasks(data.tasks);await sset("cx_tasks",data.tasks);}
-      if(data.quests){setQuests(data.quests);await sset("cx_quests",data.quests);}
-      if(data.skills){setSkills(data.skills);await sset("cx_skills",data.skills);}
-      if(data.meds){setMeds(data.meds);await sset("cx_meds",data.meds);}
-      if(data.xp!=null){setXp(data.xp);await sset("cx_xp",data.xp);}
-      if(data.streaks){setStreaks(data.streaks);await sset("cx_streaks",data.streaks);}
+      if(data.tasks){setTasks(data.tasks);await dbSet("cx_tasks",data.tasks,userId);}
+      if(data.quests){setQuests(data.quests);await dbSet("cx_quests",data.quests,userId);}
+      if(data.skills){setSkills(data.skills);await dbSet("cx_skills",data.skills,userId);}
+      if(data.meds){setMeds(data.meds);await dbSet("cx_meds",data.meds,userId);}
+      if(data.xp!=null){setXp(data.xp);await dbSet("cx_xp",data.xp,userId);}
+      if(data.streaks){setStreaks(data.streaks);await dbSet("cx_streaks",data.streaks,userId);}
       showToast("Data imported");
     }catch{showToast("Import failed — check JSON format");}
     e.target.value="";
@@ -729,10 +802,19 @@ export default function App(){
     {id:"settings", icon:"⚙", label:L.settingsTab},
   ];
 
-  if(!loaded) return <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,height:"100vh",fontFamily:"'DM Mono',monospace",fontSize:10,letterSpacing:2,background:"#0c0c0c",color:"#555"}}>
+  // Session undefined = still checking auth state
+  if(session===undefined&&!loaded) return <div style={{display:"flex",flexDirection:"column",alignItems:"center",justifyContent:"center",gap:16,height:"100vh",fontFamily:"'DM Mono',monospace",fontSize:10,letterSpacing:2,background:"#0c0c0c",color:"#555"}}>
     <span>LOADING</span>
     <button onClick={()=>{localStorage.removeItem("cx_settings");window.location.reload();}} style={{background:"none",border:"1px solid #333",borderRadius:4,color:"#444",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1,padding:"6px 12px",cursor:"pointer"}}>reset theme if stuck</button>
   </div>;
+
+  // Show auth screen when explicitly triggered (sign in button clicked, or first visit with supabase)
+  if(session===undefined&&loaded) return <AuthScreen onAuth={async s=>{
+    if(s){ setSession(s); setUserId(s.user.id); await loadData(s.user.id); }
+    else { setSession(null); setUserId(null); }
+  }}/>;
+
+  if(!loaded) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100vh",fontFamily:"'DM Mono',monospace",fontSize:10,letterSpacing:2,background:"#0c0c0c",color:"#555"}}>LOADING</div>;
 
   return (
     <SettingsCtx.Provider value={{settings,saveSettings}}>
@@ -762,7 +844,11 @@ export default function App(){
           <header className="hdr">
             <div className="hdr-row">
               <div className="hdr-title">{computedTabTitle(tab,settings)}</div>
-              <span className="lv-badge">{L.levelName} {level}</span>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <span className="lv-badge">{L.levelName} {level}</span>
+                {userId&&<button onClick={handleSignOut} title="Sign out" style={{background:"none",border:"none",cursor:"pointer",color:"var(--tx3)",fontSize:11,padding:"2px 4px",fontFamily:"'DM Mono',monospace",letterSpacing:.5}}>↪ out</button>}
+                {!userId&&session===null&&<button onClick={()=>setSession(undefined)} title="Sign in" style={{background:"none",border:"none",cursor:"pointer",color:"var(--primary)",fontSize:9,padding:"2px 4px",fontFamily:"'DM Mono',monospace",letterSpacing:1}}>sign in</button>}
+              </div>
             </div>
             <div className="xp-row">
               <div className="xp-track"><div className="xp-fill" style={{width:`${prog}%`}}/></div>
