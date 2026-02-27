@@ -1079,7 +1079,7 @@ export default function App(){
           </header>
           <div className="main-wrap">
           <main className="pg">
-            {tab==="planner"  && <PlannerTab period={period} setPeriod={setPeriod} tasks={periodTasks()} weekDays={weekDays} allTasks={tasks} skills={skills} quests={quests} onAddTask={addTask} onToggle={toggleTask} onDelete={deleteTask} onEdit={editTask} onToggleQuest={toggleQuest}/>}
+            {tab==="planner"  && <PlannerTab period={period} setPeriod={setPeriod} tasks={periodTasks()} weekDays={weekDays} allTasks={tasks} skills={skills} quests={quests} onAddTask={addTask} onToggle={toggleTask} onDelete={deleteTask} onEdit={editTask} onToggleQuest={toggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>}
             {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest} onReorder={q=>saveQ(q)} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>}
             {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill} onReorder={reorderSkills} onLink={linkSubskill}/>}
             {tab==="practice" && <PracticeTab meds={meds} skills={skills} streaks={streaks} pending={pendingPractice} practiceTypes={practiceTypes} onAddType={addPracticeType} onDeleteType={deletePracticeType} onLog={logMed} onDelete={deleteMed} onClearPending={()=>setPendingPractice(null)}/>}
@@ -1091,7 +1091,7 @@ export default function App(){
           </div>
           {/* Weekly Review floating button */}
           <button className="review-btn" onClick={()=>setShowReview(true)} title="Weekly Review">◈ Review</button>
-          {showReview&&<WeeklyReview tasks={tasks} quests={quests} skills={skills} meds={meds} xpLog={xpLog} onClose={()=>setShowReview(false)} onNavigate={id=>{setShowReview(false);handleTabChange(id);}}/>}
+          {showReview&&<WeeklyReview tasks={tasks} quests={quests} skills={skills} meds={meds} xpLog={xpLog} journal={journal} settings={settings} onClose={()=>setShowReview(false)} onNavigate={id=>{setShowReview(false);handleTabChange(id);}}/>}
           {/* Jarvis FAB */}
           <button onClick={()=>setShowJarvis(true)} style={{position:"fixed",bottom:72,right:16,width:44,height:44,borderRadius:"50%",background:"var(--s2)",border:"1px solid var(--b2)",color:"var(--tx)",fontSize:18,cursor:"pointer",zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 12px rgba(0,0,0,.4)",transition:"all .15s"}} title="Jarvis AI">⟡</button>
           {showJarvis&&<JarvisOverlay tasks={tasks} quests={quests} skills={skills} onAddQuest={addQuest} onAddTask={addTask} onClose={()=>setShowJarvis(false)}/>}
@@ -1152,7 +1152,7 @@ function ProfileSetup({onComplete}){
   );
 }
 
-function QuestPlannerCard({quest,skills,onToggle}){
+function QuestPlannerCard({quest,skills,onToggle,radiantAvailable,radiantCooldownLabel}){
   const {settings}=useSettings(); const L=settings.labels;
   const qSkills=(quest.skills||[]).map(id=>skills.find(s=>s.id===id)).filter(Boolean);
   const isRadiant=quest.type==="radiant";
@@ -1181,7 +1181,7 @@ function QuestPlannerCard({quest,skills,onToggle}){
   );
 }
 
-function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAddTask,onToggle,onDelete,onEdit,onToggleQuest}){
+function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAddTask,onToggle,onDelete,onEdit,onToggleQuest,radiantAvailable,radiantCooldownLabel}){
   const {settings}=useSettings(); const L=settings.labels;
   const [showForm,setShowForm]=useState(false);
   const [f,setF]=useState({title:"",skill:"",xpVal:20,questId:""});
@@ -1243,7 +1243,7 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
         <div key={i} className="wk-day">
           <div className={`wk-day-lbl ${isToday?"today":""}`}>{["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][i]} {d.getDate()}{isToday?" · today":""}</div>
           {dt.length===0&&dq.length===0?<div style={{fontSize:12,color:"var(--tx3)",paddingLeft:2}}>—</div>:<>
-            {dq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest}/>)}
+            {dq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}
             <div className="clist">{dt.map(t=><TaskCard key={t.id} task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div>
           </>}
         </div>
@@ -1253,18 +1253,18 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
         {(todayQuests.length>0||availableRadiant.length>0)&&period==="daily"&&<>
           {todayQuests.length>0&&<>
             <div className="slbl" style={{marginBottom:6}}>◆ Quests due today</div>
-            {todayQuests.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest}/>)}
+            {todayQuests.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}
           </>}
           {availableRadiant.length>0&&<>
             <div className="slbl" style={{marginBottom:6,marginTop:todayQuests.length?8:0}}>◉ Ready to practice</div>
-            {availableRadiant.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest}/>)}
+            {availableRadiant.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}
           </>}
           {(active.length>0||done.length>0)&&<div className="gap"/>}
         </>}
         {period==="monthly"&&(()=>{
           const now=new Date(); const mq=questsForMonth(now.getFullYear(),now.getMonth());
           return mq.length>0?<><div className="slbl" style={{marginBottom:6}}>◆ Quests this month</div>
-            {mq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest}/>)}
+            {mq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}
             {(active.length>0||done.length>0)&&<div className="gap"/>}</>:null;
         })()}
         {active.length===0&&done.length===0&&todayQuests.length===0&&(
@@ -2769,6 +2769,16 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
       {xpSuggestion&&<div style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:4,padding:"8px 10px",marginBottom:6,fontSize:11,color:"var(--tx2)",lineHeight:1.5}}>
         {xpSuggestion.xp?<><span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",fontWeight:"bold"}}>+{xpSuggestion.xp} XP</span> — {xpSuggestion.reason}</>:xpSuggestion.reason}
       </div>}
+      <div style={{display:"flex",gap:10,alignItems:"center",padding:"8px 0",borderTop:"1px solid var(--b1)",marginBottom:6}}>
+        <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",flex:1}}>
+          <input type="checkbox" checked={ef.published||false} onChange={e=>setEf(v=>({...v,published:e.target.checked}))} style={{accentColor:"var(--primary)"}}/>
+          <span style={{fontSize:11,color:"var(--tx2)"}}>Publish to community</span>
+        </label>
+        {ef.published&&<label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
+          <input type="checkbox" checked={ef.notesPublic||false} onChange={e=>setEf(v=>({...v,notesPublic:e.target.checked}))} style={{accentColor:"var(--primary)"}}/>
+          <span style={{fontSize:11,color:"var(--tx2)"}}>Share notes</span>
+        </label>}
+      </div>
       <button className="fsbtn" onClick={saveEdit}>Save</button>
     </div>
   );
@@ -3030,7 +3040,313 @@ function JournalTab({entries,onAdd,onDelete}){
 }
 
 // ─── WEEKLY REVIEW MODAL ────────────────────────────────────────────────────
-function WeeklyReview({tasks,quests,skills,meds,xpLog,onClose,onNavigate}){
+
+// ═══════════════════════════════════════════════════════════════════════════
+// COMMUNITY TAB - Wave 2 Multiplayer
+// ═══════════════════════════════════════════════════════════════════════════
+function CommunityTab({userId,settings,skills,quests,meds,journal,streaks,xp,friends,myFriendCode,profiles,onPublishProfile,onAddFriend,onRemoveFriend,onRefresh,onEditSkillPublish,onEditQuestPublish,onSaveSettings,showToast}){
+  const L=settings.labels;
+  const [view,setView]=useState("board"); // board | profile | friends
+  const [loading,setLoading]=useState(false);
+  const [friendInput,setFriendInput]=useState("");
+  const [filterCat,setFilterCat]=useState("all");
+  const [filterFriends,setFilterFriends]=useState(false);
+  const [profilePublic,setProfilePublic]=useState(settings.profile.public||false);
+
+  const level=Math.floor(xp/(settings.xp.globalPerLevel||600))+1;
+  const friendIds=new Set(friends.map(f=>f.userId));
+
+  // compute badges for a profile
+  const getBadges=(profile)=>{
+    const badges=[];
+    // Immaculate: any skill with 7+ day streak
+    if(Object.values(profile.streaks||{}).some(s=>s.count>=7)) badges.push({id:"immaculate",icon:"◆",label:"Immaculate",tip:"7+ day streak on a skill"});
+    // Verified: has journal entries
+    if((profile.journalCount||0)>=5) badges.push({id:"verified",icon:"✦",label:"Chronicler",tip:"5+ journal entries"});
+    // Practitioner: 10+ practice sessions
+    if((profile.totalPractice||0)>=10) badges.push({id:"practitioner",icon:"◉",label:"Practitioner",tip:"10+ practice sessions"});
+    return badges;
+  };
+
+  const refresh=async()=>{
+    setLoading(true);
+    await onRefresh();
+    setLoading(false);
+  };
+
+  useEffect(()=>{ refresh(); },[]);
+
+  const togglePublic=async(val)=>{
+    setProfilePublic(val);
+    const next={...settings,profile:{...settings.profile,public:val}};
+    await onSaveSettings(next);
+    await onPublishProfile(next);
+    showToast(val?"Profile published":"Profile hidden");
+  };
+
+  const filteredProfiles=profiles.filter(p=>{
+    if(p.userId===userId) return false; // don't show self
+    if(filterFriends&&!friendIds.has(p.userId)) return false;
+    if(filterCat!=="all"&&!p.skills?.some(s=>s.category===filterCat)) return false;
+    return true;
+  });
+
+  // Build my published data preview
+  const myPubSkills=skills.filter(s=>s.published);
+  const myPubQuests=quests.filter(q=>q.published);
+
+  return (
+    <div style={{padding:"0 0 80px"}}>
+      {/* Sub-nav */}
+      <div style={{display:"flex",gap:4,padding:"12px 0 0",marginBottom:16}}>
+        {[["board","⬡ Board"],["profile","◈ My Profile"],["friends","◉ Friends"]].map(([id,lbl])=>(
+          <button key={id} onClick={()=>setView(id)}
+            style={{flex:1,padding:"7px 0",borderRadius:"var(--r)",border:`1px solid ${view===id?"var(--primary)":"var(--b1)"}`,background:view===id?"var(--primaryf)":"var(--s1)",color:view===id?"var(--primary)":"var(--tx2)",fontSize:10,fontFamily:"'DM Mono',monospace",letterSpacing:.5,cursor:"pointer"}}>
+            {lbl}
+          </button>
+        ))}
+      </div>
+
+      {/* ── BOARD VIEW ── */}
+      {view==="board"&&(<>
+        <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12}}>
+          <button onClick={refresh} disabled={loading} style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",color:"var(--tx2)",fontSize:10,padding:"5px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace"}}>
+            {loading?"◌":"↺"} Refresh
+          </button>
+          <label style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer"}}>
+            <input type="checkbox" checked={filterFriends} onChange={e=>setFilterFriends(e.target.checked)} style={{accentColor:"var(--primary)"}}/>
+            <span style={{fontSize:10,color:"var(--tx2)"}}>Friends only</span>
+          </label>
+          <div style={{flex:1}}/>
+          <span style={{fontSize:10,color:"var(--tx3)",fontFamily:"'DM Mono',monospace"}}>{filteredProfiles.length} practitioners</span>
+        </div>
+
+        {/* Category filter */}
+        <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:14}}>
+          <button onClick={()=>setFilterCat("all")} style={{padding:"3px 8px",borderRadius:"var(--r)",border:`1px solid ${filterCat==="all"?"var(--primary)":"var(--b2)"}`,background:filterCat==="all"?"var(--primaryf)":"var(--s2)",color:filterCat==="all"?"var(--primary)":"var(--tx3)",fontSize:9,cursor:"pointer",fontFamily:"'DM Mono',monospace"}}>All</button>
+          {SKILL_CATEGORIES.map(cat=>(
+            <button key={cat.id} onClick={()=>setFilterCat(filterCat===cat.id?"all":cat.id)}
+              style={{padding:"3px 8px",borderRadius:"var(--r)",border:`1px solid ${filterCat===cat.id?"var(--primary)":"var(--b2)"}`,background:filterCat===cat.id?"var(--primaryf)":"var(--s2)",color:filterCat===cat.id?"var(--primary)":"var(--tx3)",fontSize:9,cursor:"pointer",fontFamily:"'DM Mono',monospace"}}>
+              {cat.icon} {cat.label}
+            </button>
+          ))}
+        </div>
+
+        {filteredProfiles.length===0?(
+          <div className="empty-state">
+            <div className="es-icon">⬡</div>
+            <div className="es-title">{loading?"Loading...":"No practitioners yet"}</div>
+            <div className="es-desc">Publish your profile and share your friend code to see others here. The community board shows skills, streaks, and practice consistency.</div>
+          </div>
+        ):(
+          filteredProfiles.map(profile=>(
+            <CommunityCard key={profile.userId} profile={profile} isFriend={friendIds.has(profile.userId)} badges={getBadges(profile)} filterCat={filterCat}/>
+          ))
+        )}
+      </>)}
+
+      {/* ── MY PROFILE VIEW ── */}
+      {view==="profile"&&(<>
+        <div className="fwrap" style={{marginBottom:14}}>
+          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,color:"var(--tx3)",marginBottom:10,textTransform:"uppercase"}}>Profile Visibility</div>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+            <span style={{fontSize:13,color:"var(--tx)"}}>{settings.profile.name||"Anonymous"}</span>
+            <span style={{fontSize:9,fontFamily:"'DM Mono',monospace",color:"var(--tx3)",background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:3,padding:"2px 6px"}}>
+              CODE: {myFriendCode||"—"}
+            </span>
+            {getBadges({streaks,journalCount:journal.length,totalPractice:meds.length}).map(b=>(
+              <span key={b.id} title={b.tip} style={{fontSize:9,color:"var(--primary)",fontFamily:"'DM Mono',monospace"}}>{b.icon} {b.label}</span>
+            ))}
+          </div>
+          <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",marginBottom:12}}>
+            <input type="checkbox" checked={profilePublic} onChange={e=>togglePublic(e.target.checked)} style={{accentColor:"var(--primary)",width:14,height:14}}/>
+            <div>
+              <div style={{fontSize:12,color:"var(--tx)"}}>Public profile</div>
+              <div style={{fontSize:10,color:"var(--tx3)"}}>Visible on the community board. Unpublished skills and quests are always private.</div>
+            </div>
+          </label>
+          {!userId&&<div style={{fontSize:11,color:"var(--danger)",padding:"8px 0"}}>Sign in to publish your profile and connect with others.</div>}
+        </div>
+
+        {/* Published skills */}
+        <div className="slbl">Published Skills ({myPubSkills.length})</div>
+        {myPubSkills.length===0?(
+          <div style={{fontSize:12,color:"var(--tx3)",padding:"8px 0 12px",fontStyle:"italic"}}>No skills published. Edit a skill to publish it to the community.</div>
+        ):(
+          myPubSkills.map(sk=>{
+            const cat=SKILL_CATEGORIES.find(c=>c.id===sk.category)||SKILL_CATEGORIES[7];
+            const lv=Math.floor((sk.xp||0)/(settings.xp.skillPerLevel||6000))+1;
+            const streak=streaks[sk.id]?.count||0;
+            return (
+              <div key={sk.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",marginBottom:6}}>
+                <span style={{fontSize:16}}>{sk.icon==="img"?<img src={sk.customImg} style={{width:18,height:18,borderRadius:3,objectFit:"cover"}}/>:sk.icon}</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:12,color:"var(--tx)"}}>{sk.name}</div>
+                  <div style={{fontSize:10,color:"var(--tx3)"}}>{cat.icon} {cat.label} · Lv{lv}{streak>0?` · ${streak}d streak`:""}</div>
+                  {sk.intention&&<div style={{fontSize:10,color:"var(--tx2)",fontStyle:"italic",marginTop:1}}>"{sk.intention}"</div>}
+                </div>
+                <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:3}}>
+                  <span style={{fontSize:9,color:sk.notesPublic?"var(--success)":"var(--tx3)",fontFamily:"'DM Mono',monospace"}}>{sk.notesPublic?"notes: on":"notes: off"}</span>
+                  <button className="delbtn" style={{fontSize:9}} onClick={()=>onEditSkillPublish(sk.id,{published:false})}>unpublish</button>
+                </div>
+              </div>
+            );
+          })
+        )}
+
+        {/* Published quests */}
+        <div className="slbl" style={{marginTop:14}}>Published Quests ({myPubQuests.length})</div>
+        {myPubQuests.length===0?(
+          <div style={{fontSize:12,color:"var(--tx3)",padding:"8px 0 12px",fontStyle:"italic"}}>No quests published. Edit a quest to publish it.</div>
+        ):(
+          myPubQuests.map(q=>(
+            <div key={q.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",marginBottom:6}}>
+              <span style={{width:8,height:8,borderRadius:"50%",background:q.color||"var(--primary)",flexShrink:0}}/>
+              <div style={{flex:1}}>
+                <div style={{fontSize:12,color:"var(--tx)"}}>{q.title}</div>
+                <div style={{fontSize:10,color:"var(--tx3)"}}>{q.type} quest</div>
+              </div>
+              <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:3}}>
+                <span style={{fontSize:9,color:q.notesPublic?"var(--success)":"var(--tx3)",fontFamily:"'DM Mono',monospace"}}>{q.notesPublic?"notes: on":"notes: off"}</span>
+                <button className="delbtn" style={{fontSize:9}} onClick={()=>onEditQuestPublish(q.id,{published:false})}>unpublish</button>
+              </div>
+            </div>
+          ))
+        )}
+
+        <div style={{marginTop:16,padding:"10px 12px",background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)"}}>
+          <div style={{fontSize:10,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",marginBottom:4}}>STATS VISIBLE WHEN PUBLISHED</div>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
+            {[["Level",level],["Total Practice",meds.length],["Journal Entries",journal.length],["Active Streaks",Object.values(streaks).filter(s=>s.count>0).length]].map(([lbl,val])=>(
+              <div key={lbl} style={{fontSize:10,color:"var(--tx2)"}}>{lbl}: <span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace"}}>{val}</span></div>
+            ))}
+          </div>
+        </div>
+      </>)}
+
+      {/* ── FRIENDS VIEW ── */}
+      {view==="friends"&&(<>
+        <div className="fwrap" style={{marginBottom:14}}>
+          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,color:"var(--tx3)",marginBottom:8,textTransform:"uppercase"}}>Add Friend</div>
+          <div style={{fontSize:11,color:"var(--tx2)",marginBottom:6}}>Your code: <span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",letterSpacing:2}}>{myFriendCode||"—"}</span> <span style={{fontSize:10,color:"var(--tx3)"}}>(share this)</span></div>
+          <div style={{display:"flex",gap:6}}>
+            <input className="fi" placeholder="Enter friend's 6-digit code" value={friendInput} onChange={e=>setFriendInput(e.target.value.replace(/\D/g,"").slice(0,6))}
+              onKeyDown={e=>e.key==="Enter"&&onAddFriend(friendInput).then(()=>setFriendInput(""))}
+              style={{flex:1,letterSpacing:2,fontFamily:"'DM Mono',monospace"}}/>
+            <button className="fsbtn" style={{width:"auto",padding:"0 14px",margin:0}} onClick={()=>onAddFriend(friendInput).then(()=>setFriendInput(""))}>Add</button>
+          </div>
+        </div>
+
+        <div className="slbl">Friends ({friends.length})</div>
+        {friends.length===0?(
+          <div className="empty-state">
+            <div className="es-icon">◉</div>
+            <div className="es-title">No friends yet</div>
+            <div className="es-desc">Share your 6-digit code with others or enter theirs above. Friends can see each other on the board with the friends-only filter.</div>
+          </div>
+        ):(
+          friends.map(f=>{
+            const profile=profiles.find(p=>p.userId===f.userId);
+            return (
+              <div key={f.userId} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",marginBottom:8}}>
+                <div style={{width:32,height:32,borderRadius:"50%",background:"var(--primaryf)",border:"1px solid var(--primaryb)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:"var(--primary)",fontFamily:"'DM Mono',monospace",flexShrink:0}}>
+                  {(f.name||"?")[0]?.toUpperCase()}
+                </div>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:12,color:"var(--tx)"}}>{f.name||"Anonymous"}</div>
+                  {profile?(
+                    <div style={{fontSize:10,color:"var(--tx3)"}}>Lv{profile.level} · {profile.totalPractice} sessions · {profile.journalCount} journal</div>
+                  ):(
+                    <div style={{fontSize:10,color:"var(--tx3)"}}>Not published yet</div>
+                  )}
+                </div>
+                <button className="delbtn" onClick={()=>onRemoveFriend(f.userId)}>remove</button>
+              </div>
+            );
+          })
+        )}
+      </>)}
+    </div>
+  );
+}
+
+function CommunityCard({profile,isFriend,badges,filterCat}){
+  const [expanded,setExpanded]=useState(false);
+  const relevantSkills=filterCat==="all"?profile.skills:profile.skills?.filter(s=>s.category===filterCat)||[];
+  const displaySkills=(relevantSkills||[]).slice(0,expanded?99:4);
+
+  return (
+    <div style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",marginBottom:10,overflow:"hidden"}}>
+      {/* Header */}
+      <div style={{padding:"10px 12px",cursor:"pointer",display:"flex",gap:10,alignItems:"center"}} onClick={()=>setExpanded(!expanded)}>
+        <div style={{width:36,height:36,borderRadius:"50%",background:"var(--primaryf)",border:"1px solid var(--primaryb)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,color:"var(--primary)",fontFamily:"'DM Mono',monospace",flexShrink:0}}>
+          {(profile.name||"?")[0]?.toUpperCase()}
+        </div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
+            <span style={{fontSize:13,color:"var(--tx)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{profile.name||"Anonymous"}</span>
+            {isFriend&&<span style={{fontSize:8,color:"var(--secondary)",fontFamily:"'DM Mono',monospace",background:"var(--secondaryf)",border:"1px solid var(--secondaryb)",borderRadius:3,padding:"1px 4px",flexShrink:0}}>friend</span>}
+            {badges.map(b=><span key={b.id} title={b.tip} style={{fontSize:8,color:"var(--primary)",fontFamily:"'DM Mono',monospace",background:"var(--primaryf)",border:"1px solid var(--primaryb)",borderRadius:3,padding:"1px 4px",flexShrink:0}}>{b.icon} {b.label}</span>)}
+          </div>
+          <div style={{fontSize:10,color:"var(--tx3)",fontFamily:"'DM Mono',monospace"}}>
+            Lv{profile.level} · {profile.totalPractice} sessions · {profile.journalCount} journal
+          </div>
+        </div>
+        <span style={{fontSize:11,color:"var(--tx3)"}}>{expanded?"▲":"▼"}</span>
+      </div>
+
+      {/* Skill pills — always visible */}
+      {(relevantSkills||[]).length>0&&(
+        <div style={{padding:"0 12px 10px",display:"flex",flexWrap:"wrap",gap:4}}>
+          {displaySkills.map(sk=>{
+            const cat=SKILL_CATEGORIES.find(cc=>cc.id===sk.category)||SKILL_CATEGORIES[7];
+            return (
+              <div key={sk.id} style={{display:"flex",alignItems:"center",gap:4,padding:"3px 8px",background:"var(--s2)",border:`1px solid ${sk.color}44`,borderRadius:10,fontSize:9,fontFamily:"'DM Mono',monospace"}}>
+                <span style={{color:sk.color}}>{sk.icon==="img"?"◈":sk.icon}</span>
+                <span style={{color:"var(--tx2)"}}>{sk.name}</span>
+                <span style={{color:"var(--tx3)"}}>Lv{sk.level}</span>
+                {sk.streak>=3&&<span style={{color:sk.color}}>↑{sk.streak}d</span>}
+              </div>
+            );
+          })}
+          {!expanded&&(relevantSkills||[]).length>4&&<span style={{fontSize:9,color:"var(--tx3)",padding:"3px 0",cursor:"pointer"}} onClick={()=>setExpanded(true)}>+{(relevantSkills||[]).length-4} more</span>}
+        </div>
+      )}
+
+      {/* Expanded: radiant quests + intentions */}
+      {expanded&&(<>
+        {(profile.radiantQuests||[]).length>0&&(
+          <div style={{padding:"8px 12px 10px",borderTop:"1px solid var(--b1)"}}>
+            <div style={{fontSize:9,fontFamily:"'DM Mono',monospace",letterSpacing:1.5,color:"var(--tx3)",textTransform:"uppercase",marginBottom:6}}>Radiant Practices</div>
+            {profile.radiantQuests.map(rq=>(
+              <div key={rq.id} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid var(--b1)"}}>
+                <span style={{width:6,height:6,borderRadius:"50%",background:rq.color||"var(--primary)",flexShrink:0}}/>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:11,color:"var(--tx)"}}>{rq.title}</div>
+                  {rq.intention&&<div style={{fontSize:10,color:"var(--tx3)",fontStyle:"italic"}}>"{rq.intention}"</div>}
+                  {rq.notesPublic&&rq.note&&<div style={{fontSize:10,color:"var(--tx2)",marginTop:2}}>{rq.note}</div>}
+                </div>
+                <span style={{fontSize:9,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",flexShrink:0}}>{rq.completions30}× / 30d</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {(profile.skills||[]).filter(sk=>sk.intention).length>0&&(
+          <div style={{padding:"8px 12px 10px",borderTop:"1px solid var(--b1)"}}>
+            <div style={{fontSize:9,fontFamily:"'DM Mono',monospace",letterSpacing:1.5,color:"var(--tx3)",textTransform:"uppercase",marginBottom:6}}>Intentions</div>
+            {(profile.skills||[]).filter(sk=>sk.intention).map(sk=>(
+              <div key={sk.id} style={{fontSize:11,color:"var(--tx2)",padding:"3px 0",borderBottom:"1px solid var(--b1)"}}>
+                <span style={{color:"var(--tx3)"}}>{sk.name}: </span>"{sk.intention}"
+              </div>
+            ))}
+          </div>
+        )}
+      </>)}
+    </div>
+  );
+}
+
+function WeeklyReview({tasks,quests,skills,meds,xpLog,journal,settings,onClose,onNavigate}){
   const {settings}=useSettings(); const L=settings.labels;
   const [analysis,setAnalysis]=useState("");
   const [loading,setLoading]=useState(false);
@@ -3047,25 +3363,71 @@ function WeeklyReview({tasks,quests,skills,meds,xpLog,onClose,onNavigate}){
   const runReview=async()=>{
     setLoading(true);
     try{
+      const skPerLv=6000;
+      const practiceBySkill={};
+      recentMeds.forEach(m=>{
+        (m.skillIds||[m.skill]).filter(Boolean).forEach(sid=>{
+          practiceBySkill[sid]=(practiceBySkill[sid]||0)+(m.dur||0);
+        });
+      });
+      const skillContext=skills.filter(s=>s.type!=="subskill").map(s=>({
+        name:s.name, level:Math.floor((s.xp||0)/skPerLv)+1,
+        intention:s.intention||null,
+        minutesThisWeek:practiceBySkill[s.id]||0,
+      }));
+      // sessions with notes for quality signal
+      const sessionNotes=recentMeds.filter(m=>m.note&&m.note.length>10).map(m=>({
+        skill:skills.find(s=>(m.skillIds||[]).includes(s.id)||m.skill===s.id)?.name||"Unknown",
+        dur:m.dur, note:m.note.slice(0,120),
+        aiReason:m.aiReason||null
+      })).slice(0,6);
+      // streaks
+      const activeStreaks=Object.entries(xpLog&&xpLog.length?{}:{}).length; // basic
+      // week pattern
+      const dayActivity={};
+      recentMeds.forEach(m=>{
+        const d=new Date(m.created).toLocaleDateString("en",{weekday:"short"});
+        dayActivity[d]=(dayActivity[d]||0)+1;
+      });
       const summary={
+        playerName:settings?.profile?.name||"Player",
         tasksCompleted:recentTasks.length,
         questsCompleted:recentQuests.length,
         practiceSessionsLogged:recentMeds.length,
         totalMinutesPracticed:recentMeds.reduce((s,m)=>s+(m.dur||0),0),
         xpEarned:recentXp,
-        questTitles:recentQuests.map(q=>q.title).slice(0,5),
-        skills:skills.map(s=>({name:s.name,level:Math.floor(s.xp/6000)+1}))
+        questsCompleted_titles:recentQuests.map(q=>q.title).slice(0,5),
+        radiantQuestsActive:quests.filter(q=>q.type==="radiant"&&!q.done).map(q=>q.title),
+        skills:skillContext,
+        sessionNotes,
+        dayActivity,
+        journalEntriesThisWeek:journal.filter(j=>j.created>weekAgo).length,
       };
       const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
-          model:"llama-3.3-70b-versatile",max_tokens:800,
-          messages:[{role:"user",content:`You are a supportive RPG life coach doing a weekly review. Be encouraging, specific, and concise. Here's the player's week:\n\n${JSON.stringify(summary,null,2)}\n\nGive a 3-paragraph weekly review: (1) wins this week, (2) patterns you notice, (3) one concrete focus for next week. Keep it personal and motivating.`}]
+          model:"llama-3.3-70b-versatile",max_tokens:1000,
+          messages:[{role:"user",content:`You are a grounded, direct life coach doing a weekly rewind for ${summary.playerName}. You have full context about their week. Be specific, personal, and honest — not just cheerleading. Acknowledge real struggles and patterns.
+
+Week data:
+${JSON.stringify(summary,null,2)}
+
+Write a weekly rewind in exactly this structure:
+**⬡ WINS THIS WEEK**
+[2-3 specific things they actually did — reference real session notes, quest titles, skills if available]
+
+**◉ PATTERNS**
+[What does this week reveal about their habits? Be honest. What showed up consistently? What was avoided? What do the practice notes say about quality vs just showing up?]
+
+**◆ ONE FOCUS FOR NEXT WEEK**
+[One specific, concrete thing — not generic advice. Based on their intentions and where they fell short or can build momentum.]
+
+Keep it under 350 words. Be like a coach who read the actual notes, not a bot reciting stats.`}]
         })
       });
       const data=await res.json();
       const msg=data?.choices?.[0]?.message?.content||data?.content?.[0]?.text||"";
       setAnalysis(msg);
-    }catch{ setAnalysis("Couldn't connect to advisor. Try again."); }
+    }catch(e){ setAnalysis("Couldn't connect to advisor. Try again."); }
     finally{ setLoading(false); }
   };
 
