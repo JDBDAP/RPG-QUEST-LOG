@@ -17,49 +17,43 @@ const COOLDOWN_OPTIONS=[
   {label:"24 hr",ms:24*60*60*1000},
 ];
 
-// ── Universal pointer-based drag hook (works on mobile + desktop) ─────────────
+// ── Drag-to-reorder hook (HTML5 drag API — desktop + Android Chrome) ──────────
 function useDrag({items, onReorder, idKey="id"}){
-  const dragId=useRef(null);
-  const dragOver=useRef(null);
-  const clone=useRef(null);
-  const startY=useRef(0);
   const [activeId,setActiveId]=useState(null);
   const [overId,setOverId]=useState(null);
+  const dragId=useRef(null);
 
-  const onPointerDown=(e,id)=>{
-    // only left-click / touch
-    if(e.button&&e.button!==0) return;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    dragId.current=id; startY.current=e.clientY;
-    setActiveId(id);
-  };
-  const onPointerMove=(e,id)=>{
-    if(!dragId.current||dragId.current===id) return;
-    e.preventDefault();
-    dragOver.current=id; setOverId(id);
-  };
-  const onPointerUp=(e,id)=>{
-    if(!dragId.current) return;
-    if(dragId.current!==id&&dragOver.current){
-      const arr=[...items];
-      const from=arr.findIndex(x=>x[idKey]===dragId.current);
-      const to=arr.findIndex(x=>x[idKey]===dragOver.current);
-      if(from!==-1&&to!==-1){const[m]=arr.splice(from,1);arr.splice(to,0,m);onReorder(arr);}
-    }
-    dragId.current=null; dragOver.current=null;
-    setActiveId(null); setOverId(null);
-  };
   const getProps=(id)=>({
-    onPointerDown:(e)=>onPointerDown(e,id),
-    onPointerMove:(e)=>onPointerMove(e,id),
-    onPointerUp:(e)=>onPointerUp(e,id),
+    draggable:true,
+    onDragStart:(e)=>{
+      dragId.current=id; setActiveId(id);
+      e.dataTransfer.effectAllowed="move";
+      e.dataTransfer.setData("text/plain",String(id));
+    },
+    onDragOver:(e)=>{
+      e.preventDefault();
+      e.dataTransfer.dropEffect="move";
+      if(dragId.current&&dragId.current!==id) setOverId(id);
+    },
+    onDragLeave:(e)=>{ if(!e.currentTarget.contains(e.relatedTarget)) setOverId(v=>v===id?null:v); },
+    onDrop:(e)=>{
+      e.preventDefault();
+      const from=items.findIndex(x=>x[idKey]===dragId.current);
+      const to=items.findIndex(x=>x[idKey]===id);
+      if(from!==-1&&to!==-1&&from!==to){
+        const arr=[...items];
+        const[m]=arr.splice(from,1); arr.splice(to,0,m);
+        onReorder(arr);
+      }
+      dragId.current=null; setActiveId(null); setOverId(null);
+    },
+    onDragEnd:()=>{ dragId.current=null; setActiveId(null); setOverId(null); },
     style:{
       opacity:activeId===id?0.4:1,
       outline:overId===id&&activeId!==id?"2px dashed var(--primary)":"none",
       outlineOffset:2,
-      touchAction:"none",
-      transition:"opacity .1s",
       cursor:"grab",
+      transition:"opacity .1s",
     }
   });
   return {getProps, activeId, overId};
@@ -216,6 +210,19 @@ function getWeekDays(){
   const t=new Date(), mon=new Date(t);
   mon.setDate(t.getDate()-((t.getDay()+6)%7));
   return Array.from({length:7},(_,i)=>{ const d=new Date(mon); d.setDate(mon.getDate()+i); return d; });
+}
+function radiantAvailable(q){
+  if(q.type!=="radiant") return true;
+  const cd=q.cooldown??60*60*1000;
+  if(cd===0||!q.lastDone) return true;
+  return Date.now()-q.lastDone >= cd;
+}
+function radiantCooldownLabel(q){
+  if(!q.lastDone||radiantAvailable(q)) return null;
+  const cd=q.cooldown??60*60*1000;
+  const ms=cd-(Date.now()-q.lastDone);
+  const mins=Math.ceil(ms/60000);
+  return mins>=60?`${Math.ceil(mins/60)}h`:`${mins}m`;
 }
 function getMultiplier(count){
   if(count>=30) return 2.0; if(count>=14) return 1.75;
@@ -526,6 +533,25 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 .search-input{flex:1;background:var(--s1);border:1px solid var(--b1);color:var(--tx);border-radius:var(--r);padding:7px 12px;font-size:12px;outline:none;}
 .search-input:focus{border-color:var(--primaryb);}
 .review-modal{background:var(--s1);border:1px solid var(--b1);border-radius:8px;padding:24px;max-width:560px;width:100%;max-height:80vh;overflow-y:auto;}
+/* ── Utility classes to replace repeated inline styles ── */
+.row{display:flex;align-items:center;}
+.row-gap4{display:flex;align-items:center;gap:4px;}
+.row-gap6{display:flex;align-items:center;gap:6px;}
+.row-gap8{display:flex;align-items:center;gap:8px;}
+.row-gap10{display:flex;align-items:center;gap:10px;}
+.row-sb{display:flex;align-items:center;justify-content:space-between;}
+.col{display:flex;flex-direction:column;}
+.col-gap4{display:flex;flex-direction:column;gap:4px;}
+.col-gap8{display:flex;flex-direction:column;gap:8px;}
+.mono{font-family:'DM Mono',monospace;}
+.mono9{font-family:'DM Mono',monospace;font-size:9px;}
+.mono10{font-family:'DM Mono',monospace;font-size:10px;}
+.mono11{font-family:'DM Mono',monospace;font-size:11px;}
+.label9{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--tx3);}
+.label10{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--tx3);}
+.tx3{color:var(--tx3);}
+.tx2{color:var(--tx2);}
+.card-row{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:8px 12px;margin-bottom:4px;}
 `;}
 
 
@@ -582,7 +608,6 @@ export default function App(){
   const [journal,setJournal]=useState([]);
   const [xpLog,setXpLog]=useState([]);
   const [showReview,setShowReview]=useState(false);
-  const [showCommunity,setShowCommunity]=useState(false);
   const [friends,setFriends]=useState([]); // [{userId,name,code}]
   const [communityProfiles,setCommunityProfiles]=useState([]);
   const [myFriendCode,setMyFriendCode]=useState("");
@@ -679,6 +704,7 @@ export default function App(){
     }
   };
   const L=settings.labels; const C=settings.colors; const TH=settings.theme;
+  const css=useMemo(()=>buildCSS(C,TH,settings.fontSize||14),[C,TH,settings.fontSize]);
 
   const showToast=useCallback(msg=>{
     if(toastRef.current) clearTimeout(toastRef.current);
@@ -711,16 +737,15 @@ export default function App(){
     return {amt,multiplier,leveledUp,newSkills};
   },[settings.xp.skillPerLevel]);
 
-  const saveT=async t=>{setTasks(t);await dbSet("cx_tasks",t,userId);};
-  const saveQ=async q=>{setQuests(q);await dbSet("cx_quests",q,userId);};
-  const saveM=async m=>{setMeds(m);await dbSet("cx_meds",m,userId);};
-  const savePT=async t=>{setPracticeTypes(t);await dbSet("cx_ptypes",t,userId);};
-  const addPracticeType=async d=>{await savePT([...practiceTypes,{id:uid(),label:d.label,icon:d.icon||"◎"}]);};
-  const deletePracticeType=async id=>{await savePT(practiceTypes.filter(t=>t.id!==id));};
-  const saveS=async s=>{setSkills(s);await dbSet("cx_skills",s,userId);};
-  const reorderSkills=async newOrder=>{setSkills(newOrder);await dbSet("cx_skills",newOrder,userId);};
-
-  const saveStr=async s=>{setStreaks(s);await dbSet("cx_streaks",s,userId);};
+  const saveT=useCallback(async t=>{setTasks(t);await dbSet("cx_tasks",t,userId);},[userId]);
+  const saveQ=useCallback(async q=>{setQuests(q);await dbSet("cx_quests",q,userId);},[userId]);
+  const saveM=useCallback(async m=>{setMeds(m);await dbSet("cx_meds",m,userId);},[userId]);
+  const savePT=useCallback(async t=>{setPracticeTypes(t);await dbSet("cx_ptypes",t,userId);},[userId]);
+  const addPracticeType=useCallback(async d=>{await savePT([...practiceTypes,{id:uid(),label:d.label,icon:d.icon||"◎"}]);},[savePT,practiceTypes]);
+  const deletePracticeType=useCallback(async id=>{await savePT(practiceTypes.filter(t=>t.id!==id));},[savePT,practiceTypes]);
+  const saveS=useCallback(async s=>{setSkills(s);await dbSet("cx_skills",s,userId);},[userId]);
+  const reorderSkills=useCallback(async newOrder=>{setSkills(newOrder);await dbSet("cx_skills",newOrder,userId);},[userId]);
+  const saveStr=useCallback(async s=>{setStreaks(s);await dbSet("cx_streaks",s,userId);},[userId]);
 
   const addTask=async d=>{
     await saveT([{id:uid(),...d,done:false,dayKey:d.period==="daily"?todayKey():null,created:Date.now()},...tasks]);
@@ -743,20 +768,6 @@ export default function App(){
     await saveQ([{id:uid(),...d,skills:qSkills,xpVal,done:false,priority:d.priority||"med",cooldown:d.type==="radiant"?(d.cooldown??60*60*1000):undefined,created:Date.now()},...quests]);
     showToast("Quest accepted");
   };
-  const radiantAvailable=(q)=>{
-    if(q.type!=="radiant") return true;
-    const cd=q.cooldown??60*60*1000; // default 1hr if not set
-    if(cd===0||!q.lastDone) return true;
-    return Date.now()-q.lastDone >= cd;
-  };
-  const radiantCooldownLabel=(q)=>{
-    if(!q.lastDone||radiantAvailable(q)) return null;
-    const cd=q.cooldown??60*60*1000;
-    const ms=cd-(Date.now()-q.lastDone);
-    const mins=Math.ceil(ms/60000);
-    return mins>=60?`${Math.ceil(mins/60)}h`:`${mins}m`;
-  };
-
   const toggleQuest=async id=>{
     const q=quests.find(q=>q.id===id); if(!q) return;
     if(q.type==="radiant"){
@@ -995,13 +1006,14 @@ export default function App(){
   const skPerLv=settings.xp.skillPerLevel||6000;
   const level=Math.floor(xp/perLv)+1;
   const prog=((xp%perLv)/perLv)*100;
-  const weekDays=getWeekDays();
-
-  function periodTasks(){
+  // weekDays only changes at midnight — memoize so it doesn't rebuild every render
+  const weekDays=useMemo(()=>getWeekDays(),[]);
+  // periodTasks filters tasks array — memoize on actual deps
+  const periodTasks=useMemo(()=>{
     if(period==="daily") return tasks.filter(t=>t.period==="daily"&&t.dayKey===todayKey());
     if(period==="weekly") return tasks.filter(t=>t.period==="weekly");
     return tasks.filter(t=>t.period==="monthly");
-  }
+  },[tasks,period]);
 
   const NAV=[
     {id:"planner",  icon:"□", label:L.plannerTab},
@@ -1024,9 +1036,11 @@ export default function App(){
     else { setShowAuth(false); }
   }}/>;
 
+  const ctxValue=useMemo(()=>({settings,saveSettings}),[settings,saveSettings]);
+
   return (
-    <SettingsCtx.Provider value={{settings,saveSettings}}>
-      <style>{buildCSS(C,TH,settings.fontSize||14)}</style>
+    <SettingsCtx.Provider value={ctxValue}>
+      <style>{css}</style>
       <div className="app" style={{"--content-width":`${settings.contentWidth||700}px`,...(settings.images?.bg?{backgroundImage:`url(${settings.images.bg})`,backgroundSize:"cover",backgroundAttachment:"fixed",backgroundPosition:"center"}:{})}}>
         {!settings.profile.setup&&<ProfileSetup onComplete={completeSetup}/>}
         {settings.profile.setup&&<>
@@ -1052,7 +1066,7 @@ export default function App(){
           <header className="hdr">
             <div className="hdr-row">
               <div className="hdr-title">{computedTabTitle(tab,settings)}</div>
-              <div style={{display:"flex",alignItems:"center",gap:8}}>
+              <div className="row-gap8">
                 <span className="lv-badge">{L.levelName} {level}</span>
                 {userId&&<button onClick={handleSignOut} title="Sign out" style={{background:"none",border:"none",cursor:"pointer",color:"var(--tx3)",fontSize:11,padding:"2px 4px",fontFamily:"'DM Mono',monospace",letterSpacing:.5}}>↪ out</button>}
                 {!userId&&<button onClick={()=>setShowAuth(true)} title="Sign in" style={{background:"none",border:"none",cursor:"pointer",color:"var(--tx2,#999999)",fontSize:9,padding:"2px 4px",fontFamily:"'DM Mono',monospace",letterSpacing:1,textDecoration:"underline"}}>sign in</button>}
@@ -1065,7 +1079,7 @@ export default function App(){
           </header>
           <div className="main-wrap">
           <main className="pg">
-            {tab==="planner"  && <PlannerTab period={period} setPeriod={setPeriod} tasks={periodTasks()} weekDays={weekDays} allTasks={tasks} skills={skills} quests={quests} onAddTask={addTask} onToggle={toggleTask} onDelete={deleteTask} onEdit={editTask} onToggleQuest={toggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>}
+            {tab==="planner"  && <PlannerTab period={period} setPeriod={setPeriod} tasks={periodTasks} weekDays={weekDays} allTasks={tasks} skills={skills} quests={quests} onAddTask={addTask} onToggle={toggleTask} onDelete={deleteTask} onEdit={editTask} onToggleQuest={toggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>}
             {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest} onReorder={q=>saveQ(q)} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>}
             {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill} onReorder={reorderSkills} onLink={linkSubskill}/>}
             {tab==="practice" && <PracticeTab meds={meds} skills={skills} streaks={streaks} pending={pendingPractice} practiceTypes={practiceTypes} onAddType={addPracticeType} onDeleteType={deletePracticeType} onLog={logMed} onDelete={deleteMed} onClearPending={()=>setPendingPractice(null)}/>}
@@ -1337,14 +1351,14 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
         <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0}} onClick={()=>setForm(null)}>✕</button>
       </div>
       <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,textTransform:"uppercase",color:"var(--tx3)",flexShrink:0}}>Resets after</div>
+        <div className="label9" style={{flexShrink:0}}>Resets after</div>
         <select className="fsel" style={{flex:1}} value={f.cooldown} onChange={e=>setF(v=>({...v,cooldown:Number(e.target.value)}))}>
           {COOLDOWN_OPTIONS.map(o=><option key={o.ms} value={o.ms}>{o.label}</option>)}
         </select>
       </div>
       <textarea className="fi" rows={2} placeholder="Intention (optional)..." value={f.note} onChange={e=>setF(v=>({...v,note:e.target.value}))} style={{resize:"vertical",minHeight:44,fontFamily:"inherit",fontSize:12,marginBottom:4,width:"100%",boxSizing:"border-box"}}/>
       <div style={{marginBottom:6}}>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5}}>Quest color</div>
+        <div className="label9" style={{marginBottom:5}}>Quest color</div>
         <div style={{display:"flex",flexWrap:"wrap",gap:4,alignItems:"center"}}>
           {SKILL_COLORS.map(c=><div key={c} onClick={()=>setF(v=>({...v,color:c}))} style={{width:18,height:18,borderRadius:"50%",background:c,cursor:"pointer",border:f.color===c?"2px solid var(--tx)":"2px solid transparent",flexShrink:0}}/>)}
           <div onClick={()=>setF(v=>({...v,color:null}))} style={{width:18,height:18,borderRadius:"50%",background:"var(--bg)",cursor:"pointer",border:!f.color?"2px solid var(--tx)":"2px solid var(--b2)",fontSize:9,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--tx3)"}} title="Auto from skill">∅</div>
@@ -1397,7 +1411,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
       </div>
       <textarea className="fi" rows={2} placeholder="Intention (optional)..." value={f.note} onChange={e=>setF(v=>({...v,note:e.target.value}))} style={{resize:"vertical",minHeight:44,fontFamily:"inherit",fontSize:12,marginBottom:4,width:"100%",boxSizing:"border-box"}}/>
       <div style={{marginBottom:6}}>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5}}>Quest color</div>
+        <div className="label9" style={{marginBottom:5}}>Quest color</div>
         <div style={{display:"flex",flexWrap:"wrap",gap:4,alignItems:"center"}}>
           {SKILL_COLORS.map(c=><div key={c} onClick={()=>setF(v=>({...v,color:c}))} style={{width:18,height:18,borderRadius:"50%",background:c,cursor:"pointer",border:f.color===c?"2px solid var(--tx)":"2px solid transparent",flexShrink:0}}/>)}
           <div onClick={()=>setF(v=>({...v,color:null}))} style={{width:18,height:18,borderRadius:"50%",background:"var(--bg)",cursor:"pointer",border:!f.color?"2px solid var(--tx)":"2px solid var(--b2)",fontSize:9,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--tx3)"}} title="Auto from skill">∅</div>
@@ -1444,7 +1458,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
       </div>
       <textarea className="fi" rows={2} placeholder="Intention (optional)..." value={f.note} onChange={e=>setF(v=>({...v,note:e.target.value}))} style={{resize:"vertical",minHeight:44,fontFamily:"inherit",fontSize:12,marginBottom:4,width:"100%",boxSizing:"border-box"}}/>
       <div style={{marginBottom:6}}>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5}}>Quest color</div>
+        <div className="label9" style={{marginBottom:5}}>Quest color</div>
         <div style={{display:"flex",flexWrap:"wrap",gap:4,alignItems:"center"}}>
           {SKILL_COLORS.map(c=><div key={c} onClick={()=>setF(v=>({...v,color:c}))} style={{width:18,height:18,borderRadius:"50%",background:c,cursor:"pointer",border:f.color===c?"2px solid var(--tx)":"2px solid transparent",flexShrink:0}}/>)}
           <div onClick={()=>setF(v=>({...v,color:null}))} style={{width:18,height:18,borderRadius:"50%",background:"var(--bg)",cursor:"pointer",border:!f.color?"2px solid var(--tx)":"2px solid var(--b2)",fontSize:9,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--tx3)"}} title="Auto from skill">∅</div>
@@ -1560,47 +1574,62 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
   const [showPresets,setShowPresets]=useState(false);
   const [f,setF]=useState({name:"",icon:"◈",color:SKILL_COLORS[0],startLevel:1,customImg:null});
 
-  // drag state — pointer events (mobile + desktop)
+  // drag state — HTML5 drag API (fixes pointer-capture bug)
   const [dragId,setDragId]=useState(null);
   const [dragType,setDragType]=useState(null); // "skill"|"subskill"
   const [dragOverId,setDragOverId]=useState(null);
   const [linkTarget,setLinkTarget]=useState(null);
+  const skDragRef=useRef({id:null,type:null});
 
-  const skPointerDown=(e,id,type)=>{
-    e.currentTarget.setPointerCapture(e.pointerId);
-    setDragId(id); setDragType(type);
-  };
-  const skPointerMove=(e,id,section)=>{
-    if(!dragId||dragId===id) return;
-    e.preventDefault();
-    if(dragType==="subskill"&&section==="skill") setLinkTarget(id);
-    else{ setDragOverId(id); setLinkTarget(null); }
-  };
-  const skPointerUp=(e,targetId,section)=>{
-    if(!dragId){ return; }
-    if(dragType==="subskill"&&section==="skill"&&dragId!==targetId){
-      onLink(dragId,targetId);
-    } else if(dragType===section&&dragId!==targetId){
-      const arr=section==="skill"?[...mainSkills]:[...subSkills];
-      const from=arr.findIndex(s=>s.id===dragId);
-      const to=arr.findIndex(s=>s.id===targetId);
-      if(from!==-1&&to!==-1){
-        const[m]=arr.splice(from,1); arr.splice(to,0,m);
-        onReorder(section==="skill"?[...arr,...subSkills]:[...mainSkills,...arr]);
-      }
-    }
-    setDragId(null); setDragType(null); setDragOverId(null); setLinkTarget(null);
-  };
   const getSkDragProps=(id,section)=>({
-    onPointerDown:(e)=>skPointerDown(e,id,section),
-    onPointerMove:(e)=>skPointerMove(e,id,section),
-    onPointerUp:(e)=>skPointerUp(e,id,section),
+    draggable:true,
+    onDragStart:(e)=>{
+      skDragRef.current={id,type:section};
+      setDragId(id); setDragType(section);
+      e.dataTransfer.effectAllowed="move";
+      e.dataTransfer.setData("text/plain",id);
+    },
+    onDragOver:(e)=>{
+      e.preventDefault();
+      const {id:fromId,type:fromType}=skDragRef.current;
+      if(!fromId||fromId===id) return;
+      if(fromType==="subskill"&&section==="skill") setLinkTarget(id);
+      else if(fromType===section){ setDragOverId(id); setLinkTarget(null); }
+    },
+    onDragLeave:(e)=>{
+      if(!e.currentTarget.contains(e.relatedTarget)){
+        setDragOverId(v=>v===id?null:v);
+        setLinkTarget(v=>v===id?null:v);
+      }
+    },
+    onDrop:(e)=>{
+      e.preventDefault();
+      const {id:fromId,type:fromType}=skDragRef.current;
+      if(!fromId||fromId===id) return;
+      if(fromType==="subskill"&&section==="skill"){
+        onLink(fromId,id);
+      } else if(fromType===section){
+        const arr=section==="skill"?[...mainSkills]:[...subSkills];
+        const from=arr.findIndex(s=>s.id===fromId);
+        const to=arr.findIndex(s=>s.id===id);
+        if(from!==-1&&to!==-1&&from!==to){
+          const[m]=arr.splice(from,1); arr.splice(to,0,m);
+          onReorder(section==="skill"?[...arr,...subSkills]:[...mainSkills,...arr]);
+        }
+      }
+      skDragRef.current={id:null,type:null};
+      setDragId(null); setDragType(null); setDragOverId(null); setLinkTarget(null);
+    },
+    onDragEnd:()=>{
+      skDragRef.current={id:null,type:null};
+      setDragId(null); setDragType(null); setDragOverId(null); setLinkTarget(null);
+    },
     style:{
       opacity:dragId===id?0.4:1,
       outline:(dragType==="subskill"&&linkTarget===id)?`2px dashed ${(skills.find(s=>s.id===id)||{}).color||"var(--primary)"}`:
                (dragOverId===id&&dragType===section)?"2px dashed var(--primary)":"none",
       outlineOffset:2,
-      touchAction:"none",
+      cursor:"grab",
       transition:"opacity .1s",
     }
   });
@@ -1644,7 +1673,6 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
     setShowPresets(false);
   };
 
-  // drag handled by pointer events (skPointerDown/Move/Up)
 
   // ── shared form renderer ───────────────────────────────────────────────────
   const renderForm=()=>(<div className="fwrap">
@@ -1660,20 +1688,20 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
     </div>
     <div className="frow"><input className="fi full" placeholder={formType==="subskill"?"e.g. Breathwork, HIIT, Focus blocks...":"e.g. Guitar, Spanish, CS2..."} autoFocus value={f.name} onChange={e=>setF(v=>({...v,name:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
     {formType==="skill"&&<div className="frow" style={{alignItems:"center",gap:8}}>
-      <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,textTransform:"uppercase",color:"var(--tx3)",flexShrink:0}}>Starting {L.levelName}</div>
+      <div className="label9" style={{flexShrink:0}}>Starting {L.levelName}</div>
       <input className="fi" type="number" min={1} max={99} style={{maxWidth:65,textAlign:"center"}} value={f.startLevel} onChange={e=>setF(v=>({...v,startLevel:e.target.value}))}/>
       <div style={{fontSize:11,color:"var(--tx3)",fontStyle:"italic",flex:1}}>{Number(f.startLevel)>1?`Pre-loads ${((Number(f.startLevel)||1)-1)*skPerLv} ${L.xpName}`:"Starting fresh"}</div>
     </div>}
-    <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:7,marginTop:4}}>Icon</div>
+    <div className="label9" style={{marginBottom:7,marginTop:4}}>Icon</div>
     <div className="icon-grid">{SKILL_ICONS_EXTRA.map(ic=><button key={ic} className={`icon-opt ${f.icon===ic?"on":""}`} onClick={()=>setF(v=>({...v,icon:ic,customImg:null}))}>{ic}</button>)}</div>
-    <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5}}>Or upload image</div>
+    <div className="label9" style={{marginBottom:5}}>Or upload image</div>
     <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",marginBottom:8}}>
       {f.customImg?<img src={f.customImg} style={{width:32,height:32,borderRadius:4,objectFit:"cover",border:"1px solid var(--b2)"}}/>:<span style={{fontSize:11,color:"var(--tx3)"}}>No image</span>}
       <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>handleImg(e,setF)}/>
       <span className="fsbtn" style={{width:"auto",padding:"4px 10px",margin:0,fontSize:9}}>Choose</span>
       {f.customImg&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setF(v=>({...v,customImg:null,icon:"◈"}))}>✕</button>}
     </label>
-    <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:7}}>Color</div>
+    <div className="label9" style={{marginBottom:7}}>Color</div>
     <div className="color-grid">{SKILL_COLORS.map(c=><div key={c} className={`color-opt ${f.color===c?"on":""}`} style={{background:c}} onClick={()=>setF(v=>({...v,color:c}))}/>)}</div>
     <button className="fsbtn" onClick={submit}>Create {formType}</button>
   </div>);
@@ -1792,7 +1820,7 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
 
     {showPresets&&!showForm&&(
       <div className="fwrap" style={{marginBottom:10,maxHeight:320,overflowY:"auto"}}>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:10}}>Skill presets</div>
+        <div className="label9" style={{marginBottom:10}}>Skill presets</div>
         {SKILL_PRESETS.map(p=>(
           <div key={p.name} style={{background:"var(--bg)",border:"1px solid var(--b1)",borderRadius:4,padding:"10px 12px",marginBottom:6}}>
             <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1,color:"var(--tx2)",marginBottom:7}}>{p.name}</div>
@@ -1808,12 +1836,12 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
     {editingId&&(()=>{
       const es=skills.find(s=>s.id===editingId); if(!es) return null;
       return (<div className="fwrap" style={{marginBottom:12}}>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:10}}>Edit {es.type||"skill"}</div>
+        <div className="label9" style={{marginBottom:10}}>Edit {es.type||"skill"}</div>
         <input className="fi full" value={ef.name} onChange={e=>setEf(v=>({...v,name:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submitEdit()} style={{marginBottom:8}}/>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5,marginTop:2}}>Intention <span style={{opacity:.5,letterSpacing:0,textTransform:"none"}}>(for AI advisor)</span></div>
+        <div className="label9" style={{marginBottom:5,marginTop:2}}>Intention <span style={{opacity:.5,letterSpacing:0,textTransform:"none"}}>(for AI advisor)</span></div>
         <textarea className="fi full" rows={2} placeholder="e.g. build consistent meditation practice, run 5k by March..." value={ef.intention} onChange={e=>setEf(v=>({...v,intention:e.target.value}))} style={{resize:"vertical",lineHeight:1.4}}/>
         <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,marginTop:8}}>
-          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)"}}>Category</div>
+          <div className="label9">Category</div>
           <SkAiCatBtn name={ef.name} intention={ef.intention} onAssign={cat=>setEf(v=>({...v,category:cat}))}/>
         </div>
         <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
@@ -1834,16 +1862,16 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
             <span style={{fontSize:11,color:"var(--tx2)"}}>Share notes</span>
           </label>}
         </div>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:7,marginTop:8}}>Icon</div>
+        <div className="label9" style={{marginBottom:7,marginTop:8}}>Icon</div>
         <div className="icon-grid">{SKILL_ICONS_EXTRA.map(ic=><button key={ic} className={`icon-opt ${ef.icon===ic?"on":""}`} onClick={()=>setEf(v=>({...v,icon:ic,customImg:null}))}>{ic}</button>)}</div>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5}}>Or upload image</div>
+        <div className="label9" style={{marginBottom:5}}>Or upload image</div>
         <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",marginBottom:8}}>
           {ef.customImg?<img src={ef.customImg} style={{width:32,height:32,borderRadius:4,objectFit:"cover",border:"1px solid var(--b2)"}}/>:<span style={{fontSize:11,color:"var(--tx3)"}}>No image</span>}
           <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>handleImg(e,setEf)}/>
           <span className="fsbtn" style={{width:"auto",padding:"4px 10px",margin:0,fontSize:9}}>Choose</span>
           {ef.customImg&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setEf(v=>({...v,customImg:null,icon:"◈"}))}>✕ clear</button>}
         </label>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:7}}>Color</div>
+        <div className="label9" style={{marginBottom:7}}>Color</div>
         <div className="color-grid">{SKILL_COLORS.map(c=><div key={c} className={`color-opt ${ef.color===c?"on":""}`} style={{background:c}} onClick={()=>setEf(v=>({...v,color:c}))}/>)}</div>
         <div style={{display:"flex",gap:6}}>
           <button className="fsbtn" style={{flex:1,marginTop:4}} onClick={submitEdit}>Save</button>
@@ -1854,7 +1882,7 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
 
     {/* ── SKILLS section ───────────────────────────────────────────── */}
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-      <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)"}}>Skills</div>
+      <div className="label9">Skills</div>
       <div style={{fontSize:9,color:"var(--tx3)"}}>{mainSkills.length} total</div>
     </div>
     {mainSkills.length===0&&!showForm&&(
@@ -1870,7 +1898,7 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
 
     {/* ── SUBSKILLS section ─────────────────────────────────────────── */}
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6,marginTop:4}}>
-      <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)"}}>Subskills</div>
+      <div className="label9">Subskills</div>
       <div style={{fontSize:9,color:"var(--tx3)"}}>{subSkills.length} total · drag onto a skill to link</div>
     </div>
     {subSkills.length===0&&<div style={{background:"var(--s1)",border:"1px dashed var(--b1)",borderRadius:"var(--r)",padding:12,textAlign:"center",marginBottom:10,fontSize:11,color:"var(--tx3)"}}>Subskills are cross-disciplinary practices — create one then drag it onto any skill to link XP</div>}
@@ -2028,7 +2056,7 @@ Suggest fair XP and a short reason. Reply ONLY with JSON, no markdown: {"xp": NU
     )}
     {showForm?(
       <div className="fwrap">
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:8}}>Practice type</div>
+        <div className="label9" style={{marginBottom:8}}>Practice type</div>
         <div className="type-grid">
           {practiceTypes.map(t=>(
             <button key={t.id} className={`topt ${f.typeId===t.id?"on":""}`} onClick={()=>setF(v=>({...v,typeId:t.id}))}>
@@ -2050,7 +2078,7 @@ Suggest fair XP and a short reason. Reply ONLY with JSON, no markdown: {"xp": NU
             <button className="fsbtn" style={{width:"auto",padding:"7px 10px",margin:0}} onClick={()=>setShowTypeForm(false)}>✕</button>
           </div>
         )}
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5}}>Skills (optional)</div>
+        <div className="label9" style={{marginBottom:5}}>Skills (optional)</div>
         <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:6}}>
           {skills.filter(s=>s.type!=="subskill").map(s=>(
             <button key={s.id} onClick={()=>toggleSkill(s.id)}
@@ -2060,7 +2088,7 @@ Suggest fair XP and a short reason. Reply ONLY with JSON, no markdown: {"xp": NU
           ))}
         </div>
         {skills.filter(s=>s.type==="subskill").length>0&&<>
-          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5,marginTop:4}}>Or log a subskill <span style={{fontWeight:"normal",textTransform:"none",letterSpacing:0}}>(XP goes to all linked skills)</span></div>
+          <div className="label9" style={{marginBottom:5,marginTop:4}}>Or log a subskill <span style={{fontWeight:"normal",textTransform:"none",letterSpacing:0}}>(XP goes to all linked skills)</span></div>
           <div style={{display:"flex",flexWrap:"wrap",gap:5,marginBottom:10}}>
             {skills.filter(s=>s.type==="subskill").map(s=>{
               const isSelected=(f.subskillIds||[]).includes(s.id);
@@ -2084,7 +2112,7 @@ Suggest fair XP and a short reason. Reply ONLY with JSON, no markdown: {"xp": NU
         </>}
         <div className="dur-hdr">
           <span>Duration</span>
-          <div style={{display:"flex",alignItems:"center",gap:6}}>
+          <div className="row-gap6">
             <input type="number" min={1} max={600} value={f.dur}
               onChange={e=>setF(v=>({...v,dur:Math.max(1,Math.min(600,Number(e.target.value)||1))}))}
               style={{width:46,background:"var(--bg)",border:"1px solid var(--b1)",borderRadius:3,color:"var(--tx)",fontSize:11,fontFamily:"'DM Mono',monospace",padding:"2px 5px",textAlign:"center",outline:"none"}}/>
@@ -2492,7 +2520,7 @@ function SettingsTab({showToast,onExport,onImport,userId,onSignIn,onSignOut}){
     <div className="slbl" style={{marginBottom:8}}>Account</div>
     <div className="fwrap" style={{marginBottom:18}}>
       {userId
-        ? <div style={{display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        ? <div className="row-sb">
             <span style={{fontSize:11,color:"var(--tx2)",fontFamily:"'DM Mono',monospace"}}>Signed in</span>
             <button className="fsbtn" style={{width:"auto",padding:"6px 16px",margin:0}} onClick={onSignOut}>Sign Out</button>
           </div>
@@ -2523,7 +2551,7 @@ function SettingsTab({showToast,onExport,onImport,userId,onSignIn,onSignOut}){
       <div className="srow">
         <div style={{flex:1}}><div className="srow-label">Content width</div>
           <div className="srow-sub">How wide the main content area is on desktop</div></div>
-        <div style={{display:"flex",alignItems:"center",gap:8}}>
+        <div className="row-gap8">
           <input type="range" min={500} max={1100} step={50} value={draft.contentWidth||700}
             onChange={e=>setDraft(d=>({...d,contentWidth:Number(e.target.value)}))}
             style={{width:90,accentColor:"var(--primary)"}}/>
@@ -2756,7 +2784,7 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
         {skills.map(s=><button key={s.id} onClick={()=>toggleESkill(s.id)} style={{background:ef.skillIds.includes(s.id)?s.color+"22":"var(--bg)",border:`1px solid ${ef.skillIds.includes(s.id)?s.color+"66":"var(--b2)"}`,borderRadius:20,padding:"4px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:.8,color:ef.skillIds.includes(s.id)?s.color:"var(--tx3)",transition:"all .15s"}}>{s.icon} {s.name}</button>)}
       </div>}
       <div className="frow" style={{alignItems:"center",gap:6}}>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,textTransform:"uppercase",color:"var(--tx3)",flexShrink:0}}>Priority</div>
+        <div className="label9" style={{flexShrink:0}}>Priority</div>
         {["high","med","low"].map(p=>(
           <button key={p} onClick={()=>setEf(v=>({...v,priority:p}))} style={{background:ef.priority===p?"var(--s2)":"var(--bg)",border:`1px solid ${ef.priority===p?"var(--b3)":"var(--b1)"}`,borderRadius:4,padding:"4px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:.8,color:ef.priority===p?({high:"#e05555",med:"var(--primary)",low:"var(--tx3)"}[p]):"var(--tx3)",transition:"all .15s",textTransform:"uppercase"}}>
             {p}
@@ -2768,13 +2796,13 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
         <input className="fi" type="date" style={{colorScheme:"dark"}} value={ef.dueDate} onChange={e=>setEf(v=>({...v,dueDate:e.target.value}))}/>
       </div>
       {quest.type==="radiant"&&<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,textTransform:"uppercase",color:"var(--tx3)",flexShrink:0}}>Resets after</div>
+        <div className="label9" style={{flexShrink:0}}>Resets after</div>
         <select className="fsel" style={{flex:1}} value={ef.cooldown} onChange={e=>setEf(v=>({...v,cooldown:Number(e.target.value)}))}>
           {COOLDOWN_OPTIONS.map(o=><option key={o.ms} value={o.ms}>{o.label}</option>)}
         </select>
       </div>}
       <div style={{marginBottom:8}}>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:6}}>Quest color</div>
+        <div className="label9" style={{marginBottom:6}}>Quest color</div>
         <div style={{display:"flex",flexWrap:"wrap",gap:5,alignItems:"center"}}>
           {SKILL_COLORS.map(c=><div key={c} onClick={()=>setEf(v=>({...v,color:c}))} style={{width:20,height:20,borderRadius:"50%",background:c,cursor:"pointer",border:ef.color===c?"2px solid var(--tx)":"2px solid transparent",transition:"all .15s"}}/>)}
           <div onClick={()=>setEf(v=>({...v,color:null}))} style={{width:20,height:20,borderRadius:"50%",background:"var(--bg)",cursor:"pointer",border:!ef.color?"2px solid var(--tx)":"2px solid var(--b2)",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--tx3)"}} title="Default">∅</div>
@@ -2815,7 +2843,7 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
           {isRadiant?(rCool?rCool:"◉"):quest.done?"✓":""}
         </button>
         <div className="cbody">
-          <div style={{display:"flex",alignItems:"center",gap:4}}>
+          <div className="row-gap4">
             {quest.priority&&<span className={`prio-dot prio-${quest.priority||"med"}`} title={`Priority: ${quest.priority}`}/>}
             <span className={`ctitle ${quest.done&&!isRadiant?"done":""}`}>{quest.title}</span>
           </div>
