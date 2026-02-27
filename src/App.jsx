@@ -1323,7 +1323,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
       const res=await fetch("/api/chat",{method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({max_tokens:120,
-          messages:[{role:"user",content:`Quest in a gamified life tracker: "${f.title}"${f.note?`. Intention: "${f.note}"`:""}. Type: ${typeLabel}. Priority: ${f.priority||"med"}. XP scale: 6000 XP = 1 level (~100 hours). Judge SCOPE and TIME required: radiant (repeat daily)=20-60, side quest (hours-days)=100-800, main quest (weeks-months)=600-4000, major life goal=2000-8000+. High priority = upper half of range. Reply ONLY with JSON: {"xp": NUMBER, "reason": "one short sentence"}`})});
+          messages:[{role:"user",content:"Quest in a gamified life tracker: \""+f.title+"\"" + (f.note ? ". Intention: \""+f.note+"\"" : "") + ". Type: "+typeLabel+". Priority: "+(f.priority||"med")+". XP scale: 6000 XP = 1 level (~100 hours). Judge SCOPE and TIME required: radiant (repeat daily)=20-60, side quest (hours-days)=100-800, main quest (weeks-months)=600-4000, major life goal=2000-8000+. High priority = upper half of range. Reply ONLY with JSON: {\"xp\": NUMBER, \"reason\": \"one short sentence\"}"})});
       const data=await res.json();
       const txt=data.choices?.[0]?.message?.content||"";
       const m=txt.match(/\{[\s\S]*\}/);
@@ -2897,7 +2897,7 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
       const res=await fetch("/api/chat",{method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({max_tokens:120,
-          messages:[{role:"user",content:`Quest in a gamified life tracker: "${ef.title}"${ef.note?`. Intention: "${ef.note}"`:""}.  Type: ${quest.type}, Priority: ${ef.priority||"med"}. XP scale: 6000 XP = 1 level (~100 hours). Judge SCOPE: radiant (daily repeat)=20-60, side (hours-days)=100-800, main (weeks-months)=600-4000, major life goal=2000-8000+. High priority = upper half of range. Reply ONLY with JSON: {"xp": NUMBER, "reason": "one short sentence"}`})});
+          messages:[{role:"user",content:"Quest in a gamified life tracker: \""+ef.title+"\"" + (ef.note ? ". Intention: \""+ef.note+"\"" : "") + ". Type: "+quest.type+", Priority: "+(ef.priority||"med")+". XP scale: 6000 XP = 1 level (~100 hours). Judge SCOPE: radiant (daily repeat)=20-60, side (hours-days)=100-800, main (weeks-months)=600-4000, major life goal=2000-8000+. High priority = upper half of range. Reply ONLY with JSON: {\"xp\": NUMBER, \"reason\": \"one short sentence\"}"})});
       const data=await res.json();
       const txt=data.choices?.[0]?.message?.content||"";
       const parsed=JSON.parse(txt.match(/\{[\s\S]*\}/)?.[0]||"{}");
@@ -4538,7 +4538,7 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
       const res=await fetch("/api/chat",{method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({max_tokens:120,
-          messages:[{role:"user",content:`Quest in a gamified life tracker: "${ef.title}"${ef.note?`. Intention: "${ef.note}"`:""}.  Type: ${quest.type}, Priority: ${ef.priority||"med"}. XP scale: 6000 XP = 1 level (~100 hours). Judge SCOPE: radiant (daily repeat)=20-60, side (hours-days)=100-800, main (weeks-months)=600-4000, major life goal=2000-8000+. High priority = upper half of range. Reply ONLY with JSON: {"xp": NUMBER, "reason": "one short sentence"}`})});
+          messages:[{role:"user",content:"Quest in a gamified life tracker: \""+ef.title+"\"" + (ef.note ? ". Intention: \""+ef.note+"\"" : "") + ". Type: "+quest.type+", Priority: "+(ef.priority||"med")+". XP scale: 6000 XP = 1 level (~100 hours). Judge SCOPE: radiant (daily repeat)=20-60, side (hours-days)=100-800, main (weeks-months)=600-4000, major life goal=2000-8000+. High priority = upper half of range. Reply ONLY with JSON: {\"xp\": NUMBER, \"reason\": \"one short sentence\"}"})});
       const data=await res.json();
       const txt=data.choices?.[0]?.message?.content||"";
       const parsed=JSON.parse(txt.match(/\{[\s\S]*\}/)?.[0]||"{}");
@@ -6153,7 +6153,7 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
       const res=await fetch("/api/chat",{method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({max_tokens:120,
-          messages:[{role:"user",content:`Quest in a gamified life tracker: "${ef.title}"${ef.note?`. Intention: "${ef.note}"`:""}.  Type: ${quest.type}, Priority: ${ef.priority||"med"}. XP scale: 6000 XP = 1 level (~100 hours). Judge SCOPE: radiant (daily repeat)=20-60, side (hours-days)=100-800, main (weeks-months)=600-4000, major life goal=2000-8000+. High priority = upper half of range. Reply ONLY with JSON: {"xp": NUMBER, "reason": "one short sentence"}`})});
+          messages:[{role:"user",content:"Quest in a gamified life tracker: \""+ef.title+"\"" + (ef.note ? ". Intention: \""+ef.note+"\"" : "") + ". Type: "+quest.type+", Priority: "+(ef.priority||"med")+". XP scale: 6000 XP = 1 level (~100 hours). Judge SCOPE: radiant (daily repeat)=20-60, side (hours-days)=100-800, main (weeks-months)=600-4000, major life goal=2000-8000+. High priority = upper half of range. Reply ONLY with JSON: {\"xp\": NUMBER, \"reason\": \"one short sentence\"}"})});
       const data=await res.json();
       const txt=data.choices?.[0]?.message?.content||"";
       const parsed=JSON.parse(txt.match(/\{[\s\S]*\}/)?.[0]||"{}");
@@ -7794,7 +7794,7 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
       const res=await fetch("/api/chat",{method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({max_tokens:120,
-          messages:[{role:"user",content:`Quest in a gamified life tracker: "${ef.title}"${ef.note?`. Intention: "${ef.note}"`:""}.  Type: ${quest.type}, Priority: ${ef.priority||"med"}. XP scale: 6000 XP = 1 level (~100 hours). Judge SCOPE: radiant (daily repeat)=20-60, side (hours-days)=100-800, main (weeks-months)=600-4000, major life goal=2000-8000+. High priority = upper half of range. Reply ONLY with JSON: {"xp": NUMBER, "reason": "one short sentence"}`})});
+          messages:[{role:"user",content:"Quest in a gamified life tracker: \""+ef.title+"\"" + (ef.note ? ". Intention: \""+ef.note+"\"" : "") + ". Type: "+quest.type+", Priority: "+(ef.priority||"med")+". XP scale: 6000 XP = 1 level (~100 hours). Judge SCOPE: radiant (daily repeat)=20-60, side (hours-days)=100-800, main (weeks-months)=600-4000, major life goal=2000-8000+. High priority = upper half of range. Reply ONLY with JSON: {\"xp\": NUMBER, \"reason\": \"one short sentence\"}"})});
       const data=await res.json();
       const txt=data.choices?.[0]?.message?.content||"";
       const parsed=JSON.parse(txt.match(/\{[\s\S]*\}/)?.[0]||"{}");
