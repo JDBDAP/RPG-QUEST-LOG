@@ -1185,12 +1185,14 @@ function QuestPlannerCard({quest,skills,onToggle,radiantAvailable,radiantCooldow
 function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAddTask,onToggle,onDelete,onEdit,onToggleQuest,radiantAvailable,radiantCooldownLabel}){
   const {settings}=useSettings(); const L=settings.labels;
   const [showForm,setShowForm]=useState(false);
-  const [f,setF]=useState({title:"",skill:"",xpVal:20,questId:""});
+  const [f,setF]=useState({title:"",skill:"",xpVal:20,questId:"",recurrenceDays:[]});
+  const WDAY_LABELS=["Mo","Tu","We","Th","Fr","Sa","Su"];
+  const toggleWday=i=>setF(v=>({...v,recurrenceDays:v.recurrenceDays.includes(i)?v.recurrenceDays.filter(x=>x!==i):[...v.recurrenceDays,i]}));
   useEffect(()=>{if(skills.length&&!f.skill)setF(v=>({...v,skill:skills[0]?.id||""}));},[skills]);
   const submit=()=>{
     if(!f.title.trim()) return;
-    onAddTask({title:f.title.trim(),period,skill:f.skill||null,xpVal:f.xpVal,questId:f.questId||null});
-    setF(v=>({...v,title:"",questId:""})); setShowForm(false);
+    onAddTask({title:f.title.trim(),period,skill:f.skill||null,xpVal:f.xpVal,questId:f.questId||null,recurrenceDays:period==="weekly"&&f.recurrenceDays.length?f.recurrenceDays:null});
+    setF(v=>({...v,title:"",questId:"",recurrenceDays:[]})); setShowForm(false);
   };
   const activeQuests=(quests||[]).filter(q=>!q.done);
 
@@ -1234,11 +1236,23 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
             </select>
           </div>
         )}
+        {period==="weekly"&&<div style={{marginBottom:8}}>
+          <div className="label9" style={{marginBottom:5}}>Repeat on days <span style={{opacity:.5,fontWeight:"normal",textTransform:"none",letterSpacing:0}}>(optional)</span></div>
+          <div style={{display:"flex",gap:4}}>
+            {WDAY_LABELS.map((d,i)=>(
+              <button key={i} onClick={()=>toggleWday(i)}
+                style={{flex:1,padding:"4px 0",borderRadius:3,border:`1px solid ${f.recurrenceDays.includes(i)?"var(--primary)":"var(--b2)"}`,background:f.recurrenceDays.includes(i)?"var(--primaryf)":"var(--bg)",color:f.recurrenceDays.includes(i)?"var(--primary)":"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,cursor:"pointer",transition:"all .15s"}}>
+                {d}
+              </button>
+            ))}
+          </div>
+        </div>}
         <button className="fsbtn" onClick={submit}>Add Task</button>
       </div>
     ):<button className="addbtn" onClick={()=>setShowForm(true)}><span>+</span> Add task</button>}
     {period==="weekly"?(weekDays.map((d,i)=>{
-      const dk=dayKey(d), isToday=dk===dayKey(new Date()), dt=allTasks.filter(t=>t.dayKey===dk);
+      const dk=dayKey(d), isToday=dk===dayKey(new Date()), dayIdx=i; // 0=Mon..6=Sun
+      const dt=[...new Map([...allTasks.filter(t=>t.dayKey===dk),...allTasks.filter(t=>t.period==="weekly"&&(t.recurrenceDays||[]).includes(dayIdx))].map(t=>[t.id,t])).values()];
       const dq=questsForDay(dk);
       return (
         <div key={i} className="wk-day">
@@ -1288,6 +1302,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
   const [form,setForm]=useState(null);
   const [search,setSearch]=useState("");
   const [filterPrio,setFilterPrio]=useState("");
+  const [sortBy,setSortBy]=useState("manual"); // "manual" | "priority" | "due"
   const [f,setF]=useState({title:"",skillIds:[],note:"",dueDate:"",type:"main",priority:"med",color:null,cooldown:60*60*1000});
   const [qXpSug,setQXpSug]=useState(null);
   const [qXpLoad,setQXpLoad]=useState(false);
@@ -1320,10 +1335,16 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
     if(filterPrio&&q.priority!==filterPrio) return false;
     return true;
   };
-  const mainA=quests.filter(q=>q.type==="main"&&!q.done&&filterQ(q));
-  const mainD=quests.filter(q=>q.type==="main"&&q.done&&filterQ(q));
-  const side=quests.filter(q=>q.type==="side"&&filterQ(q));
-  const radiant=quests.filter(q=>q.type==="radiant"&&filterQ(q));
+  const PRIO_ORDER={"high":0,"med":1,"low":2};
+  const sortQ=arr=>{
+    if(sortBy==="priority") return [...arr].sort((a,b)=>(PRIO_ORDER[a.priority||"med"]||1)-(PRIO_ORDER[b.priority||"med"]||1));
+    if(sortBy==="due") return [...arr].sort((a,b)=>(a.due||Infinity)-(b.due||Infinity));
+    return arr;
+  };
+  const mainA=sortQ(quests.filter(q=>q.type==="main"&&!q.done&&filterQ(q)));
+  const mainD=sortQ(quests.filter(q=>q.type==="main"&&q.done&&filterQ(q)));
+  const side=sortQ(quests.filter(q=>q.type==="side"&&filterQ(q)));
+  const radiant=sortQ(quests.filter(q=>q.type==="radiant"&&filterQ(q)));
 
   // Quest drag-to-reorder via pointer events (mobile + desktop)
   const {getProps:getQDragProps}=useDrag({items:quests,onReorder,idKey:"id"});
@@ -1336,6 +1357,11 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
         <option value="med">Med</option>
         <option value="low">Low</option>
       </select>
+      <button onClick={()=>setSortBy(v=>v==="manual"?"priority":v==="priority"?"due":"manual")}
+        style={{background:"none",border:"1px solid var(--b2)",borderRadius:3,padding:"5px 8px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:sortBy!=="manual"?"var(--primary)":"var(--tx3)",flexShrink:0,whiteSpace:"nowrap"}}
+        title="Sort order">
+        {sortBy==="manual"?"⇅ manual":sortBy==="priority"?"⬤ priority":"◷ due date"}
+      </button>
     </div>
     <div className="slbl">{L.mainQuest}s</div>
     {form==="main"?(<div className="fwrap">
@@ -1533,6 +1559,61 @@ function HeatMap({days, color}){
 }
 
 
+function StreakCalendar({skillId, meds, color}){
+  const now = new Date();
+  const year = now.getFullYear(), month = now.getMonth();
+  const daysInMonth = new Date(year, month+1, 0).getDate();
+  const firstDow = new Date(year, month, 1).getDay(); // 0=Sun
+
+  // build map: date number -> minutes
+  const minMap = {};
+  meds.forEach(m => {
+    if(!(m.skillIds||[]).includes(skillId)) return;
+    const d = new Date(m.created||m.sessionDate||0);
+    if(d.getFullYear()===year && d.getMonth()===month) {
+      const day = d.getDate();
+      minMap[day] = (minMap[day]||0) + m.dur;
+    }
+  });
+  const maxMins = Math.max(...Object.values(minMap), 1);
+  const DAY_LABELS = ["S","M","T","W","T","F","S"];
+  const cells = [];
+  // pad to start on correct dow
+  for(let i=0;i<firstDow;i++) cells.push(null);
+  for(let d=1;d<=daysInMonth;d++) cells.push(d);
+  const today = now.getDate();
+  const monthName = now.toLocaleDateString("en-US",{month:"short",year:"numeric"});
+  return (
+    <div style={{marginTop:4}}>
+      <div style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"var(--tx3)",marginBottom:4}}>{monthName}</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
+        {DAY_LABELS.map((l,i)=>(
+          <div key={i} style={{textAlign:"center",fontSize:7,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",paddingBottom:2}}>{l}</div>
+        ))}
+        {cells.map((d,i)=>{
+          if(!d) return <div key={i}/>;
+          const mins = minMap[d]||0;
+          const isToday = d===today;
+          const intensity = mins===0?0:Math.max(0.18, mins/maxMins);
+          const bg = mins===0?"var(--b1)":`${color}${Math.round(intensity*255).toString(16).padStart(2,"0")}`;
+          return (
+            <div key={i} title={mins?`${d}: ${mins} min`:`${d}: no activity`}
+              style={{aspectRatio:"1",borderRadius:2,background:bg,
+                display:"flex",alignItems:"center",justifyContent:"center",
+                fontSize:7,color:isToday?"var(--tx)":"transparent",
+                fontFamily:"'DM Mono',monospace",
+                border:isToday?"1px solid var(--tx3)":"1px solid transparent",
+                transition:"background .1s"}}>
+              {isToday?d:""}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+
 function SkAiCatBtn({name,intention,onAssign}){
   const [loading,setLoading]=useState(false);
   const suggest=async()=>{
@@ -1566,6 +1647,8 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
   // view state
   const [viewMode,setViewMode]=useState("grid");
   const [expandedId,setExpandedId]=useState(null);
+  const [calViewIds,setCalViewIds]=useState(new Set()); // skill IDs showing calendar view
+  const toggleCalView=id=>setCalViewIds(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
   const [editingId,setEditingId]=useState(null);
   const [ef,setEf]=useState({name:"",icon:"◈",color:SKILL_COLORS[0],customImg:null,intention:"",category:"other",published:false,notesPublic:false});
 
@@ -1704,6 +1787,13 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
     </label>
     <div className="label9" style={{marginBottom:7}}>Color</div>
     <div className="color-grid">{SKILL_COLORS.map(c=><div key={c} className={`color-opt ${f.color===c?"on":""}`} style={{background:c}} onClick={()=>setF(v=>({...v,color:c}))}/>)}</div>
+    <div style={{display:"flex",alignItems:"center",gap:8,marginTop:6,marginBottom:8}}>
+      <div className="label9" style={{flexShrink:0}}>Custom</div>
+      <input type="color" value={f.color||"#888888"} onChange={e=>setF(v=>({...v,color:e.target.value}))}
+        style={{width:32,height:24,padding:0,border:"1px solid var(--b2)",borderRadius:3,background:"none",cursor:"pointer"}}/>
+      <div style={{width:18,height:18,borderRadius:"50%",background:f.color||"var(--tx3)",border:"1px solid var(--b2)",flexShrink:0}}/>
+      <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)"}}>{f.color}</span>
+    </div>
     <button className="fsbtn" onClick={submit}>Create {formType}</button>
   </div>);
 
@@ -1780,9 +1870,20 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
             {isExpanded?"▲ less":"▼ more"}
           </button>
           {isExpanded&&(<div style={{marginTop:6,paddingTop:6,borderTop:"1px solid var(--b1)"}}>
-            {/* 90-day heatmap */}
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:1.5,textTransform:"uppercase",color:"var(--tx3)",marginBottom:2}}>90 day activity</div>
-            <HeatMap days={activityMap[s.id]||[]} color={s.color}/>
+            {/* activity view with toggle */}
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:2}}>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:1.5,textTransform:"uppercase",color:"var(--tx3)"}}>
+                {calViewIds.has(s.id)?"this month":"90 day activity"}
+              </div>
+              <button onClick={()=>toggleCalView(s.id)}
+                style={{background:"none",border:"1px solid var(--b2)",borderRadius:3,padding:"2px 6px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:7,letterSpacing:.8,color:"var(--tx3)",textTransform:"uppercase"}}>
+                {calViewIds.has(s.id)?"⊞ grid":"⊟ cal"}
+              </button>
+            </div>
+            {calViewIds.has(s.id)
+              ? <StreakCalendar skillId={s.id} meds={meds} color={s.color}/>
+              : <HeatMap days={activityMap[s.id]||[]} color={s.color}/>
+            }
             <div style={{marginBottom:6}}/>
             {/* linked items */}
             {section==="skill"&&linked.length>0&&(<>
@@ -1874,6 +1975,13 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
         </label>
         <div className="label9" style={{marginBottom:7}}>Color</div>
         <div className="color-grid">{SKILL_COLORS.map(c=><div key={c} className={`color-opt ${ef.color===c?"on":""}`} style={{background:c}} onClick={()=>setEf(v=>({...v,color:c}))}/>)}</div>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginTop:6,marginBottom:4}}>
+          <div className="label9" style={{flexShrink:0}}>Custom</div>
+          <input type="color" value={ef.color||"#888888"} onChange={e=>setEf(v=>({...v,color:e.target.value}))}
+            style={{width:32,height:24,padding:0,border:"1px solid var(--b2)",borderRadius:3,background:"none",cursor:"pointer"}}/>
+          <div style={{width:18,height:18,borderRadius:"50%",background:ef.color||"var(--tx3)",border:"1px solid var(--b2)",flexShrink:0}}/>
+          <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)"}}>{ef.color}</span>
+        </div>
         <div style={{display:"flex",gap:6}}>
           <button className="fsbtn" style={{flex:1,marginTop:4}} onClick={submitEdit}>Save</button>
           <button className="fsbtn" style={{flex:"none",width:"auto",padding:"8px 12px",marginTop:4}} onClick={()=>setEditingId(null)}>Cancel</button>
@@ -1961,7 +2069,7 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
         const skNames=f.skillIds.map(id=>skills.find(s=>s.id===id)?.name).filter(Boolean).join(", ")||"General";
         const res=await fetch("/api/chat",{
           method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:80,
+          body:JSON.stringify({max_tokens:80,
             messages:[{role:"user",content:`Score a practice session for XP. Time-based would be ${baseXp}.\nType: ${ptype?.label}, Duration: ${f.dur}min, Skills: ${skNames}\nJournal: "${f.note}"\nReturn JSON only, no markdown: {"xp":number,"reason":"12 words max"}`}]
           })
         });
@@ -2024,7 +2132,7 @@ Suggest fair XP and a short reason. Reply ONLY with JSON, no markdown: {"xp": NU
       const totalMinsA=recent.reduce((a,m)=>a+m.dur,0);
       const res=await fetch("/api/chat",{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:300,
+        body:JSON.stringify({max_tokens:300,
           messages:[{role:"user",content:`Analyze these practice sessions and give honest, direct feedback in 3-4 sentences. Note patterns, gaps, what's working, and one concrete suggestion. Be specific, not generic.\n\nTotal: ${recent.length} sessions, ${totalMinsA} minutes\n\n${summary}`}]
         })
       });
@@ -2275,9 +2383,8 @@ If the user is asking a question or just talking — reply ONLY with plain text.
 
       const res=await fetch("/api/chat",{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:600,
-          system:systemPrompt,
-          messages:next.map(m=>({role:m.role,content:m.content}))})
+        body:JSON.stringify({max_tokens:600,
+          messages:[{role:"system",content:systemPrompt},...next.map(m=>({role:m.role,content:m.content}))]})
       });
       const data=await res.json();
       const raw=data.choices?.[0]?.message?.content||"...";
@@ -2393,8 +2500,8 @@ function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,o
     try{
       const res=await fetch("/api/chat",{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({model:"claude-sonnet-4-20250514",max_tokens:1000,
-          system:buildCtx(),tools:buildAdvisorTools(skills,quests),messages:history}),
+        body:JSON.stringify({max_tokens:1000,
+          messages:[{role:"system",content:buildCtx()},...history]}),
       });
       const data=await res.json();
       // Groq returns OpenAI format; tool_calls in message if tools used
@@ -2699,6 +2806,7 @@ function TaskCard({task,skills,quests,onToggle,onDelete,onEdit}){
           {sk&&<span className="ctag" style={{borderColor:sk.color+"44",color:sk.color}}>{sk.icon} {sk.name}</span>}
           <span className="ctag">{task.xpVal} {L.xpName}</span>
           {linkedQuest&&<span className="ctag" style={{borderColor:"var(--primaryb)",color:"var(--primary)"}}>◆ {linkedQuest.title}</span>}
+          {task.recurrenceDays?.length>0&&<span className="ctag" style={{color:"var(--tx3)"}}>↻ {["Mo","Tu","We","Th","Fr","Sa","Su"].filter((_,i)=>task.recurrenceDays.includes(i)).join("/")}</span>}
         </div>
       </div>
       <button className="delbtn" onClick={()=>setEditing(true)} title="Edit">✎</button>
@@ -2796,6 +2904,7 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
       <div className="frow">
         <input className="fi" type="date" style={{colorScheme:"dark"}} value={ef.dueDate} onChange={e=>setEf(v=>({...v,dueDate:e.target.value}))}/>
       </div>
+      {ef.dueDate&&quest.type!=="radiant"&&<NotifPrompt dueDate={ef.dueDate} title={ef.title}/>}
       {quest.type==="radiant"&&<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
         <div className="label9" style={{flexShrink:0}}>Resets after</div>
         <select className="fsel" style={{flex:1}} value={ef.cooldown} onChange={e=>setEf(v=>({...v,cooldown:Number(e.target.value)}))}>
