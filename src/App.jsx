@@ -1014,6 +1014,8 @@ export default function App(){
     if(period==="weekly") return tasks.filter(t=>t.period==="weekly");
     return tasks.filter(t=>t.period==="monthly");
   },[tasks,period]);
+  // Must be before any conditional returns — hooks cannot be after early returns
+  const ctxValue=useMemo(()=>({settings,saveSettings}),[settings,saveSettings]);
 
   const NAV=[
     {id:"planner",  icon:"□", label:L.plannerTab},
@@ -1036,7 +1038,6 @@ export default function App(){
     else { setShowAuth(false); }
   }}/>;
 
-  const ctxValue=useMemo(()=>({settings,saveSettings}),[settings,saveSettings]);
 
   return (
     <SettingsCtx.Provider value={ctxValue}>
