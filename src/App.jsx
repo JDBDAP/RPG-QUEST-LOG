@@ -1361,13 +1361,13 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
       :<button className="addbtn" onClick={()=>openForm("main")}><span>+</span> New {L.mainQuest.toLowerCase()}</button>}
     <div className="clist">{mainA.map(q=>(
       <div key={q.id} {...getQDragProps(q.id)}>
-        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest}/>
+        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>
       </div>
     ))}</div>
     {mainD.length>0&&<><div className="gap"/><div className="slbl">{L.completed}</div>
       <div className="clist">{mainD.map(q=>(
       <div key={q.id} {...getQDragProps(q.id)}>
-        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest}/>
+        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>
       </div>
     ))}</div></>}
     {quests.filter(q=>q.type==="main").length===0&&form!=="main"&&(
@@ -1414,7 +1414,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
       :<button className="addbtn" onClick={()=>openForm("side")}><span>+</span> New {L.sideQuest.toLowerCase()}</button>}
     <div className="clist">{side.map(q=>(
       <div key={q.id} {...getQDragProps(q.id)}>
-        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest}/>
+        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>
       </div>
     ))}</div>
     {side.length===0&&form!=="side"&&(
@@ -2692,6 +2692,9 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
   const [subXpLoad,setSubXpLoad]=useState(false);
   const [editSubId,setEditSubId]=useState(null);
   const [editSubVal,setEditSubVal]=useState("");
+  const isRadiant=quest.type==="radiant";
+  const rAvail=isRadiant&&radiantAvailable?radiantAvailable(quest):true;
+  const rCool=isRadiant&&radiantCooldownLabel?radiantCooldownLabel(quest):null;
   const toggleESkill=id=>setEf(v=>{
     const next=v.skillIds.includes(id)?v.skillIds.filter(x=>x!==id):[...v.skillIds,id];
     const autoColor=!quest.color&&next.length>0?defaultQColor(next):v.color;
