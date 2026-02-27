@@ -2692,9 +2692,6 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
   const [subXpLoad,setSubXpLoad]=useState(false);
   const [editSubId,setEditSubId]=useState(null);
   const [editSubVal,setEditSubVal]=useState("");
-  const isRadiant=quest.type==="radiant";
-  const rAvail=isRadiant&&radiantAvailable?radiantAvailable(quest):true;
-  const rCool=isRadiant&&radiantCooldownLabel?radiantCooldownLabel(quest):null;
   const toggleESkill=id=>setEf(v=>{
     const next=v.skillIds.includes(id)?v.skillIds.filter(x=>x!==id):[...v.skillIds,id];
     const autoColor=!quest.color&&next.length>0?defaultQColor(next):v.color;
@@ -2744,6 +2741,8 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
   const subs=quest.subquests||[];
   const subsDone=subs.filter(s=>s.done).length;
   const isRadiant=quest.type==="radiant";
+  const rAvail=isRadiant&&radiantAvailable?radiantAvailable(quest):true;
+  const rCool=isRadiant&&radiantCooldownLabel?radiantCooldownLabel(quest):null;
   const now=Date.now();
   const overdue=quest.due&&!quest.done&&quest.due<now;
   const dueSoon=quest.due&&!quest.done&&quest.due>now&&quest.due-now<86400000;
