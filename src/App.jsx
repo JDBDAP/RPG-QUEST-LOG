@@ -558,20 +558,6 @@ function Collapsible({question,children}){
   );
 }
 
-function CommunityTab({userId,settings,skills,quests,meds,journal,streaks,xp,friends,myFriendCode,profiles,onPublishProfile,onAddFriend,onRemoveFriend,onRefresh,onEditSkillPublish,onEditQuestPublish,onSaveSettings,showToast}){
-  const {settings:s}=useSettings(); const L=s.labels;
-  return (
-    <div style={{paddingBottom:8}}>
-      <div className="slbl" style={{marginBottom:12}}>⬡ Community</div>
-      <div className="empty-state">
-        <div className="es-icon">⬡</div>
-        <div className="es-title">Coming Soon</div>
-        <div className="es-desc">The community board is under construction. Share your progress, find practice partners, and see how others are building their skills.</div>
-      </div>
-    </div>
-  );
-}
-
 export default function App(){
   const [session,setSession]=useState(null);
   const [userId,setUserId]=useState(null);
@@ -1531,6 +1517,32 @@ function HeatMap({days, color}){
   );
 }
 
+
+function SkAiCatBtn({name,intention,onAssign}){
+  const [loading,setLoading]=useState(false);
+  const suggest=async()=>{
+    if(!name.trim()) return;
+    setLoading(true);
+    try{
+      const catList=SKILL_CATEGORIES.map(c=>c.id).join(", ");
+      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({max_tokens:30,
+          messages:[{role:"user",content:`Skill: "${name}"${intention?`. Intention: "${intention}"`:""}.\nAssign to exactly one category from: ${catList}.\nReply with ONLY the category id, nothing else.`}]})});
+      const data=await res.json();
+      const txt=(data.choices?.[0]?.message?.content||data.content?.[0]?.text||"").trim().toLowerCase();
+      const valid=SKILL_CATEGORIES.find(c=>txt.includes(c.id));
+      if(valid) onAssign(valid.id);
+    }catch(e){}
+    setLoading(false);
+  };
+  return (
+    <button onClick={suggest} disabled={loading||!name.trim()}
+      style={{background:"none",border:"1px solid var(--b2)",borderRadius:"var(--r)",color:"var(--tx3)",fontSize:8,padding:"2px 6px",cursor:"pointer",fontFamily:"'DM Mono',monospace",letterSpacing:.5,opacity:loading?.5:1}}>
+      {loading?"◌":"⟡"} AI
+    </button>
+  );
+}
+
 function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,onEdit,onReorder,onLink}){
   const {settings}=useSettings(); const L=settings.labels;
   const mainSkills=skills.filter(s=>s.type!=="subskill");
@@ -1800,7 +1812,10 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
         <input className="fi full" value={ef.name} onChange={e=>setEf(v=>({...v,name:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submitEdit()} style={{marginBottom:8}}/>
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5,marginTop:2}}>Intention <span style={{opacity:.5,letterSpacing:0,textTransform:"none"}}>(for AI advisor)</span></div>
         <textarea className="fi full" rows={2} placeholder="e.g. build consistent meditation practice, run 5k by March..." value={ef.intention} onChange={e=>setEf(v=>({...v,intention:e.target.value}))} style={{resize:"vertical",lineHeight:1.4}}/>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)",marginBottom:5,marginTop:8}}>Category</div>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,marginTop:8}}>
+          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,textTransform:"uppercase",color:"var(--tx3)"}}>Category</div>
+          <SkAiCatBtn name={ef.name} intention={ef.intention} onAssign={cat=>setEf(v=>({...v,category:cat}))}/>
+        </div>
         <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
           {SKILL_CATEGORIES.map(cat=>(
             <button key={cat.id} onClick={()=>setEf(v=>({...v,category:cat.id}))}
@@ -3094,6 +3109,29 @@ function CommunityTab({userId,settings,skills,quests,meds,journal,streaks,xp,fri
   // Build my published data preview
   const myPubSkills=skills.filter(s=>s.published);
   const myPubQuests=quests.filter(q=>q.published);
+  const [bulkLoading,setBulkLoading]=useState(false);
+
+  const bulkCategorize=async()=>{
+    const uncategorized=skills.filter(s=>!s.category||s.category==="other");
+    if(!uncategorized.length){showToast("All skills already categorized");return;}
+    setBulkLoading(true);
+    const catList=SKILL_CATEGORIES.map(c=>c.id).join(", ");
+    for(const sk of uncategorized){
+      try{
+        const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+          body:JSON.stringify({max_tokens:20,
+            messages:[{role:"user",content:`Skill: "${sk.name}"${sk.intention?`. Intention: "${sk.intention}"`:""}.
+Assign to exactly one category from: ${catList}.
+Reply with ONLY the category id.`}]})});
+        const data=await res.json();
+        const txt=(data.choices?.[0]?.message?.content||data.content?.[0]?.text||"").trim().toLowerCase();
+        const valid=SKILL_CATEGORIES.find(c=>txt.includes(c.id));
+        if(valid) await onEditSkillPublish(sk.id,{category:valid.id});
+      }catch(e){}
+    }
+    setBulkLoading(false);
+    showToast(`Categorized ${uncategorized.length} skills`);
+  };
 
   return (
     <div style={{padding:"0 0 80px"}}>
@@ -3149,10 +3187,12 @@ function CommunityTab({userId,settings,skills,quests,meds,journal,streaks,xp,fri
       {view==="profile"&&(<>
         <div className="fwrap" style={{marginBottom:14}}>
           <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,color:"var(--tx3)",marginBottom:10,textTransform:"uppercase"}}>Profile Visibility</div>
-          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8,flexWrap:"wrap"}}>
             <span style={{fontSize:13,color:"var(--tx)"}}>{settings.profile.name||"Anonymous"}</span>
-            <span style={{fontSize:9,fontFamily:"'DM Mono',monospace",color:"var(--tx3)",background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:3,padding:"2px 6px"}}>
-              CODE: {myFriendCode||"—"}
+            <span style={{fontSize:9,fontFamily:"'DM Mono',monospace",color:"var(--tx3)",background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:3,padding:"2px 6px",cursor:"pointer"}}
+              title="Click to copy"
+              onClick={()=>{if(myFriendCode){navigator.clipboard?.writeText(myFriendCode);showToast("Code copied!");}}}>
+              CODE: {myFriendCode||"—"} ⧉
             </span>
             {getBadges({streaks,journalCount:journal.length,totalPractice:meds.length}).map(b=>(
               <span key={b.id} title={b.tip} style={{fontSize:9,color:"var(--primary)",fontFamily:"'DM Mono',monospace"}}>{b.icon} {b.label}</span>
@@ -3169,6 +3209,17 @@ function CommunityTab({userId,settings,skills,quests,meds,journal,streaks,xp,fri
         </div>
 
         {/* Published skills */}
+        {/* Bulk categorize */}
+        {skills.some(s=>!s.category||s.category==="other")&&(
+          <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",marginBottom:12}}>
+            <span style={{fontSize:11,color:"var(--tx2)",flex:1}}>{skills.filter(s=>!s.category||s.category==="other").length} skills uncategorized</span>
+            <button onClick={bulkCategorize} disabled={bulkLoading}
+              style={{background:"var(--primaryf)",border:"1px solid var(--primaryb)",borderRadius:"var(--r)",color:"var(--primary)",fontSize:10,padding:"4px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace"}}>
+              {bulkLoading?"◌ AI working...":"⟡ AI categorize all"}
+            </button>
+          </div>
+        )}
+
         <div className="slbl">Published Skills ({myPubSkills.length})</div>
         {myPubSkills.length===0?(
           <div style={{fontSize:12,color:"var(--tx3)",padding:"8px 0 12px",fontStyle:"italic"}}>No skills published. Edit a skill to publish it to the community.</div>
@@ -3228,7 +3279,7 @@ function CommunityTab({userId,settings,skills,quests,meds,journal,streaks,xp,fri
       {view==="friends"&&(<>
         <div className="fwrap" style={{marginBottom:14}}>
           <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,color:"var(--tx3)",marginBottom:8,textTransform:"uppercase"}}>Add Friend</div>
-          <div style={{fontSize:11,color:"var(--tx2)",marginBottom:6}}>Your code: <span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",letterSpacing:2}}>{myFriendCode||"—"}</span> <span style={{fontSize:10,color:"var(--tx3)"}}>(share this)</span></div>
+          <div style={{fontSize:11,color:"var(--tx2)",marginBottom:6}}>Your code: <span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",letterSpacing:2,cursor:"pointer",borderBottom:"1px dashed var(--primaryb)"}} title="Click to copy" onClick={()=>{if(myFriendCode){navigator.clipboard?.writeText(myFriendCode);showToast("Code copied!");} }}>{myFriendCode||"—"}</span> <span style={{fontSize:10,color:"var(--tx3)"}}>(tap to copy)</span></div>
           <div style={{display:"flex",gap:6}}>
             <input className="fi" placeholder="Enter friend's 6-digit code" value={friendInput} onChange={e=>setFriendInput(e.target.value.replace(/\D/g,"").slice(0,6))}
               onKeyDown={e=>e.key==="Enter"&&onAddFriend(friendInput).then(()=>setFriendInput(""))}
