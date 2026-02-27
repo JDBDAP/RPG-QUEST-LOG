@@ -3398,7 +3398,7 @@ function CommunityCard({profile,isFriend,badges,filterCat}){
 }
 
 function WeeklyReview({tasks,quests,skills,meds,xpLog,journal,settings,onClose,onNavigate}){
-  const {settings}=useSettings(); const L=settings.labels;
+  const L=settings.labels;
   const [analysis,setAnalysis]=useState("");
   const [loading,setLoading]=useState(false);
 
