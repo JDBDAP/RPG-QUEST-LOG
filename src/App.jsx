@@ -3045,7 +3045,7 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
   const [showSubs,setShowSubs]=useState(false);
   const [newSub,setNewSub]=useState("");
   const defaultQColor=(sIds)=>{ const s=skills.find(sk=>sk.id===(sIds||[])[0]); return s?s.color:null; };
-  const [ef,setEf]=useState({title:quest.title,note:quest.note||"",dueDate:quest.due?new Date(quest.due).toISOString().split("T")[0]:"",skillIds:quest.skills||[],color:quest.color||defaultQColor(quest.skills)||null,priority:quest.priority||"med",cooldown:quest.cooldown??60*60*1000,published:quest.published||false,notesPublic:quest.notesPublic||false,xpVal:quest.xpVal||0,type:quest.type});
+  const [ef,setEf]=useState({title:quest.title,note:quest.note||"",dueDate:quest.due?new Date(quest.due).toISOString().split("T")[0]:"",skillIds:quest.skills||[],color:quest.color||defaultQColor(quest.skills)||null,priority:quest.priority||"med",cooldown:quest.cooldown??60*60*1000,published:quest.published||false,notesPublic:quest.notesPublic||false,xpVal:quest.xpVal??null,type:quest.type});
   const [xpSuggestion,setXpSuggestion]=useState(null);
   const [xpLoading,setXpLoading]=useState(false);
   const [subXpSug,setSubXpSug]=useState(null);
@@ -3060,7 +3060,7 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
   const saveEdit=()=>{
     if(!ef.title.trim()) return;
     const due=ef.dueDate?new Date(ef.dueDate+"T09:00").getTime():null;
-    const newXp=xpSuggestion?.xp||ef.xpVal||quest.xpVal;
+    const newXp=xpSuggestion?.xp??(ef.xpVal!==null?ef.xpVal:quest.xpVal);
     onEdit(quest.id,{title:ef.title.trim(),note:ef.note.trim(),due,skills:ef.skillIds,color:ef.color||null,priority:ef.priority,cooldown:ef.type==="radiant"?ef.cooldown:undefined,published:ef.published||false,notesPublic:ef.notesPublic||false,xpVal:newXp,type:ef.type});
     setEditing(false); setXpSuggestion(null);
   };
@@ -3125,7 +3125,13 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
             {p}
           </button>
         ))}
-        <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0,flexShrink:0,marginLeft:"auto"}} onClick={()=>{setEditing(false);setXpSuggestion(null);}}>✕</button>
+        <div style={{marginLeft:"auto",display:"flex",alignItems:"center",gap:4}}>
+          <input type="number" title="XP reward"
+            value={ef.xpVal??""} placeholder="xp"
+            onChange={e=>setEf(v=>({...v,xpVal:e.target.value===""?null:Number(e.target.value)}))}
+            style={{width:52,background:"var(--bg)",border:"1px solid var(--b1)",borderRadius:4,padding:"4px 6px",fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--primary)",textAlign:"center",outline:"none"}}/>
+          <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0,flexShrink:0}} onClick={()=>{setEditing(false);setXpSuggestion(null);}}>✕</button>
+        </div>
       </div>
       <div className="frow">
         <input className="fi" type="date" style={{colorScheme:"dark"}} value={ef.dueDate} onChange={e=>setEf(v=>({...v,dueDate:e.target.value}))}/>
@@ -3144,21 +3150,7 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
           <div onClick={()=>setEf(v=>({...v,color:null}))} style={{width:20,height:20,borderRadius:"50%",background:"var(--bg)",cursor:"pointer",border:!ef.color?"2px solid var(--tx)":"2px solid var(--b2)",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--tx3)"}} title="Default">∅</div>
         </div>
       </div>
-      <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
-        <div style={{flex:1}}>
-          <div className="label9" style={{marginBottom:4}}>Quest type</div>
-          <div style={{display:"flex",gap:4}}>
-            {["main","side","radiant"].map(t=>(
-              <button key={t} onClick={()=>setEf(v=>({...v,type:t}))} style={{background:ef.type===t?"var(--s2)":"var(--bg)",border:`1px solid ${ef.type===t?"var(--b3)":"var(--b1)"}`,borderRadius:4,padding:"4px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:ef.type===t?"var(--primary)":"var(--tx3)",textTransform:"uppercase",letterSpacing:.8}}>{t}</button>
-            ))}
-          </div>
-        </div>
-        <div style={{width:80}}>
-          <div className="label9" style={{marginBottom:4}}>XP reward</div>
-          <input type="number" className="fi" style={{textAlign:"center"}} value={ef.xpVal}
-            onChange={e=>setEf(v=>({...v,xpVal:Number(e.target.value)}))}/>
-        </div>
-      </div>
+
       <button className="fsbtn secondary" style={{marginTop:4,marginBottom:2}} onClick={suggestQuestXp} disabled={xpLoading||!ef.title.trim()}>
         {xpLoading?"thinking...":"⟡ AI XP opinion"}
       </button>
