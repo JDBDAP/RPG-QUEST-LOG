@@ -718,7 +718,7 @@ export default function App(){
     setXpLog(prev=>{const next=[entry,...prev].slice(0,100);dbSet("cx_xplog",next,userId);return next;});
   };
 
-  const award=useCallback(async(baseAmt,skillId,curXp,curSkills,curStreaks,label)=>{
+  const award=useCallback(async(baseAmt,skillId,curXp,curSkills,curStreaks,label,questId)=>{
     const skPerLv=settings.xp.skillPerLevel||6000;
     const streak=skillId?(curStreaks[skillId]||{count:0}):{count:0};
     const multiplier=getMultiplier(streak.count);
@@ -735,7 +735,7 @@ export default function App(){
       setSkills(newSkills); await dbSet("cx_skills",newSkills,userId);
     }
     const sk=curSkills.find(s=>s.id===skillId);
-    await saveXpLog({id:uid(),amt,label:label||"Task",skill:sk?.name||null,multiplier,created:Date.now()});
+    await saveXpLog({id:uid(),amt,label:label||"Task",skill:sk?.name||null,skillId:skillId||null,questId:questId||null,multiplier,created:Date.now()});
     return {amt,multiplier,leveledUp,newSkills};
   },[settings.xp.skillPerLevel]);
 
@@ -772,6 +772,11 @@ export default function App(){
   };
   const toggleQuest=async id=>{
     const q=quests.find(q=>q.id===id); if(!q) return;
+    // Chain lock: can't complete if prerequisite quest isn't done
+    if(!q.done&&q.unlocksAfter){
+      const prereq=quests.find(p=>p.id===q.unlocksAfter);
+      if(prereq&&!prereq.done){showToast(`🔒 Complete "${prereq.title}" first`);return;}
+    }
     if(q.type==="radiant"){
       if(!radiantAvailable(q)){
         showToast(`Available in ${radiantCooldownLabel(q)}`); return;
@@ -779,7 +784,7 @@ export default function App(){
       const qSkills=q.skills||[]; const primary=qSkills[0]||null;
       let newStr=streaks;
       if(primary){ newStr=updateStreak(streaks,primary); await saveStr(newStr); }
-      const {amt,multiplier,leveledUp}=await award(q.xpVal,primary,xp,skills,newStr,`◉ ${q.title}`);
+      const {amt,multiplier,leveledUp}=await award(q.xpVal,primary,xp,skills,newStr,`◉ ${q.title}`,q.id);
       const streak=newStr[primary]||{count:0};
       // Store lastDone timestamp on the quest
       await saveQ(quests.map(qq=>qq.id===id?{...qq,lastDone:Date.now()}:qq));
@@ -795,7 +800,7 @@ export default function App(){
     if(!q.done){
       const primary=(q.skills||[])[0]||null;
       const prefix=q.type==="main"?"◆":q.type==="side"?"◇":"";
-      const {amt,leveledUp}=await award(q.xpVal,primary,xp,skills,streaks,`${prefix} ${q.title}`);
+      const {amt,leveledUp}=await award(q.xpVal,primary,xp,skills,streaks,`${prefix} ${q.title}`,q.id);
       showToast(`+${amt} ${L.xpName}`);
       if(leveledUp) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);
       setPendingPractice({skillId:primary,questTitle:q.title,questType:q.type});
@@ -1158,7 +1163,7 @@ function ProfileSetup({onComplete}){
   );
 }
 
-function QuestPlannerCard({quest,skills,onToggle,radiantAvailable,radiantCooldownLabel}){
+function QuestPlannerCard({quest,skills,onToggle,radiantAvailable,radiantCooldownLabel,locked,prereqTitle}){
   const {settings}=useSettings(); const L=settings.labels;
   const qSkills=(quest.skills||[]).map(id=>skills.find(s=>s.id===id)).filter(Boolean);
   const isRadiant=quest.type==="radiant";
@@ -1169,13 +1174,14 @@ function QuestPlannerCard({quest,skills,onToggle,radiantAvailable,radiantCooldow
   const overdue=quest.due&&quest.due<now&&!quest.done;
   return (
     <div className={`card quest-${quest.type} ${quest.done?"done":""}`}
-      style={{marginBottom:3,borderColor:overdue?"var(--danger)":"var(--primaryb)",background:"var(--primaryf)"}}>
-      <button className="chk" style={{color:"var(--primary)",borderColor:"var(--primaryb)"}}
-        onClick={()=>onToggle(quest.id)}>
-        {quest.done?"✓":""}
+      style={{marginBottom:3,borderColor:locked?"var(--b1)":overdue?"var(--danger)":"var(--primaryb)",background:locked?"var(--bg)":"var(--primaryf)",opacity:locked?.55:1}}>
+      <button className="chk" style={locked?{color:"var(--tx3)",borderColor:"var(--b1)",cursor:"not-allowed"}:{color:"var(--primary)",borderColor:"var(--primaryb)"}}
+        onClick={()=>onToggle(quest.id)} title={locked?`Locked — complete "${prereqTitle}" first`:undefined}>
+        {locked?"🔒":quest.done?"✓":""}
       </button>
       <div className="cbody">
-        <div className={`ctitle ${quest.done?"done":""}`}>{quest.title}</div>
+        {locked&&<div style={{fontSize:9,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",marginBottom:2}}>after: {prereqTitle}</div>}
+        <div className={`ctitle ${quest.done?"done":locked?"":""}`} style={locked?{color:"var(--tx3)"}:{}}>{quest.title}</div>
         <div className="cmeta">
           <span className="ctag" style={{color:"var(--primary)",borderColor:"var(--primaryb)"}}>◆ {isRadiant?"Radiant":"Quest"}</span>
           {qSkills.map(sk=><span key={sk.id} className="ctag" style={{borderColor:sk.color+"44",color:sk.color,display:"inline-flex",alignItems:"center",gap:3}}><SkIcon s={sk} sz={10}/>{sk.name}</span>)}
@@ -1273,7 +1279,11 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
         {(todayQuests.length>0||availableRadiant.length>0)&&period==="daily"&&<>
           {todayQuests.length>0&&<>
             <div className="slbl" style={{marginBottom:6}}>◆ Quests due today</div>
-            {todayQuests.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}
+            {todayQuests.map(q=>{
+              const prereq=(quests||[]).find(p=>p.id===q.unlocksAfter);
+              const locked=prereq&&!prereq.done;
+              return <QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} locked={locked} prereqTitle={prereq?.title}/>;
+            })}
           </>}
           {availableRadiant.length>0&&<>
             <div className="slbl" style={{marginBottom:6,marginTop:todayQuests.length?8:0}}>◉ Ready to practice</div>
@@ -1409,13 +1419,13 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
       :<button className="addbtn" onClick={()=>openForm("main")}><span>+</span> New {L.mainQuest.toLowerCase()}</button>}
     <div className="clist">{mainA.map(q=>(
       <div key={q.id} {...getQDragProps(q.id)}>
-        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>
+        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} quests={quests} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>
       </div>
     ))}</div>
     {mainD.length>0&&<><div className="gap"/><div className="slbl">{L.completed}</div>
       <div className="clist">{mainD.map(q=>(
       <div key={q.id} {...getQDragProps(q.id)}>
-        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>
+        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} quests={quests} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>
       </div>
     ))}</div></>}
     {quests.filter(q=>q.type==="main").length===0&&form!=="main"&&(
@@ -1462,7 +1472,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
       :<button className="addbtn" onClick={()=>openForm("side")}><span>+</span> New {L.sideQuest.toLowerCase()}</button>}
     <div className="clist">{side.map(q=>(
       <div key={q.id} {...getQDragProps(q.id)}>
-        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>
+        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} quests={quests} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>
       </div>
     ))}</div>
     {side.length===0&&form!=="side"&&(
@@ -1509,7 +1519,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
       :<button className="addbtn" onClick={()=>openForm("radiant")}><span>+</span> New {L.radiantQuest.toLowerCase()}</button>}
     <div className="clist">{radiant.map(q=>(
       <div key={q.id} {...getQDragProps(q.id)}>
-        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>
+        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} quests={quests} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>
       </div>
     ))}</div>
     {radiant.length===0&&form!=="radiant"&&(
@@ -1795,6 +1805,8 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
   const [calViewIds,setCalViewIds]=useState(new Set()); // skill IDs showing calendar view
   const toggleCalView=id=>setCalViewIds(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
   const [discussSkillId,setDiscussSkillId]=useState(null);
+  const [collapsedGroups,setCollapsedGroups]=useState(new Set());
+  const toggleGroup=id=>setCollapsedGroups(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
   const [editingId,setEditingId]=useState(null);
   const [ef,setEf]=useState({name:"",icon:"◈",color:SKILL_COLORS[0],customImg:null,intention:"",category:"other",published:false,notesPublic:false});
 
@@ -2050,6 +2062,23 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
               </div>)}
             </>)}
             {section==="skill"&&linked.length===0&&<div style={{fontSize:9,color:"var(--tx3)",fontStyle:"italic"}}>No subskills linked. Drag a subskill here.</div>}
+            {/* per-skill XP history */}
+            {(()=>{
+              const skLog=(xpLog||[]).filter(e=>e.skillId===s.id).slice(0,8);
+              if(!skLog.length) return null;
+              return (<>
+                <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:1.5,textTransform:"uppercase",color:"var(--tx3)",marginTop:8,marginBottom:4}}>XP History</div>
+                {skLog.map(e=>{
+                  const linked=e.questId?xpLog.find(x=>x.id===e.id):null;
+                  return (<div key={e.id} style={{display:"flex",alignItems:"center",gap:5,padding:"3px 0",borderBottom:"1px solid var(--b1)"}}>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:s.color,flexShrink:0,fontWeight:"bold"}}>+{e.amt}</span>
+                    {e.multiplier>1&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)"}}>{e.multiplier}×</span>}
+                    <span style={{fontSize:10,color:"var(--tx2)",flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{e.label}</span>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",flexShrink:0}}>{new Date(e.created).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</span>
+                  </div>);
+                })}
+              </>);
+            })()}
           </div>)}
         </div>
       </div>
@@ -2158,9 +2187,37 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
         <div className="es-desc">Skills track your growth over time. Add one above, or load a preset to get started. XP flows here from every practice session and quest.</div>
       </div>
     )}
-    <div style={viewMode==="grid"?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}:{marginBottom:16}}>
-      {mainSkills.map((s,i)=>renderSkillCard(s,i,"skill"))}
-    </div>
+    {(()=>{
+      // Group skills by category
+      const grouped=SKILL_CATEGORIES.map(cat=>({
+        cat,
+        skills:mainSkills.filter(s=>(s.category||"other")===cat.id)
+      })).filter(g=>g.skills.length>0);
+      if(grouped.length<=1) return (
+        <div style={viewMode==="grid"?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}:{marginBottom:16}}>
+          {mainSkills.map((s,i)=>renderSkillCard(s,i,"skill"))}
+        </div>
+      );
+      return grouped.map(({cat,skills:gskills})=>{
+        const collapsed=collapsedGroups.has(cat.id);
+        return (
+          <div key={cat.id} style={{marginBottom:10}}>
+            <button onClick={()=>toggleGroup(cat.id)}
+              style={{width:"100%",display:"flex",alignItems:"center",gap:6,background:"none",border:"none",cursor:"pointer",padding:"4px 0",marginBottom:collapsed?0:6}}>
+              <span style={{fontSize:11}}>{cat.icon}</span>
+              <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.2,textTransform:"uppercase",color:"var(--tx3)",flex:1,textAlign:"left"}}>{cat.label}</span>
+              <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",marginRight:4}}>{gskills.length}</span>
+              <span style={{fontSize:9,color:"var(--tx3)",transition:"transform .15s",display:"inline-block",transform:collapsed?"rotate(-90deg)":"rotate(0deg)"}}>▾</span>
+            </button>
+            {!collapsed&&(
+              <div style={viewMode==="grid"?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}:{display:"block"}}>
+                {gskills.map((s,i)=>renderSkillCard(s,i,"skill"))}
+              </div>
+            )}
+          </div>
+        );
+      });
+    })()}
 
     {/* ── SUBSKILLS section ─────────────────────────────────────────── */}
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6,marginTop:4}}>
@@ -2172,21 +2229,7 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
       {subSkills.map((s,i)=>renderSkillCard(s,i,"subskill"))}
     </div>
 
-    {/* XP log */}
-    {xpLog&&xpLog.length>0&&<>
-      <div className="gap"/>
-      <div className="slbl">Recent XP</div>
-      <div style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"4px 12px"}}>
-        {xpLog.slice(0,20).map(e=>(
-          <div key={e.id} className="xp-log-row">
-            <span className="xp-log-amt">+{e.amt}{e.multiplier>1?` ${e.multiplier}×`:""}</span>
-            <span className="xp-log-label">{e.label}</span>
-            {e.skill&&<span className="ctag" style={{fontSize:9}}>{e.skill}</span>}
-            <span className="xp-log-time">{new Date(e.created).toLocaleDateString("en-US",{month:"short",day:"numeric"})}</span>
-          </div>
-        ))}
-      </div>
-    </>}
+
   </>);
 }
 
@@ -3038,14 +3081,16 @@ function TaskCard({task,skills,quests,onToggle,onDelete,onEdit}){
   );
 }
 
-function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggleSubquest,onDeleteSubquest,radiantAvailable,radiantCooldownLabel}){
+function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,onToggleSubquest,onDeleteSubquest,radiantAvailable,radiantCooldownLabel}){
   const {settings}=useSettings(); const L=settings.labels;
   const qSkills=(quest.skills||[]).map(id=>skills.find(s=>s.id===id)).filter(Boolean);
+  const prereq=(quests||[]).find(q=>q.id===quest.unlocksAfter)||null;
+  const isLocked=!quest.done&&prereq&&!prereq.done;
   const [editing,setEditing]=useState(false);
   const [showSubs,setShowSubs]=useState(false);
   const [newSub,setNewSub]=useState("");
   const defaultQColor=(sIds)=>{ const s=skills.find(sk=>sk.id===(sIds||[])[0]); return s?s.color:null; };
-  const [ef,setEf]=useState({title:quest.title,note:quest.note||"",dueDate:quest.due?new Date(quest.due).toISOString().split("T")[0]:"",skillIds:quest.skills||[],color:quest.color||defaultQColor(quest.skills)||null,priority:quest.priority||"med",cooldown:quest.cooldown??60*60*1000,published:quest.published||false,notesPublic:quest.notesPublic||false,xpVal:quest.xpVal??null,type:quest.type});
+  const [ef,setEf]=useState({title:quest.title,note:quest.note||"",dueDate:quest.due?new Date(quest.due).toISOString().split("T")[0]:"",skillIds:quest.skills||[],color:quest.color||defaultQColor(quest.skills)||null,priority:quest.priority||"med",cooldown:quest.cooldown??60*60*1000,published:quest.published||false,notesPublic:quest.notesPublic||false,xpVal:quest.xpVal??null,type:quest.type,unlocksAfter:quest.unlocksAfter||""});
   const [xpSuggestion,setXpSuggestion]=useState(null);
   const [xpLoading,setXpLoading]=useState(false);
   const [subXpSug,setSubXpSug]=useState(null);
@@ -3061,7 +3106,7 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
     if(!ef.title.trim()) return;
     const due=ef.dueDate?new Date(ef.dueDate+"T09:00").getTime():null;
     const newXp=xpSuggestion?.xp??(ef.xpVal!==null?ef.xpVal:quest.xpVal);
-    onEdit(quest.id,{title:ef.title.trim(),note:ef.note.trim(),due,skills:ef.skillIds,color:ef.color||null,priority:ef.priority,cooldown:ef.type==="radiant"?ef.cooldown:undefined,published:ef.published||false,notesPublic:ef.notesPublic||false,xpVal:newXp,type:ef.type});
+    onEdit(quest.id,{title:ef.title.trim(),note:ef.note.trim(),due,skills:ef.skillIds,color:ef.color||null,priority:ef.priority,cooldown:ef.type==="radiant"?ef.cooldown:undefined,published:ef.published||false,notesPublic:ef.notesPublic||false,xpVal:newXp,type:ef.type,unlocksAfter:ef.unlocksAfter||null});
     setEditing(false); setXpSuggestion(null);
   };
   const suggestQuestXp=async()=>{
@@ -3110,6 +3155,7 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
   const overdue=quest.due&&!quest.done&&quest.due<now;
   const dueSoon=quest.due&&!quest.done&&quest.due>now&&quest.due-now<86400000;
   const dueFmt=quest.due?new Date(quest.due).toLocaleDateString("en-US",{month:"short",day:"numeric"}):null;
+  const chainUnlocks=quest.done?(quests||[]).filter(q=>q.unlocksAfter===quest.id&&!q.done):[];
 
   if(editing) return (
     <div className="fwrap" style={{marginBottom:2}}>
@@ -3143,6 +3189,17 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
           {COOLDOWN_OPTIONS.map(o=><option key={o.ms} value={o.ms}>{o.label}</option>)}
         </select>
       </div>}
+      {(quests||[]).filter(q=>q.id!==quest.id&&q.type!=="radiant"&&!q.done).length>0&&(
+        <div style={{marginBottom:8}}>
+          <div className="label9" style={{marginBottom:4}}>Unlocks after <span style={{opacity:.5,fontWeight:"normal",textTransform:"none",letterSpacing:0}}>(optional chain)</span></div>
+          <select className="fsel" style={{flex:1,width:"100%"}} value={ef.unlocksAfter||""} onChange={e=>setEf(v=>({...v,unlocksAfter:e.target.value||null}))}>
+            <option value="">None — available immediately</option>
+            {(quests||[]).filter(q=>q.id!==quest.id&&q.type!=="radiant"&&!q.done).map(q=>(
+              <option key={q.id} value={q.id}>{q.type==="main"?"◆":"◇"} {q.title}</option>
+            ))}
+          </select>
+        </div>
+      )}
       <div style={{marginBottom:8}}>
         <div className="label9" style={{marginBottom:6}}>Quest color</div>
         <div style={{display:"flex",flexWrap:"wrap",gap:5,alignItems:"center"}}>
@@ -3157,6 +3214,18 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
       {xpSuggestion&&<div style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:4,padding:"8px 10px",marginBottom:6,fontSize:11,color:"var(--tx2)",lineHeight:1.5,cursor:"pointer"}} onClick={()=>xpSuggestion.xp&&setEf(v=>({...v,xpVal:xpSuggestion.xp}))} title="Click to apply to XP field">
         {xpSuggestion.xp?<><span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",fontWeight:"bold"}}>+{xpSuggestion.xp} XP</span> — {xpSuggestion.reason} <span style={{color:"var(--tx3)",fontSize:9}}>(click to apply)</span></>:xpSuggestion.reason}
       </div>}
+      {(()=>{
+        const prereqs=quests.filter(q=>q.id!==quest.id&&!q.done&&!q.unlocksAfter);
+        if(prereqs.length===0) return null;
+        return (<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+          <div className="label9" style={{flexShrink:0}}>Unlocks after</div>
+          <select className="fsel" style={{flex:1}} value={ef.unlocksAfter} onChange={e=>setEf(v=>({...v,unlocksAfter:e.target.value}))}>
+            <option value="">Always available</option>
+            {prereqs.map(q=><option key={q.id} value={q.id}>{q.type==="main"?"◆":q.type==="side"?"◇":"◉"} {q.title}</option>)}
+          </select>
+          {ef.unlocksAfter&&<button onClick={()=>setEf(v=>({...v,unlocksAfter:""}))} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11,flexShrink:0}}>✕</button>}
+        </div>);
+      })()}
       <div style={{display:"flex",gap:10,alignItems:"center",padding:"8px 0",borderTop:"1px solid var(--b1)",marginBottom:6}}>
         <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",flex:1}}>
           <input type="checkbox" checked={ef.published||false} onChange={e=>setEf(v=>({...v,published:e.target.checked}))} style={{accentColor:"var(--primary)"}}/>
@@ -3181,14 +3250,15 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
           if(qc) return {borderColor:qc,borderLeftWidth:3};
           return {};
         })()}>
-        <button className="chk" style={isRadiant?{color:rAvail?"var(--secondary)":"var(--tx3)",borderColor:rAvail?"var(--secondaryb)":"var(--b1)",fontSize:rCool?7:undefined}:{}}
-          onClick={()=>onToggle(quest.id)} title={rCool?`Available in ${rCool}`:undefined}>
-          {isRadiant?(rCool?rCool:"◉"):quest.done?"✓":""}
+        <button className="chk" style={isLocked?{color:"var(--tx3)",borderColor:"var(--b1)",opacity:.5,cursor:"not-allowed"}:isRadiant?{color:rAvail?"var(--secondary)":"var(--tx3)",borderColor:rAvail?"var(--secondaryb)":"var(--b1)",fontSize:rCool?7:undefined}:{}}
+          onClick={()=>onToggle(quest.id)} title={isLocked?`Locked — complete "${prereq?.title}" first`:rCool?`Available in ${rCool}`:undefined}>
+          {isLocked?"🔒":isRadiant?(rCool?rCool:"◉"):quest.done?"✓":""}
         </button>
-        <div className="cbody">
+        <div className="cbody" style={isLocked?{opacity:.6}:{}}>
           <div className="row-gap4">
-            {quest.priority&&<span className={`prio-dot prio-${quest.priority||"med"}`} title={`Priority: ${quest.priority}`}/>}
-            <span className={`ctitle ${quest.done&&!isRadiant?"done":""}`}>{quest.title}</span>
+            {isLocked&&<span style={{fontSize:8,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",letterSpacing:.5}}>after: {prereq?.title}</span>}
+            {!isLocked&&quest.priority&&<span className={`prio-dot prio-${quest.priority||"med"}`} title={`Priority: ${quest.priority}`}/>}
+            <span className={`ctitle ${isLocked?"":quest.done&&!isRadiant?"done":""}`} style={isLocked?{color:"var(--tx3)"}:{}}>{quest.title}</span>
           </div>
           {subs.length>0&&<div className="sub-progress"><div className="sub-progress-fill" style={{width:`${subs.length?Math.round(subsDone/subs.length*100):0}%`}}/></div>}
           {quest.note&&<div className="cnote">{quest.note}</div>}
@@ -3196,6 +3266,7 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
             {qSkills.map(sk=><span key={sk.id} className="ctag" style={{borderColor:sk.color+"44",color:sk.color,display:"inline-flex",alignItems:"center",gap:3}}><SkIcon s={sk} sz={10}/>{sk.name}</span>)}
             <span className="ctag">{quest.xpVal} {L.xpName}{isRadiant?" / run":""}</span>
             {isRadiant&&<span className="ctag" style={{color:"var(--secondary)",borderColor:"var(--secondaryb)"}}>◉ {COOLDOWN_OPTIONS.find(o=>o.ms===(quest.cooldown??60*60*1000))?.label||"1 hr"}</span>}
+            {quest.done&&chainUnlocks.length>0&&<span className="ctag" style={{color:"var(--primary)",borderColor:"var(--primaryf)"}}>▶ Unlocks: {chainUnlocks.map(q=>q.title).join(", ")}</span>}
             {dueFmt&&<span className="ctag" style={{
               color:overdue?"var(--danger)":dueSoon?"var(--primary)":"var(--tx3)",
               borderColor:overdue?"var(--dangerf)":dueSoon?"var(--primaryb)":"var(--b1)"
