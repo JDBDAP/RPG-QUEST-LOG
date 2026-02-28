@@ -860,10 +860,10 @@ export default function App(){
       journalCount:(journal||[]).length,
       streaks,
       publishedAt:Date.now(),
-      skills:pubSkills.map(sk=>{
+      skills:[...pubSkills,...skills.filter(sk=>sk.type==="subskill"&&sk.published)].map(sk=>{
         const streak=streaks[sk.id]?.count||0;
         const lv=Math.floor((sk.xp||0)/(settings.xp.skillPerLevel||6000))+1;
-        return {id:sk.id,name:sk.name,icon:sk.icon,color:sk.color,category:sk.category||"other",intention:sk.intention||"",level:lv,streak,notesPublic:sk.notesPublic||false,xp:sk.xp||0};
+        return {id:sk.id,name:sk.name,icon:sk.icon,color:sk.color,category:sk.category||"other",intention:sk.intention||"",level:lv,streak,notesPublic:sk.notesPublic||false,xp:sk.xp||0,type:sk.type||"skill",parentIds:sk.parentIds||[]};
       }),
       radiantQuests:radiantStats,
     };
@@ -3551,7 +3551,8 @@ function CommunityTab({userId,settings,skills,quests,meds,journal,streaks,xp,fri
   });
 
   // Build my published data preview
-  const myPubSkills=skills.filter(s=>s.published);
+  const myPubSkills=skills.filter(s=>s.published&&s.type!=="subskill");
+  const myPubSubskills=skills.filter(s=>s.published&&s.type==="subskill");
   const myPubQuests=quests.filter(q=>q.published);
   const [bulkLoading,setBulkLoading]=useState(false);
 
@@ -3690,6 +3691,27 @@ Reply with ONLY the category id.`}]})});
         )}
 
         {/* Published quests */}
+        {myPubSubskills.length>0&&<>
+          <div className="slbl" style={{marginTop:12}}>Published Subskills ({myPubSubskills.length})</div>
+          {myPubSubskills.map(sk=>{
+            const parents=(sk.parentIds||[]).map(pid=>skills.find(s=>s.id===pid)).filter(Boolean);
+            const cat=SKILL_CATEGORIES.find(c=>c.id===sk.category)||SKILL_CATEGORIES[7];
+            const lv=Math.floor((sk.xp||0)/(settings.xp.skillPerLevel||6000))+1;
+            return (
+              <div key={sk.id} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",background:"var(--bg)",border:"1px solid var(--b1)",borderRadius:"var(--r)",marginBottom:5,marginLeft:12,borderLeft:`2px solid var(--b2)`}}>
+                <span style={{fontSize:14}}>{sk.icon}</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:11,color:"var(--tx)"}}>{sk.name}</div>
+                  <div style={{fontSize:9,color:"var(--tx3)",fontFamily:"'DM Mono',monospace"}}>
+                    {cat.icon} {cat.label} · Lv{lv}
+                    {parents.length>0&&<> · {parents.map(p=>`${p.icon} ${p.name}`).join(", ")}</>}
+                  </div>
+                </div>
+                <button className="delbtn" style={{fontSize:9}} onClick={()=>onEditSkillPublish(sk.id,{published:false})}>unpublish</button>
+              </div>
+            );
+          })}
+        </>}
         <div className="slbl" style={{marginTop:14}}>Published Quests ({myPubQuests.length})</div>
         {myPubQuests.length===0?(
           <div style={{fontSize:12,color:"var(--tx3)",padding:"8px 0 12px",fontStyle:"italic"}}>No quests published. Edit a quest to publish it.</div>
@@ -3767,7 +3789,10 @@ Reply with ONLY the category id.`}]})});
 
 function CommunityCard({profile,isFriend,badges,filterCat}){
   const [expanded,setExpanded]=useState(false);
-  const relevantSkills=filterCat==="all"?profile.skills:profile.skills?.filter(s=>s.category===filterCat)||[];
+  const allProfileSkills=profile.skills||[];
+  const mainProfileSkills=allProfileSkills.filter(s=>s.type!=="subskill");
+  const subProfileSkills=allProfileSkills.filter(s=>s.type==="subskill");
+  const relevantSkills=(filterCat==="all"?mainProfileSkills:mainProfileSkills.filter(s=>s.category===filterCat));
   const displaySkills=(relevantSkills||[]).slice(0,expanded?99:4);
 
   return (
@@ -3810,6 +3835,23 @@ function CommunityCard({profile,isFriend,badges,filterCat}){
 
       {/* Expanded: radiant quests + intentions */}
       {expanded&&(<>
+        {subProfileSkills.length>0&&(
+          <div style={{padding:"6px 12px 10px",borderTop:"1px solid var(--b1)"}}>
+            <div style={{fontSize:9,fontFamily:"'DM Mono',monospace",letterSpacing:1.5,color:"var(--tx3)",textTransform:"uppercase",marginBottom:6}}>Subskills</div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+              {subProfileSkills.map(sk=>{
+                const parents=(sk.parentIds||[]).map(pid=>(relevantSkills||[]).find(s=>s.id===pid)).filter(Boolean);
+                return (
+                  <div key={sk.id} style={{display:"flex",alignItems:"center",gap:3,padding:"2px 7px",background:"var(--bg)",border:`1px solid ${sk.color}33`,borderRadius:10,fontSize:9,fontFamily:"'DM Mono',monospace"}}>
+                    <span style={{color:sk.color}}>{sk.icon==="img"?"◈":sk.icon}</span>
+                    <span style={{color:"var(--tx3)"}}>{sk.name}</span>
+                    {parents.length>0&&<span style={{color:"var(--tx3)",opacity:.6}}>↳{parents.map(p=>p.name).join(",")}</span>}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
         {(profile.radiantQuests||[]).length>0&&(
           <div style={{padding:"8px 12px 10px",borderTop:"1px solid var(--b1)"}}>
             <div style={{fontSize:9,fontFamily:"'DM Mono',monospace",letterSpacing:1.5,color:"var(--tx3)",textTransform:"uppercase",marginBottom:6}}>Radiant Practices</div>
