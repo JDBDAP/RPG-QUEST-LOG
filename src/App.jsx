@@ -599,6 +599,7 @@ export default function App(){
   const [xp,setXp]=useState(0);
   const [streaks,setStreaks]=useState({});
   const [pendingPractice,setPendingPractice]=useState(null);
+  const [aiMemory,setAiMemory]=useState({facts:[],patterns:[],updated:0});
   const [toast,setToast]=useState({msg:"",on:false});
   const [confirm,setConfirm]=useState(null);
   const [showJarvis,setShowJarvis]=useState(false);
@@ -640,13 +641,14 @@ export default function App(){
     const q=await sget("cx_quests");   if(q) setQuests(q);
     const sk=await sget("cx_skills");  if(sk) setSkills(sk);
     const m=await sget("cx_meds");     if(m) setMeds(m);
-    const pt=await sget("cx_ptypes");  if(pt) setPracticeTypes(pt);
+    const pt=await sget("cx_ptypes");  if(pt){setPracticeTypes(pt);window.__practiceTypes=pt;}
     const x=await sget("cx_xp");       if(x!==null) setXp(x);
     const st=await sget("cx_streaks"); if(st) setStreaks(st);
     const sv=await sget("cx_seen");    if(sv) setSeenTabs(sv);
     const jn=await sget("cx_journal"); if(jn) setJournal(jn);
     const xl=await sget("cx_xplog");   if(xl) setXpLog(xl);
     const fr=await sget("cx_friends"); if(fr) setFriends(fr);
+    const am=await sget("cx_aimem");   if(am) setAiMemory(am);
     setLoaded(true);
   };
 
@@ -796,6 +798,8 @@ export default function App(){
       const {amt,leveledUp}=await award(q.xpVal,primary,xp,skills,streaks,`${prefix} ${q.title}`);
       showToast(`+${amt} ${L.xpName}`);
       if(leveledUp) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);
+      setPendingPractice({skillId:primary,questTitle:q.title,questType:q.type});
+      setTab("practice");
     }
   };
   const deleteQuest=async id=>saveQ(quests.filter(q=>q.id!==id));
@@ -1083,10 +1087,10 @@ export default function App(){
           <main className="pg">
             {tab==="planner"  && <PlannerTab period={period} setPeriod={setPeriod} tasks={periodTasks} weekDays={weekDays} allTasks={tasks} skills={skills} quests={quests} onAddTask={addTask} onToggle={toggleTask} onDelete={deleteTask} onEdit={editTask} onToggleQuest={toggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>}
             {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest} onReorder={q=>saveQ(q)} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>}
-            {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill} onReorder={reorderSkills} onLink={linkSubskill}/>}
+            {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill} onReorder={reorderSkills} onLink={linkSubskill} onAward={async(skillId,amt,reason)=>{const {leveledUp}=await award(amt,skillId,xp,skills,streaks,`✦ ${reason}`);showToast(`+${amt} ${settings.labels.xpName}`);if(leveledUp)setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);}}/>}
             {tab==="practice" && <PracticeTab meds={meds} skills={skills} streaks={streaks} pending={pendingPractice} practiceTypes={practiceTypes} onAddType={addPracticeType} onDeleteType={deletePracticeType} onLog={logMed} onDelete={deleteMed} onEdit={editMed} onClearPending={()=>setPendingPractice(null)}/>}
             {tab==="journal"  && <JournalTab entries={journal} onAdd={addJournalEntry} onDelete={deleteJournalEntry}/>}
-            {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} journal={journal} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest}/>}
+            {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} journal={journal} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest} aiMemory={aiMemory} onUpdateMemory={async(m)=>{setAiMemory(m);await dbSet("cx_aimem",m,userId);}}/>}
             {tab==="settings" && <SettingsTab showToast={showToast} onExport={exportData} onImport={importData} userId={userId} onSignIn={()=>setShowAuth(true)} onSignOut={handleSignOut}/>}
             {tab==="community" && <CommunityTab userId={userId} settings={settings} skills={skills} quests={quests} meds={meds} journal={journal} streaks={streaks} xp={xp} friends={friends} myFriendCode={myFriendCode} profiles={communityProfiles} onPublishProfile={publishProfile} onAddFriend={addFriend} onRemoveFriend={removeFriend} onRefresh={refreshCommunity} onEditSkillPublish={editSkillPublish} onEditQuestPublish={editQuestPublish} onSaveSettings={saveSettings} showToast={showToast}/>}
           </main>
@@ -1096,7 +1100,7 @@ export default function App(){
           {showReview&&<WeeklyReview tasks={tasks} quests={quests} skills={skills} meds={meds} xpLog={xpLog} journal={journal} settings={settings} onClose={()=>setShowReview(false)} onNavigate={id=>{setShowReview(false);handleTabChange(id);}}/>}
           {/* Jarvis FAB */}
           <button onClick={()=>setShowJarvis(true)} style={{position:"fixed",bottom:72,right:16,width:44,height:44,borderRadius:"50%",background:"var(--s2)",border:"1px solid var(--b2)",color:"var(--tx)",fontSize:18,cursor:"pointer",zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 12px rgba(0,0,0,.4)",transition:"all .15s"}} title="Jarvis AI">⟡</button>
-          {showJarvis&&<JarvisOverlay tasks={tasks} quests={quests} skills={skills} onAddQuest={addQuest} onAddTask={addTask} onClose={()=>setShowJarvis(false)}/>}
+          {showJarvis&&<JarvisOverlay tasks={tasks} quests={quests} skills={skills} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onClose={()=>setShowJarvis(false)}/>}
           {/* Mobile bottom nav */}
           <nav className="bnav">
             {NAV.map(n=>(
@@ -1320,7 +1324,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
     setQXpLoad(true); setQXpSug(null);
     const typeLabel=form==="main"?"main quest":form==="side"?"side quest":"radiant/repeatable quest";
     try{
-      const _qp='Quest in a gamified life tracker: "'+f.title+'"'+(f.note?'. Intention: "'+f.note+'"':'')+'. Type: '+typeLabel+'. Priority: '+(f.priority||'med')+'. XP scale: 6000 XP = 1 level (about 100 hours). Judge SCOPE: radiant/daily=20-60, side quest/hours-days=100-800, main quest/weeks-months=600-4000, major life goal=2000-8000+. High priority = upper half of range. Reply ONLY with a JSON object with keys xp (number) and reason (string).';
+      const _qp='Quest in a gamified life tracker: "'+f.title+'"'+(f.note?'. Intention: "'+f.note+'"':'')+'. Type: '+typeLabel+'. Priority: '+(f.priority||'med')+'. XP scale: 6000 XP = 1 level. Judge SCOPE: radiant/daily=20-60, side/hours-days=100-800, main/weeks-months=600-8000, impactful main=8000-20000, life-defining quest=20000-30000 (hard cap). Use high end sparingly — most mains should be 600-4000. Reply ONLY with JSON: {"xp":number,"reason":"one sentence"}.';
       const res=await fetch("/api/chat",{method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({max_tokens:120,
@@ -1617,6 +1621,144 @@ function StreakCalendar({skillId, meds, color}){
 }
 
 
+function SkillDiscussPanel({skill,skPerLv,streaks,meds,onGrant,onClose}){
+  const lv=skillLv(skill.xp,skPerLv);
+  const streak=streaks[skill.id]||{count:0};
+  const recentSessions=meds.filter(m=>(m.skillIds||[m.skillId]).filter(Boolean).includes(skill.id)).slice(0,12);
+  const [msgs,setMsgs]=useState([{role:"assistant",content:`What have you been working on with ${skill.name} lately? Walk me through it — be specific.`}]);
+  const [input,setInput]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [pendingGrant,setPendingGrant]=useState(null);
+  const [granted,setGranted]=useState(false);
+  const bottomRef=useRef(null);
+  useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:"smooth"});},[msgs,loading]);
+
+  const buildSys=()=>{
+    const recentDesc=recentSessions.length
+      ? recentSessions.map(m=>`${m.type||"session"} ${m.dur}min${m.note?` ("${m.note.slice(0,60)}")`:""}`).join("; ")
+      : "none logged yet";
+    return `You are an XP evaluator inside a gamified skill tracker. The user wants to discuss their real-world progress in "${skill.name}" and receive fair XP.
+
+SKILL STATE:
+- Name: ${skill.name} | Type: ${skill.type||"skill"}
+- Level: ${lv} | Total XP: ${skill.xp} | 1 level = ${skPerLv} XP (~100 hours of genuine work)
+- Intention: ${skill.intention||"not set"}
+- Current streak: ${streak.count} days
+- Already-logged sessions (don't re-award these): ${recentDesc}
+
+YOUR ROLE:
+Have a genuine conversation to understand what the user has actually accomplished BEYOND what's already logged. Ask follow-up questions when claims are vague. Be direct, not interrogative — you're a coach, not a cop.
+
+XP SCALE:
+- Single focused session not yet logged: 30–80 XP
+- Breakthrough insight or skill unlock: 100–500 XP  
+- Consistent week of work beyond logged: 200–700 XP
+- Month of dedicated practice: 500–2500 XP
+- Major milestone (first performance, shipped project, test passed): 1000–5000 XP
+- Life-changing mastery achievement: 5000–20000 XP (use rarely)
+
+ANTI-GAMING RULES:
+- Ask: what specifically, when, how long, what was the outcome
+- If they're vague after one follow-up, halve your estimate
+- Never award for work already in logged sessions
+- If the story doesn't add up to the XP they're hinting at, say so directly
+- You can ask clarifying questions across multiple turns
+
+When you're confident — end your message with this exact format on its own line:
+GRANT:{"xp":NUMBER,"reason":"one sentence max 15 words"}
+
+Only include GRANT when you have enough info to be fair. It's fine to take 2-4 turns first.`;
+  };
+
+  const send=async(txt)=>{
+    const msg=(txt||input).trim(); if(!msg||loading) return;
+    setInput(""); setLoading(true);
+    const history=[...msgs.map(m=>({role:m.role,content:m.content})),{role:"user",content:msg}];
+    setMsgs(v=>[...v,{role:"user",content:msg}]);
+    try{
+      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({max_tokens:400,messages:[{role:"system",content:buildSys()},...history]})});
+      const data=await res.json();
+      const raw=data.choices?.[0]?.message?.content||"";
+      const grantMatch=raw.match(/GRANT:({"xp":\s*\d+[^}]*})/);
+      let display=raw;
+      if(grantMatch){
+        try{
+          const g=JSON.parse(grantMatch[1]);
+          if(g.xp>0) setPendingGrant(g);
+        }catch{}
+        display=raw.replace(/GRANT:\{[^}]+\}/,"").trim();
+      }
+      setMsgs(v=>[...v,{role:"assistant",content:display||"..."}]);
+    }catch{setMsgs(v=>[...v,{role:"assistant",content:"Connection failed."}]);}
+    setLoading(false);
+  };
+
+  const accept=async()=>{
+    if(!pendingGrant||granted) return;
+    setGranted(true);
+    await onGrant(pendingGrant.xp,pendingGrant.reason);
+    setMsgs(v=>[...v,{role:"assistant",content:`✦ Granted +${pendingGrant.xp} XP for: ${pendingGrant.reason}`}]);
+    setPendingGrant(null);
+  };
+
+  const skColor=skill.color||"var(--primary)";
+
+  return (
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.65)",backdropFilter:"blur(4px)",zIndex:9999,display:"flex",alignItems:"flex-end",justifyContent:"center",padding:"0 0 70px"}}
+      onClick={e=>e.target===e.currentTarget&&onClose()}>
+      <div style={{width:"min(480px,95vw)",background:"var(--s1)",border:`1px solid ${skColor}44`,borderRadius:10,overflow:"hidden",display:"flex",flexDirection:"column",maxHeight:"70vh",boxShadow:"0 8px 40px rgba(0,0,0,.5)"}}>
+        {/* header */}
+        <div style={{padding:"12px 14px",borderBottom:"1px solid var(--b1)",display:"flex",alignItems:"center",gap:10,background:"var(--bg)"}}>
+          <SkIcon s={skill} sz={16}/>
+          <div style={{flex:1}}>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:"var(--tx)",letterSpacing:.5}}>{skill.name}</div>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",marginTop:1}}>Lv {lv} · {skill.xp} XP total · discuss progress for XP</div>
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:16,lineHeight:1,padding:4}}>✕</button>
+        </div>
+        {/* messages */}
+        <div style={{flex:1,overflowY:"auto",padding:"12px 14px",display:"flex",flexDirection:"column",gap:8}}>
+          {msgs.map((m,i)=>(
+            <div key={i} style={{alignSelf:m.role==="user"?"flex-end":"flex-start",maxWidth:"88%",
+              background:m.role==="user"?"var(--s2)":"var(--bg)",
+              border:`1px solid ${m.role==="user"?"var(--b2)":"var(--b1)"}`,
+              borderRadius:6,padding:"8px 11px",fontSize:12,color:"var(--tx)",lineHeight:1.55,fontFamily:"inherit"}}>
+              {m.content}
+            </div>
+          ))}
+          {loading&&<div style={{alignSelf:"flex-start",fontSize:11,color:"var(--tx3)",fontStyle:"italic",fontFamily:"'DM Mono',monospace"}}>thinking...</div>}
+          {pendingGrant&&!granted&&(
+            <div style={{alignSelf:"stretch",background:"var(--s2)",border:`1px solid ${skColor}55`,borderRadius:6,padding:"10px 12px",display:"flex",alignItems:"center",gap:10}}>
+              <div style={{flex:1}}>
+                <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:skColor,fontWeight:"bold",marginBottom:2}}>+{pendingGrant.xp} XP</div>
+                <div style={{fontSize:11,color:"var(--tx2)",lineHeight:1.4}}>{pendingGrant.reason}</div>
+              </div>
+              <div style={{display:"flex",gap:6,flexShrink:0}}>
+                <button onClick={accept} style={{background:skColor,border:"none",borderRadius:4,color:"#fff",fontFamily:"'DM Mono',monospace",fontSize:10,cursor:"pointer",padding:"6px 12px",letterSpacing:.5}}>Accept</button>
+                <button onClick={()=>setPendingGrant(null)} style={{background:"none",border:"1px solid var(--b2)",borderRadius:4,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:10,cursor:"pointer",padding:"6px 10px"}}>Discuss more</button>
+              </div>
+            </div>
+          )}
+          <div ref={bottomRef}/>
+        </div>
+        {/* input */}
+        <div style={{padding:"10px 14px",borderTop:"1px solid var(--b1)",display:"flex",gap:8,background:"var(--bg)"}}>
+          <textarea value={input} onChange={e=>setInput(e.target.value)}
+            onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send();}}}
+            placeholder="Describe what you've done..."
+            rows={2}
+            style={{flex:1,background:"var(--s1)",border:"1px solid var(--b2)",borderRadius:4,padding:"7px 10px",color:"var(--tx)",fontFamily:"inherit",fontSize:12,resize:"none",outline:"none",lineHeight:1.4}}/>
+          <button onClick={()=>send()} disabled={!input.trim()||loading}
+            style={{background:skColor,border:"none",borderRadius:4,color:"#fff",fontFamily:"'DM Mono',monospace",fontSize:10,cursor:"pointer",padding:"0 14px",letterSpacing:.5,opacity:!input.trim()||loading?0.4:1,transition:"opacity .15s",flexShrink:0}}>
+            Send
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function SkAiCatBtn({name,intention,onAssign}){
   const [loading,setLoading]=useState(false);
   const suggest=async()=>{
@@ -1642,7 +1784,7 @@ function SkAiCatBtn({name,intention,onAssign}){
   );
 }
 
-function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,onEdit,onReorder,onLink}){
+function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,onEdit,onReorder,onLink,onAward}){
   const {settings}=useSettings(); const L=settings.labels;
   const mainSkills=skills.filter(s=>s.type!=="subskill");
   const subSkills=skills.filter(s=>s.type==="subskill");
@@ -1652,6 +1794,7 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
   const [expandedId,setExpandedId]=useState(null);
   const [calViewIds,setCalViewIds]=useState(new Set()); // skill IDs showing calendar view
   const toggleCalView=id=>setCalViewIds(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
+  const [discussSkillId,setDiscussSkillId]=useState(null);
   const [editingId,setEditingId]=useState(null);
   const [ef,setEf]=useState({name:"",icon:"◈",color:SKILL_COLORS[0],customImg:null,intention:"",category:"other",published:false,notesPublic:false});
 
@@ -1868,10 +2011,19 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
               : parents.map(p=><span key={p.id} style={{fontSize:9,color:p.color,background:p.color+"18",border:`1px solid ${p.color}44`,borderRadius:10,padding:"1px 6px"}}>{p.icon} {p.name}</span>)}
           </div>)}
           {/* expand toggle */}
-          <button onClick={()=>setExpandedId(isExpanded?null:s.id)}
-            style={{background:"none",border:"none",width:"100%",textAlign:"center",color:"var(--tx3)",fontSize:9,cursor:"pointer",padding:"4px 0 0",letterSpacing:1}}>
-            {isExpanded?"▲ less":"▼ more"}
-          </button>
+          <div style={{display:"flex",alignItems:"center",gap:4}}>
+            <button onClick={()=>setExpandedId(isExpanded?null:s.id)}
+              style={{background:"none",border:"none",flex:1,textAlign:"center",color:"var(--tx3)",fontSize:9,cursor:"pointer",padding:"4px 0 0",letterSpacing:1}}>
+              {isExpanded?"▲ less":"▼ more"}
+            </button>
+            <button onClick={()=>setDiscussSkillId(s.id)}
+              title="Discuss progress with AI for XP"
+              style={{background:"none",border:"1px solid var(--b2)",borderRadius:3,color:"var(--tx3)",fontSize:8,cursor:"pointer",padding:"3px 6px",letterSpacing:.8,fontFamily:"'DM Mono',monospace",marginTop:4,flexShrink:0,transition:"all .15s"}}
+              onMouseEnter={e=>e.currentTarget.style.color="var(--primary)"}
+              onMouseLeave={e=>e.currentTarget.style.color="var(--tx3)"}>
+              ⟡ discuss
+            </button>
+          </div>
           {isExpanded&&(<div style={{marginTop:6,paddingTop:6,borderTop:"1px solid var(--b1)"}}>
             {/* activity view with toggle */}
             <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:2}}>
@@ -1904,7 +2056,9 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
     );
   };
 
+  const discussSkill = skills.find(s=>s.id===discussSkillId);
   return (<>
+    {discussSkillId&&discussSkill&&<SkillDiscussPanel skill={discussSkill} skPerLv={skPerLv} streaks={streaks} meds={meds} onGrant={async(amt,reason)=>{await onAward(discussSkillId,amt,reason);}} onClose={()=>setDiscussSkillId(null)}/>}
     <div className="slbl">{L.skillsTab}</div>
     <div className="sk-quote">
       <div className="sk-quote-text">"Every shortcut you take, every session you skip, every number you inflate — you're not fooling the system. You're just lying to the only person whose opinion of you actually matters."</div>
@@ -2298,7 +2452,7 @@ function MedCard({med,ptype,mSkills,skills,onDelete,onEdit}){
   const {settings}=useSettings(); const L=settings.labels;
   const [expanded,setExpanded]=useState(false);
   const [editing,setEditing]=useState(false);
-  const [ef,setEf]=useState({note:med.note||"",xpAwarded:med.xpAwarded||med.dur*(settings.xp.practicePerMin||1)});
+  const [ef,setEf]=useState({note:med.note||"",xpAwarded:med.xpAwarded||med.dur*(settings.xp.practicePerMin||1),dur:med.dur,typeId:med.type});
   const [rescoring,setRescoring]=useState(false);
   const ppm=settings.xp.practicePerMin||1;
   const primaryColor=mSkills[0]?.color||"var(--secondary)";
@@ -2318,18 +2472,29 @@ function MedCard({med,ptype,mSkills,skills,onDelete,onEdit}){
     setRescoring(false);
   };
   const save=()=>{
-    onEdit(med.id,{note:ef.note,xpAwarded:Number(ef.xpAwarded)||med.dur*ppm,aiReason:ef.aiReason!==undefined?ef.aiReason:med.aiReason});
+    onEdit(med.id,{note:ef.note,xpAwarded:Number(ef.xpAwarded)||med.dur*ppm,aiReason:ef.aiReason!==undefined?ef.aiReason:med.aiReason,dur:Number(ef.dur)||med.dur,type:ef.typeId||med.type});
     setEditing(false);
   };
   if(editing) return (
     <div className="med-card" style={{flexDirection:"column",gap:8}}>
-      <div style={{display:"flex",gap:8,alignItems:"center"}}>
-        <div className="med-icon" style={{color:primaryColor}}>{ptype.icon}</div>
-        <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"var(--tx2)"}}>{ptype.label} · {med.dur} min</div>
-        <div style={{marginLeft:"auto",display:"flex",gap:4}}>
-          <button className="delbtn" style={{color:"var(--success)"}} onClick={save}>✓</button>
-          <button className="delbtn" onClick={()=>setEditing(false)}>✕</button>
+      <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:2}}>
+        <div className="med-icon" style={{color:primaryColor}}>{ptype?.icon||"◎"}</div>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"var(--tx2)",flex:1}}>Edit session</div>
+        <button className="delbtn" style={{color:"var(--success)"}} onClick={save}>✓ Save</button>
+        <button className="delbtn" onClick={()=>setEditing(false)}>✕</button>
+      </div>
+      <div style={{display:"flex",gap:6,marginBottom:4}}>
+        <div style={{flex:1}}>
+          <div className="label9" style={{marginBottom:3}}>Duration (min)</div>
+          <input type="number" className="fi" value={ef.dur} min={1}
+            onChange={e=>setEf(v=>({...v,dur:Number(e.target.value),xpAwarded:Number(e.target.value)*ppm}))}/>
         </div>
+        {skills?.length>0&&<div style={{flex:2}}>
+          <div className="label9" style={{marginBottom:3}}>Practice type</div>
+          <select className="fsel" value={ef.typeId} onChange={e=>setEf(v=>({...v,typeId:e.target.value}))}>
+            {(window.__practiceTypes||[]).map(t=><option key={t.id} value={t.id}>{t.label}</option>)}
+          </select>
+        </div>}
       </div>
       <textarea className="fi" rows={3} placeholder="Edit journal..." value={ef.note}
         onChange={e=>setEf(v=>({...v,note:e.target.value}))}
@@ -2381,7 +2546,8 @@ function buildAdvisorTools(skills,quests){
   ];
 }
 
-function JarvisOverlay({tasks,quests,skills,onAddQuest,onAddTask,onClose}){
+function JarvisOverlay({tasks,quests,skills,onAddQuest,onAddTask,onClose,onLogMed}){
+  const {settings}=useSettings();
   const [input,setInput]=useState("");
   const [msgs,setMsgs]=useState([{role:"assistant",content:"Online."}]);
   const [loading,setLoading]=useState(false);
@@ -2390,71 +2556,49 @@ function JarvisOverlay({tasks,quests,skills,onAddQuest,onAddTask,onClose}){
   useEffect(()=>{inputRef.current?.focus();},[]);
   useEffect(()=>{msgEndRef.current?.scrollIntoView({behavior:"smooth"});},[msgs]);
 
+  const executeAction=async(action)=>{
+    if(action.tool==="add_quest"){
+      const due=action.input.dueDate?new Date(action.input.dueDate+"T09:00").getTime():null;
+      await onAddQuest({title:action.input.title,type:action.input.type||"main",note:action.input.note||"",due,skills:[]});
+    } else if(action.tool==="add_task"){
+      await onAddTask({title:action.input.title,period:action.input.period||"daily",xpVal:action.input.xpVal||20,skill:null});
+    } else if(action.tool==="log_session"&&onLogMed){
+      await onLogMed({type:action.input.type||"open",dur:Number(action.input.duration)||20,note:action.input.note||"",skillIds:[],baseXp:Number(action.input.duration)*((settings?.xp?.practicePerMin)||1),aiReason:null,sessionDate:null});
+    }
+  };
+  const handleConfirm=async(msgIdx,actionId,accept)=>{
+    setMsgs(prev=>prev.map((m,i)=>{
+      if(i!==msgIdx||!m.actions) return m;
+      return {...m,actions:m.actions.map(a=>a.id===actionId?{...a,status:accept?"accepted":"cancelled"}:a)};
+    }));
+    if(accept){const action=msgs[msgIdx]?.actions?.find(a=>a.id===actionId);if(action)await executeAction(action);}
+  };
+
   const send=async()=>{
     const txt=input.trim(); if(!txt||loading) return;
-    const next=[...msgs,{role:"user",content:txt}];
-    setMsgs(next); setInput(""); setLoading(true);
+    const history=[...msgs.filter(m=>!m.actions).map(m=>({role:m.role,content:m.content})),{role:"user",content:txt}];
+    setMsgs(v=>[...v,{role:"user",content:txt}]); setInput(""); setLoading(true);
     try{
-      const activeQuests=quests.filter(q=>!q.done).map(q=>`${q.title} (${q.type})`).slice(0,10).join(", ")||"none";
-      const doneCount=quests.filter(q=>q.done).length;
+      const tools=buildAdvisorTools(skills,quests);
+      const activeQuests=quests.filter(q=>!q.done).map(q=>'"'+q.title+'" ('+q.type+')').slice(0,10).join(", ")||"none";
       const skPerLvLocal=settings?.xp?.skillPerLevel||6000;
-      const skillDetails=skills.filter(s=>s.type!=="subskill").map(s=>{
-        const lv=Math.floor(s.xp/skPerLvLocal*100)+1;
-        return s.intention?`${s.name} (lv${lv}): ${s.intention}`:`${s.name} (lv${lv})`;
-      }).join("\n")||"none";
-      const taskCount=tasks.filter(t=>!t.done).length;
-
-      const systemPrompt=`You are JARVIS — a sharp, direct AI co-pilot inside The Codex, a personal gamified life tracker.
-
-## USER'S CODEX STATE
-Active quests: ${activeQuests}
-Completed quests: ${doneCount}
-Pending tasks: ${taskCount}
-Skills and intentions:
-${skillDetails}
-
-## YOUR BEHAVIOR
-- You are a co-pilot, not a chatbot. Be direct. Have opinions. Use dry wit when appropriate.
-- Answer questions in 2-4 sentences max unless the user asks for detail.
-- NEVER start a sentence with "I" as the first word.
-- NEVER offer to add things unprompted.
-- Most messages are just conversation. Reply conversationally. No ACTIONS block.
-
-## ADDING TO THE TRACKER
-Only append an ACTIONS block when the user explicitly uses words like: add, create, log, track, make, set up.
-The ACTIONS block must be the LAST line of your response, nothing after it.
-Format: ACTIONS:{"actions":[...]}
-
-Types:
-- {"type":"add_task","title":"...","xpVal":25,"period":"daily"}
-- {"type":"add_quest","title":"...","note":"...","questType":"main"}
-- {"type":"log_session","sessionType":"mindfulness","duration":20,"note":"..."}
-
-## CRITICAL RULE
-If the user is asking a question or just talking — reply ONLY with plain text. No ACTIONS block at all. Not even empty.`;
-
+      const skillList=skills.map(s=>s.name+' Lv'+(Math.floor(s.xp/skPerLvLocal)+1)).join(", ")||"none";
+      const sys="You are JARVIS — a sharp AI co-pilot in a gamified life tracker. Be direct and concise.\nActive quests: "+activeQuests+"\nSkills: "+skillList+"\nPending tasks: "+tasks.filter(t=>!t.done).length+"\nWhen user wants to add/create/schedule something, use the appropriate tool. Otherwise just reply in 1-3 sentences.";
       const res=await fetch("/api/chat",{
         method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({max_tokens:600,
-          messages:[{role:"system",content:systemPrompt},...next.map(m=>({role:m.role,content:m.content}))]})
+        body:JSON.stringify({max_tokens:600,messages:[{role:"system",content:sys},...history],tools})
       });
       const data=await res.json();
-      const raw=data.choices?.[0]?.message?.content||"...";
-      let display=raw;
-      const actionMatch=raw.match(/ACTIONS:(\{[\s\S]*\})/);
-      if(actionMatch){
-        try{
-          const parsed=JSON.parse(actionMatch[1]);
-          for(const a of parsed.actions||[]){
-            if(a.type==="add_task") await onAddTask({title:a.title,xpVal:Number(a.xpVal)||20,period:a.period||"daily",skill:null});
-            if(a.type==="add_quest") await onAddQuest({title:a.title,note:a.note||"",type:a.questType||"main",due:"",skills:[]});
-            if(a.type==="log_session") await onLogMed({type:a.sessionType||"open",dur:Number(a.duration)||20,note:a.note||"",skillIds:[],baseXp:Number(a.duration)||20});
-          }
-        }catch(e){}
-        display=raw.split("ACTIONS:")[0].trim();
+      const msg=data.choices?.[0]?.message||{};
+      const toolCalls=msg.tool_calls||[];
+      const replyText=msg.content||"";
+      if(toolCalls.length>0){
+        const actions=toolCalls.map(tc=>({id:tc.id,tool:tc.function?.name,input:(()=>{try{return JSON.parse(tc.function?.arguments||"{}");}catch{return {};}})(),status:"pending"}));
+        setMsgs(v=>[...v,{role:"assistant",content:replyText||"Here's what I'd add:",actions}]);
+      } else {
+        setMsgs(v=>[...v,{role:"assistant",content:replyText||"..."}]);
       }
-      setMsgs(v=>[...v,{role:"assistant",content:display||"Done."}]);
-    }catch(e){setMsgs(v=>[...v,{role:"assistant",content:"Error — check console."}]);}
+    }catch(e){setMsgs(v=>[...v,{role:"assistant",content:"Error."}]);}
     setLoading(false);
   };
 
@@ -2467,11 +2611,19 @@ If the user is asking a question or just talking — reply ONLY with plain text.
         </div>
         <div style={{flex:1,overflowY:"auto",padding:"12px 16px",display:"flex",flexDirection:"column",gap:10}}>
           {msgs.map((m,i)=>(
-            <div key={i} style={{alignSelf:m.role==="user"?"flex-end":"flex-start",maxWidth:"85%",
-              background:m.role==="user"?"var(--s2)":"var(--bg)",
-              border:"1px solid var(--b1)",borderRadius:6,padding:"8px 12px",
-              fontSize:12,color:"var(--tx)",lineHeight:1.5,fontFamily:"'DM Mono',monospace"}}>
-              {m.content}
+            <div key={i} style={{alignSelf:m.role==="user"?"flex-end":"flex-start",maxWidth:"90%"}}>
+              {m.content&&<div style={{background:m.role==="user"?"var(--s2)":"var(--bg)",
+                border:"1px solid var(--b1)",borderRadius:6,padding:"8px 12px",
+                fontSize:12,color:"var(--tx)",lineHeight:1.5,fontFamily:"'DM Mono',monospace",marginBottom:m.actions?.length?4:0}}>
+                {m.content}
+              </div>}
+              {m.actions&&<div style={{display:"flex",flexDirection:"column",gap:4}}>
+                {m.actions.map(a=>(
+                  <ActionCard key={a.id} action={a} skills={skills}
+                    onAccept={()=>handleConfirm(i,a.id,true)}
+                    onCancel={()=>handleConfirm(i,a.id,false)}/>
+                ))}
+              </div>}
             </div>
           ))}
           {loading&&<div style={{alignSelf:"flex-start",fontSize:11,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontStyle:"italic"}}>...</div>}
@@ -2495,7 +2647,7 @@ If the user is asking a question or just talking — reply ONLY with plain text.
 }
 
 
-function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,onLogMed,onEditQuest}){
+function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,onLogMed,onEditQuest,aiMemory,onUpdateMemory}){
   const {settings}=useSettings(); const L=settings.labels;
   const [msgs,setMsgs]=useState([]);
   const [input,setInput]=useState("");
@@ -2512,7 +2664,9 @@ function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,o
     const skPerLv=settings.xp.skillPerLevel||6000;
     const topStr=Object.entries(streaks).sort((a,b)=>b[1].count-a[1].count).slice(0,3)
       .map(([id,s])=>`${skills.find(sk=>sk.id===id)?.name||id}: ${s.count}d`).join(", ");
-    return `You are a direct planning advisor inside the user\'s RPG quest log.\nLEVEL: ${level} (${xp} XP)${topStr?"\nSTREAKS: "+topStr:""}\nTASKS (${at.length} active): ${at.map(t=>`"${t.title}" [${t.period}, ${skills.find(s=>s.id===t.skill)?.name||"no skill"}, ${t.xpVal}xp]`).join("; ")||"none"}\nQUESTS (${aq.length} active): ${aq.map(q=>`"${q.title}" [${q.type}${q.due?", due "+new Date(q.due).toLocaleDateString():""}]`).join("; ")||"none"}\nSKILLS: ${[...skills].sort((a,b)=>b.xp-a.xp).map(s=>`${s.name} Lv${Math.floor(s.xp/skPerLv)+1}`).join(", ")||"none"}\nBe direct. Reference actual task names. 3-5 sentences max unless breaking something down.`;
+    const memFacts=(aiMemory?.facts||[]).slice(-8).join("\n")||"none yet";
+    const memPatterns=(aiMemory?.patterns||[]).slice(-5).join(", ")||"unknown";
+    return `You are a direct planning advisor inside the user's RPG quest log. You have persistent memory of this user.\nLEVEL: ${level} (${xp} XP)${topStr?"\nSTREAKS: "+topStr:""}\nTASKS (${at.length} active): ${at.map(t=>`"${t.title}" [${t.period}, ${skills.find(s=>s.id===t.skill)?.name||"no skill"}, ${t.xpVal}xp]`).join("; ")||"none"}\nQUESTS (${aq.length} active): ${aq.map(q=>`"${q.title}" [${q.type}${q.due?", due "+new Date(q.due).toLocaleDateString():""}]`).join("; ")||"none"}\nSKILLS: ${[...skills].sort((a,b)=>b.xp-a.xp).map(s=>`${s.name} Lv${Math.floor(s.xp/skPerLv)+1}`).join(", ")||"none"}\nMEMORY - known facts:\n${memFacts}\nObserved patterns: ${memPatterns}\nBe direct. Reference actual task names. 3-5 sentences unless breaking something down. If you learn new facts about this user, append MEMORY_UPDATE:{"facts":["fact"],"patterns":["pattern"]} as the very last line.`;
   }
 
   const executeAction=async(action)=>{
@@ -2569,7 +2723,18 @@ function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,o
         }));
         setMsgs(prev=>[...prev,{role:"assistant",content:replyText||"Here\'s what I\'d like to add:",actions}]);
       } else {
-        setMsgs(prev=>[...prev,{role:"assistant",content:replyText||"Something went wrong."}]);
+        let displayText=replyText||"Something went wrong.";
+        const memMatch=replyText&&replyText.match(/MEMORY_UPDATE:(\{[\s\S]*?\})/);
+        if(memMatch&&onUpdateMemory){
+          try{
+            const upd=JSON.parse(memMatch[1]);
+            const prev=aiMemory||{facts:[],patterns:[],updated:0};
+            const merged={facts:[...new Set([...(prev.facts||[]),...(upd.facts||[])])].slice(-20),patterns:[...new Set([...(prev.patterns||[]),...(upd.patterns||[])])].slice(-10),updated:Date.now()};
+            onUpdateMemory(merged);
+          }catch{}
+          displayText=replyText.split("MEMORY_UPDATE:")[0].trim();
+        }
+        setMsgs(prev=>[...prev,{role:"assistant",content:displayText}]);
       }
     }catch{
       setMsgs(prev=>[...prev,{role:"assistant",content:"Connection failed. Try again."}]);
@@ -2583,6 +2748,12 @@ function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,o
         <div className="ai-intro-title">✦ {L.advisorTab}</div>
         <div className="ai-intro-body">Has full access to your quests, tasks, and skill data. Can add quests, log sessions, and schedule tasks — confirm before anything is written.</div>
       </div>
+      {aiMemory?.facts?.length>0&&<div style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:6,padding:"8px 12px",marginBottom:8,fontSize:10,color:"var(--tx3)"}}>
+        <div style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",fontSize:9,marginBottom:4}}>✦ ADVISOR MEMORY</div>
+        {(aiMemory.facts||[]).slice(-3).map((f,i)=><div key={i}>· {f}</div>)}
+        {(aiMemory.facts||[]).length>3&&<div style={{marginTop:2}}>+{aiMemory.facts.length-3} more facts stored</div>}
+        <button onClick={()=>onUpdateMemory&&onUpdateMemory({facts:[],patterns:[],updated:0})} style={{marginTop:4,background:"none",border:"none",color:"var(--tx3)",fontSize:9,cursor:"pointer",padding:0}}>clear memory</button>
+      </div>}
       <div className="ai-chips">{QUICK.map((q,i)=><button key={i} className="ai-chip" onClick={()=>send(q)}>{q}</button>)}</div>
     </>}
     <div className="ai-msgs">
@@ -2874,7 +3045,7 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
   const [showSubs,setShowSubs]=useState(false);
   const [newSub,setNewSub]=useState("");
   const defaultQColor=(sIds)=>{ const s=skills.find(sk=>sk.id===(sIds||[])[0]); return s?s.color:null; };
-  const [ef,setEf]=useState({title:quest.title,note:quest.note||"",dueDate:quest.due?new Date(quest.due).toISOString().split("T")[0]:"",skillIds:quest.skills||[],color:quest.color||defaultQColor(quest.skills)||null,priority:quest.priority||"med",cooldown:quest.cooldown??60*60*1000,published:quest.published||false,notesPublic:quest.notesPublic||false});
+  const [ef,setEf]=useState({title:quest.title,note:quest.note||"",dueDate:quest.due?new Date(quest.due).toISOString().split("T")[0]:"",skillIds:quest.skills||[],color:quest.color||defaultQColor(quest.skills)||null,priority:quest.priority||"med",cooldown:quest.cooldown??60*60*1000,published:quest.published||false,notesPublic:quest.notesPublic||false,xpVal:quest.xpVal||0,type:quest.type});
   const [xpSuggestion,setXpSuggestion]=useState(null);
   const [xpLoading,setXpLoading]=useState(false);
   const [subXpSug,setSubXpSug]=useState(null);
@@ -2889,14 +3060,15 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
   const saveEdit=()=>{
     if(!ef.title.trim()) return;
     const due=ef.dueDate?new Date(ef.dueDate+"T09:00").getTime():null;
-    onEdit(quest.id,{title:ef.title.trim(),note:ef.note.trim(),due,skills:ef.skillIds,color:ef.color||null,priority:ef.priority,cooldown:quest.type==="radiant"?ef.cooldown:undefined,published:ef.published||false,notesPublic:ef.notesPublic||false});
+    const newXp=xpSuggestion?.xp||ef.xpVal||quest.xpVal;
+    onEdit(quest.id,{title:ef.title.trim(),note:ef.note.trim(),due,skills:ef.skillIds,color:ef.color||null,priority:ef.priority,cooldown:ef.type==="radiant"?ef.cooldown:undefined,published:ef.published||false,notesPublic:ef.notesPublic||false,xpVal:newXp,type:ef.type});
     setEditing(false); setXpSuggestion(null);
   };
   const suggestQuestXp=async()=>{
     if(!ef.title.trim()) return;
     setXpLoading(true); setXpSuggestion(null);
     try{
-      const _eqp='Quest in a gamified life tracker: "'+ef.title+'"'+(ef.note?'. Intention: "'+ef.note+'"':'')+'. Type: '+quest.type+', Priority: '+(ef.priority||'med')+'. XP scale: 6000 XP = 1 level (about 100 hours). Judge SCOPE: radiant/daily=20-60, side/hours-days=100-800, main/weeks-months=600-4000, major life goal=2000-8000+. High priority = upper half of range. Reply ONLY with a JSON object with keys xp (number) and reason (string).';
+      const _eqp='Quest in a gamified life tracker: "'+ef.title+'"'+(ef.note?'. Intention: "'+ef.note+'"':'')+'. Type: '+quest.type+', Priority: '+(ef.priority||'med')+'. XP scale: 6000 XP = 1 level. Judge SCOPE: radiant/daily=20-60, side/hours-days=100-800, main/weeks-months=600-8000, impactful main=8000-20000, life-defining=20000-30000 (5 level max, use rarely). Most mains should be 600-4000. Reply ONLY with JSON: {"xp":number,"reason":"one sentence"}.';
       const res=await fetch("/api/chat",{method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({max_tokens:120,
@@ -2972,11 +3144,26 @@ function QuestCard({quest,skills,onToggle,onDelete,onEdit,onAddSubquest,onToggle
           <div onClick={()=>setEf(v=>({...v,color:null}))} style={{width:20,height:20,borderRadius:"50%",background:"var(--bg)",cursor:"pointer",border:!ef.color?"2px solid var(--tx)":"2px solid var(--b2)",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--tx3)"}} title="Default">∅</div>
         </div>
       </div>
+      <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:8}}>
+        <div style={{flex:1}}>
+          <div className="label9" style={{marginBottom:4}}>Quest type</div>
+          <div style={{display:"flex",gap:4}}>
+            {["main","side","radiant"].map(t=>(
+              <button key={t} onClick={()=>setEf(v=>({...v,type:t}))} style={{background:ef.type===t?"var(--s2)":"var(--bg)",border:`1px solid ${ef.type===t?"var(--b3)":"var(--b1)"}`,borderRadius:4,padding:"4px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:ef.type===t?"var(--primary)":"var(--tx3)",textTransform:"uppercase",letterSpacing:.8}}>{t}</button>
+            ))}
+          </div>
+        </div>
+        <div style={{width:80}}>
+          <div className="label9" style={{marginBottom:4}}>XP reward</div>
+          <input type="number" className="fi" style={{textAlign:"center"}} value={ef.xpVal}
+            onChange={e=>setEf(v=>({...v,xpVal:Number(e.target.value)}))}/>
+        </div>
+      </div>
       <button className="fsbtn secondary" style={{marginTop:4,marginBottom:2}} onClick={suggestQuestXp} disabled={xpLoading||!ef.title.trim()}>
         {xpLoading?"thinking...":"⟡ AI XP opinion"}
       </button>
-      {xpSuggestion&&<div style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:4,padding:"8px 10px",marginBottom:6,fontSize:11,color:"var(--tx2)",lineHeight:1.5}}>
-        {xpSuggestion.xp?<><span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",fontWeight:"bold"}}>+{xpSuggestion.xp} XP</span> — {xpSuggestion.reason}</>:xpSuggestion.reason}
+      {xpSuggestion&&<div style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:4,padding:"8px 10px",marginBottom:6,fontSize:11,color:"var(--tx2)",lineHeight:1.5,cursor:"pointer"}} onClick={()=>xpSuggestion.xp&&setEf(v=>({...v,xpVal:xpSuggestion.xp}))} title="Click to apply to XP field">
+        {xpSuggestion.xp?<><span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",fontWeight:"bold"}}>+{xpSuggestion.xp} XP</span> — {xpSuggestion.reason} <span style={{color:"var(--tx3)",fontSize:9}}>(click to apply)</span></>:xpSuggestion.reason}
       </div>}
       <div style={{display:"flex",gap:10,alignItems:"center",padding:"8px 0",borderTop:"1px solid var(--b1)",marginBottom:6}}>
         <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",flex:1}}>
