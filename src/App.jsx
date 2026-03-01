@@ -1994,6 +1994,51 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
     }
 
     // grid card
+    if(editingId===s.id){
+      return (
+        <div key={s.id} id={"sk-"+s.id} style={{gridColumn:"1 / -1"}}>
+          <div className="fwrap" style={{marginBottom:4}}>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+              <div className="label9">Edit {s.type||"skill"}</div>
+              <button onClick={()=>setEditingId(null)} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:14,lineHeight:1}}>✕</button>
+            </div>
+            <input className="fi full" value={ef.name} onChange={e=>setEf(v=>({...v,name:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submitEdit()} style={{marginBottom:8}}/>
+            <div className="label9" style={{marginBottom:4,marginTop:2}}>Intention</div>
+            <textarea className="fi full" rows={2} placeholder="e.g. build consistent meditation practice..." value={ef.intention} onChange={e=>setEf(v=>({...v,intention:e.target.value}))} style={{resize:"vertical",lineHeight:1.4,marginBottom:8}}/>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+              <div className="label9">Category</div>
+              <SkAiCatBtn name={ef.name} intention={ef.intention} onAssign={cat=>setEf(v=>({...v,category:cat}))}/>
+            </div>
+            <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
+              {SKILL_CATEGORIES.map(cat=>(
+                <button key={cat.id} onClick={()=>setEf(v=>({...v,category:cat.id}))}
+                  style={{padding:"3px 8px",borderRadius:"var(--r)",border:`1px solid ${ef.category===cat.id?"var(--primary)":"var(--b2)"}`,background:ef.category===cat.id?"var(--primaryf)":"var(--s2)",color:ef.category===cat.id?"var(--primary)":"var(--tx2)",fontSize:10,cursor:"pointer",fontFamily:"'DM Mono',monospace"}}>
+                  {cat.icon} {cat.label}
+                </button>
+              ))}
+            </div>
+            <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:8,paddingTop:4,borderTop:"1px solid var(--b1)"}}>
+              <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",flex:1}}>
+                <input type="checkbox" checked={ef.published||false} onChange={e=>setEf(v=>({...v,published:e.target.checked}))} style={{accentColor:"var(--primary)"}}/>
+                <span style={{fontSize:11,color:"var(--tx2)"}}>Publish to community</span>
+              </label>
+              {ef.published&&<label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
+                <input type="checkbox" checked={ef.notesPublic||false} onChange={e=>setEf(v=>({...v,notesPublic:e.target.checked}))} style={{accentColor:"var(--primary)"}}/>
+                <span style={{fontSize:11,color:"var(--tx2)"}}>Share notes</span>
+              </label>}
+            </div>
+            <div className="label9" style={{marginBottom:6}}>Icon</div>
+            <div className="icon-grid" style={{marginBottom:8}}>{SKILL_ICONS_EXTRA.map(ic=><button key={ic} className={`icon-opt ${ef.icon===ic?"on":""}`} onClick={()=>setEf(v=>({...v,icon:ic,customImg:null}))}>{ic}</button>)}</div>
+            <div className="label9" style={{marginBottom:5}}>Color</div>
+            <div className="color-grid" style={{marginBottom:8}}>{SKILL_COLORS.map(col=><div key={col} className={`color-opt ${ef.color===col?"on":""}`} style={{background:col}} onClick={()=>setEf(v=>({...v,color:col}))}/>)}</div>
+            <div style={{display:"flex",gap:6}}>
+              <button className="fsbtn" style={{flex:1,marginTop:4}} onClick={submitEdit}>Save</button>
+            </div>
+          </div>
+        </div>
+      );
+    }
+    // normal card
     return (
       <div key={s.id} id={"sk-"+s.id}
         {...getSkDragProps(s.id,section)}>
@@ -2121,59 +2166,7 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
     )}
 
     {/* edit form */}
-    {editingId&&(()=>{
-      const es=skills.find(s=>s.id===editingId); if(!es) return null;
-      return (<div className="fwrap" style={{marginBottom:12}}>
-        <div className="label9" style={{marginBottom:10}}>Edit {es.type||"skill"}</div>
-        <input className="fi full" value={ef.name} onChange={e=>setEf(v=>({...v,name:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submitEdit()} style={{marginBottom:8}}/>
-        <div className="label9" style={{marginBottom:5,marginTop:2}}>Intention <span style={{opacity:.5,letterSpacing:0,textTransform:"none"}}>(for AI advisor)</span></div>
-        <textarea className="fi full" rows={2} placeholder="e.g. build consistent meditation practice, run 5k by March..." value={ef.intention} onChange={e=>setEf(v=>({...v,intention:e.target.value}))} style={{resize:"vertical",lineHeight:1.4}}/>
-        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:5,marginTop:8}}>
-          <div className="label9">Category</div>
-          <SkAiCatBtn name={ef.name} intention={ef.intention} onAssign={cat=>setEf(v=>({...v,category:cat}))}/>
-        </div>
-        <div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
-          {SKILL_CATEGORIES.map(cat=>(
-            <button key={cat.id} onClick={()=>setEf(v=>({...v,category:cat.id}))}
-              style={{padding:"3px 8px",borderRadius:"var(--r)",border:`1px solid ${ef.category===cat.id?"var(--primary)":"var(--b2)"}`,background:ef.category===cat.id?"var(--primaryf)":"var(--s2)",color:ef.category===cat.id?"var(--primary)":"var(--tx2)",fontSize:10,cursor:"pointer",fontFamily:"'DM Mono',monospace"}}>
-              {cat.icon} {cat.label}
-            </button>
-          ))}
-        </div>
-        <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:8,paddingTop:4,borderTop:"1px solid var(--b1)"}}>
-          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer",flex:1}}>
-            <input type="checkbox" checked={ef.published||false} onChange={e=>setEf(v=>({...v,published:e.target.checked}))} style={{accentColor:"var(--primary)"}}/>
-            <span style={{fontSize:11,color:"var(--tx2)"}}>Publish to community</span>
-          </label>
-          {ef.published&&<label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
-            <input type="checkbox" checked={ef.notesPublic||false} onChange={e=>setEf(v=>({...v,notesPublic:e.target.checked}))} style={{accentColor:"var(--primary)"}}/>
-            <span style={{fontSize:11,color:"var(--tx2)"}}>Share notes</span>
-          </label>}
-        </div>
-        <div className="label9" style={{marginBottom:7,marginTop:8}}>Icon</div>
-        <div className="icon-grid">{SKILL_ICONS_EXTRA.map(ic=><button key={ic} className={`icon-opt ${ef.icon===ic?"on":""}`} onClick={()=>setEf(v=>({...v,icon:ic,customImg:null}))}>{ic}</button>)}</div>
-        <div className="label9" style={{marginBottom:5}}>Or upload image</div>
-        <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",marginBottom:8}}>
-          {ef.customImg?<img src={ef.customImg} style={{width:32,height:32,borderRadius:4,objectFit:"cover",border:"1px solid var(--b2)"}}/>:<span style={{fontSize:11,color:"var(--tx3)"}}>No image</span>}
-          <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>handleImg(e,setEf)}/>
-          <span className="fsbtn" style={{width:"auto",padding:"4px 10px",margin:0,fontSize:9}}>Choose</span>
-          {ef.customImg&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setEf(v=>({...v,customImg:null,icon:"◈"}))}>✕ clear</button>}
-        </label>
-        <div className="label9" style={{marginBottom:7}}>Color</div>
-        <div className="color-grid">{SKILL_COLORS.map(c=><div key={c} className={`color-opt ${ef.color===c?"on":""}`} style={{background:c}} onClick={()=>setEf(v=>({...v,color:c}))}/>)}</div>
-        <div style={{display:"flex",alignItems:"center",gap:8,marginTop:6,marginBottom:4}}>
-          <div className="label9" style={{flexShrink:0}}>Custom</div>
-          <input type="color" value={ef.color||"#888888"} onChange={e=>setEf(v=>({...v,color:e.target.value}))}
-            style={{width:32,height:24,padding:0,border:"1px solid var(--b2)",borderRadius:3,background:"none",cursor:"pointer"}}/>
-          <div style={{width:18,height:18,borderRadius:"50%",background:ef.color||"var(--tx3)",border:"1px solid var(--b2)",flexShrink:0}}/>
-          <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)"}}>{ef.color}</span>
-        </div>
-        <div style={{display:"flex",gap:6}}>
-          <button className="fsbtn" style={{flex:1,marginTop:4}} onClick={submitEdit}>Save</button>
-          <button className="fsbtn" style={{flex:"none",width:"auto",padding:"8px 12px",marginTop:4}} onClick={()=>setEditingId(null)}>Cancel</button>
-        </div>
-      </div>);
-    })()}
+
 
     {/* ── SKILLS section ───────────────────────────────────────────── */}
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
@@ -2193,11 +2186,7 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
         cat,
         skills:mainSkills.filter(s=>(s.category||"other")===cat.id)
       })).filter(g=>g.skills.length>0);
-      if(grouped.length<=1) return (
-        <div style={viewMode==="grid"?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:16}:{marginBottom:16}}>
-          {mainSkills.map((s,i)=>renderSkillCard(s,i,"skill"))}
-        </div>
-      );
+      if(!grouped.length) return null;
       return grouped.map(({cat,skills:gskills})=>{
         const collapsed=collapsedGroups.has(cat.id);
         return (
