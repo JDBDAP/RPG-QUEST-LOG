@@ -792,7 +792,7 @@ export default function App(){
       if(multiplier>1) msg+=` · ${streak.count}d ${L.comboName||"Combo"} ${multiplier}×`;
       showToast(msg);
       if(leveledUp) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);
-      setPendingPractice({skillId:primary,questTitle:q.title});
+      setPendingPractice({skillId:primary,questTitle:q.title,questId:q.id,questType:"radiant"});
       setTab("practice");
       return;
     }
@@ -967,12 +967,14 @@ export default function App(){
     const session={id:uid(),type:d.type,dur:d.dur,skillIds,subskillId:subId,note:d.note,
       aiReason:d.aiReason,xpAwarded:amt,multiplier,created:sessionCreated};
     await saveM([session,...meds]);
-    // Auto-save note to journal as a practice segment
-    if(d.note&&d.note.trim()){
+    // Auto-save to journal: always if quest, only if note otherwise
+    if(d.note&&d.note.trim()||d.questId){
       const sk=curSkillsState.filter(s=>skillIds.includes(s.id));
       const skLabel=sk.map(s=>`${s.icon} ${s.name}`).join(", ");
-      const header=`[${d.type}${skLabel?` · ${skLabel}`:""}${d.dur?` · ${d.dur}min`:""}]`;
-      const next=[{id:uid(),text:`${header}\n${d.note.trim()}`,img:null,source:"practice",created:sessionCreated},...journal];
+      const questPfx=d.questTitle?`[${d.questType==="radiant"?"◉":"◆"} ${d.questTitle}] `:"";
+      const header=`${questPfx}[${d.type}${skLabel?` · ${skLabel}`:""}${d.dur?` · ${d.dur}min`:""}]`;
+      const body=d.note&&d.note.trim()?`${header}\n${d.note.trim()}`:header;
+      const next=[{id:uid(),text:body,img:null,source:"practice",questId:d.questId||null,created:sessionCreated},...journal];
       setJournal(next); await dbSet("cx_journal",next,userId);
     }
     let msg=`+${amt} ${L.xpName}`;
@@ -2229,9 +2231,14 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
   const [showForm,setShowForm]=useState(false);
   const [showTypeForm,setShowTypeForm]=useState(false);
   const [scoring,setScoring]=useState(false);
+  const openForm=()=>{setScoring(false);setXpPreview(null);setShowForm(true);};
   const [xpPreview,setXpPreview]=useState(null);
   const [xpPrevLoad,setXpPrevLoad]=useState(false);
   const [newType,setNewType]=useState({label:"",icon:"◎"});
+  const [timeUnit,setTimeUnit]=useState("min"); // min | hr | day
+  const toMin=v=>timeUnit==="hr"?Math.round(v*60):timeUnit==="day"?Math.round(v*1440):v;
+  const fromMin=v=>timeUnit==="hr"?+(v/60).toFixed(2):timeUnit==="day"?+(v/1440).toFixed(3):v;
+  const durDisplay=v=>timeUnit==="hr"?`${+(v/60).toFixed(1)}hr`:timeUnit==="day"?`${+(v/1440).toFixed(2)}d`:`${v}min`;
   const [f,setF]=useState({typeId:"",skillIds:[],subskillIds:[],dur:15,note:"",sessionDate:"",sessionTime:"",showDate:false});
 
   const toggleSkill=id=>setF(v=>({...v,skillIds:v.skillIds.includes(id)?v.skillIds.filter(s=>s!==id):[...v.skillIds,id]}));
@@ -2272,7 +2279,8 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
     }
     let sessionDate=null;
     if(f.showDate&&f.sessionDate) sessionDate=new Date(`${f.sessionDate}${f.sessionTime?"T"+f.sessionTime:"T12:00"}`).getTime();
-    await onLog({type:f.typeId,skillIds:f.skillIds,subskillIds:f.subskillIds,dur:f.dur,note:f.note.trim(),baseXp,aiReason,sessionDate});
+    await onLog({type:f.typeId,skillIds:f.skillIds,subskillIds:f.subskillIds,dur:f.dur,note:f.note.trim(),baseXp,aiReason,sessionDate,questId:pending?.questId||null,questTitle:pending?.questTitle||null});
+    setScoring(false); // ensure cleared before form closes
     setF(v=>({...v,note:"",subskillIds:[],sessionDate:"",sessionTime:"",showDate:false}));
     setShowForm(false);
   };
@@ -2335,11 +2343,15 @@ Suggest fair XP and a short reason. Reply ONLY with JSON, no markdown: {"xp": NU
   const streak=streaks[primary]||{count:0}; const mult=getMultiplier(streak.count);
   const estXp=Math.round(f.dur*ppm*mult);
   const totalMins=meds.reduce((a,m)=>a+m.dur,0);
+  const totalDisplay=timeUnit==="hr"?`${+(totalMins/60).toFixed(1)}hr`:timeUnit==="day"?`${+(totalMins/1440).toFixed(2)}d`:`${totalMins}min`;
 
   return (<>
     <div className="stats">
       <div className="sbox"><div className="snum">{meds.length}</div><div className="slb2">Sessions</div></div>
-      <div className="sbox"><div className="snum">{totalMins}</div><div className="slb2">Minutes</div></div>
+      <div className="sbox" style={{cursor:"pointer"}} onClick={()=>setTimeUnit(u=>u==="min"?"hr":u==="hr"?"day":"min")} title="Click to switch units">
+        <div className="snum">{totalDisplay}</div>
+        <div className="slb2" style={{display:"flex",alignItems:"center",gap:3}}>Practice <span style={{fontSize:7,opacity:.5,fontFamily:"'DM Mono',monospace"}}>↻</span></div>
+      </div>
       <div className="sbox"><div className="snum">{practiceTypes.length}</div><div className="slb2">Types</div></div>
     </div>
     {pending&&!showForm&&(
@@ -2347,7 +2359,7 @@ Suggest fair XP and a short reason. Reply ONLY with JSON, no markdown: {"xp": NU
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,textTransform:"uppercase",color:"var(--secondary)",marginBottom:5}}>◉ Journal this session</div>
         <div style={{fontSize:13,color:"var(--tx2)",marginBottom:10}}>◉ {pending.questTitle}</div>
         <div style={{display:"flex",gap:6,marginBottom:6}}>
-          <button className="fsbtn secondary" style={{margin:0}} onClick={()=>setShowForm(true)}>Log session</button>
+          <button className="fsbtn secondary" style={{margin:0}} onClick={()=>openForm()}>Log session</button>
           <button className="fsbtn" style={{margin:0,width:"auto",padding:"8px 12px"}} onClick={onClearPending}>Skip</button>
         </div>
         <div style={{fontSize:10,color:"var(--tx3)"}}>Couldn't complete it? <button onClick={onClearPending} style={{background:"none",border:"none",color:"var(--secondary)",textDecoration:"underline",cursor:"pointer",fontSize:10,padding:0}}>Dismiss</button> — XP was already awarded.</div>
@@ -2412,10 +2424,19 @@ Suggest fair XP and a short reason. Reply ONLY with JSON, no markdown: {"xp": NU
         <div className="dur-hdr">
           <span>Duration</span>
           <div className="row-gap6">
-            <input type="number" min={1} max={600} value={f.dur}
-              onChange={e=>setF(v=>({...v,dur:Math.max(1,Math.min(600,Number(e.target.value)||1))}))}
-              style={{width:46,background:"var(--bg)",border:"1px solid var(--b1)",borderRadius:3,color:"var(--tx)",fontSize:11,fontFamily:"'DM Mono',monospace",padding:"2px 5px",textAlign:"center",outline:"none"}}/>
-            <span className="dur-val">min · +{estXp} {L.xpName}{mult>1&&<span style={{color:"var(--primary)"}}> · {streak.count}d {mult}×</span>}</span>
+            <input type="number" min={timeUnit==="day"?.001:timeUnit==="hr"?.1:1} step={timeUnit==="day"?.01:timeUnit==="hr"?.25:1}
+              value={fromMin(f.dur)}
+              onChange={e=>setF(v=>({...v,dur:Math.max(1,toMin(Number(e.target.value)||0))}))}
+              style={{width:52,background:"var(--bg)",border:"1px solid var(--b1)",borderRadius:3,color:"var(--tx)",fontSize:11,fontFamily:"'DM Mono',monospace",padding:"2px 5px",textAlign:"center",outline:"none"}}/>
+            <div style={{display:"flex",gap:3}}>
+              {["min","hr","day"].map(u=>(
+                <button key={u} onClick={()=>setTimeUnit(u)}
+                  style={{padding:"1px 5px",borderRadius:3,border:`1px solid ${timeUnit===u?"var(--secondary)":"var(--b2)"}`,background:timeUnit===u?"var(--secondaryf)":"none",color:timeUnit===u?"var(--secondary)":"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:8,cursor:"pointer"}}>
+                  {u}
+                </button>
+              ))}
+            </div>
+            <span className="dur-val">· +{estXp} {L.xpName}{mult>1&&<span style={{color:"var(--primary)"}}> · {streak.count}d {mult}×</span>}</span>
           </div>
         </div>
         <input type="range" min={1} max={240} value={Math.min(f.dur,240)} onChange={e=>setF(v=>({...v,dur:Number(e.target.value)}))}/>
@@ -2438,11 +2459,12 @@ Suggest fair XP and a short reason. Reply ONLY with JSON, no markdown: {"xp": NU
         {xpPreview&&<div style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:4,padding:"8px 10px",marginBottom:6,fontSize:11,color:"var(--tx2)",lineHeight:1.5}}>
           {xpPreview.xp?<><span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",fontWeight:"bold"}}>~{xpPreview.xp} XP</span> — {xpPreview.reason}<br/><span style={{fontSize:10,color:"var(--tx3)"}}>Final XP calculated on log (journal scoring may adjust)</span></>:xpPreview.reason}
         </div>}
-        <button className="fsbtn secondary" style={{marginTop:4}} onClick={submit} disabled={scoring||!f.typeId}>
+        <button className="fsbtn secondary" style={{marginTop:4}} onClick={submit} disabled={scoring||!f.typeId}
+          key={scoring?"scoring":"idle"}>
           {scoring?"✦ Scoring...":"Log Session"}
         </button>
       </div>
-    ):<button className="addbtn" onClick={()=>{onClearPending();setShowForm(true)}}><span>+</span> Log practice session</button>}
+    ):<button className="addbtn" onClick={()=>{onClearPending();openForm();}}><span>+</span> Log practice session</button>}
     {practiceTypes.length===0&&!showForm&&(
       <div style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"16px",textAlign:"center",marginTop:8}}>
         <div style={{fontSize:24,marginBottom:8}}>◉</div>
@@ -2549,7 +2571,7 @@ function MedCard({med,ptype,mSkills,skills,onDelete,onEdit}){
       <div className="med-body">
         <div className="med-name">{ptype.label}</div>
         <div className="med-sub">
-          {med.dur} min · +{med.xpAwarded||med.dur*ppm} {L.xpName}{med.multiplier>1&&` · ${med.multiplier}×`}
+          {med.dur>=1440?`${+(med.dur/1440).toFixed(2)}d`:med.dur>=60?`${+(med.dur/60).toFixed(1)}hr`:`${med.dur}min`} · +{med.xpAwarded||med.dur*ppm} {L.xpName}{med.multiplier>1&&` · ${med.multiplier}×`}
           {mSkills.map(s=><span key={s.id} style={{marginLeft:4,color:s.color,display:"inline-flex",alignItems:"center",gap:3}}><SkIcon s={s} sz={11}/>{s.name}</span>)}
         </div>
         {med.aiReason&&<div className="med-reason">✦ {med.aiReason}</div>}
@@ -2736,10 +2758,12 @@ function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,o
     const history=[...msgs.map(m=>({role:m.role,content:m.content})),{role:"user",content:msg}];
     setMsgs(prev=>[...prev,{role:"user",content:msg}]);
     try{
+      const advisorTools=buildAdvisorTools(skills,quests);
       const res=await fetch("/api/chat",{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({max_tokens:1000,
-          messages:[{role:"system",content:buildCtx()},...history]}),
+          messages:[{role:"system",content:buildCtx()},...history],
+          tools:advisorTools}),
       });
       const data=await res.json();
       // Groq returns OpenAI format; tool_calls in message if tools used
