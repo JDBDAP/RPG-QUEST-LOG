@@ -521,7 +521,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 .review-btn{position:fixed;bottom:72px;right:16px;background:var(--s2);border:1px solid var(--b2);color:var(--tx2);font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1px;padding:7px 12px;border-radius:20px;cursor:pointer;z-index:50;transition:all .15s;box-shadow:0 2px 12px #0008;}
 .review-btn:hover{background:var(--primary);color:var(--bg);border-color:var(--primary);}
 @media(min-width:768px){.review-btn{bottom:20px;right:24px;}}
-.journal-entry{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:14px 16px;margin-bottom:8px;}.journal-entry.practice-entry{border-color:var(--secondaryb);background:var(--s2);}
+.journal-entry{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:14px 16px;margin-bottom:8px;}.journal-entry.practice-entry{border-color:var(--secondaryb);background:var(--s2);}.journal-entry.ai-journal-entry{border-color:var(--secondaryb);background:linear-gradient(135deg,var(--s2),var(--bg));}
 .journal-date{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1px;color:var(--tx3);margin-bottom:6px;}
 .journal-text{font-size:13px;color:var(--tx);line-height:1.7;white-space:pre-wrap;}
 .journal-img{max-width:100%;border-radius:4px;margin-bottom:8px;border:1px solid var(--b1);}
@@ -836,6 +836,32 @@ export default function App(){
     setJournal(next); await dbSet("cx_journal",next,userId);
     showToast("Entry saved");
   };
+  const awardFromJournal=async(skillAwards)=>{
+    // skillAwards: [{skillId, xp, reason}]
+    if(!skillAwards?.length) return;
+    let curXp=xp, curSkills=skills, newStr=streaks;
+    const skPerLvLocal=settings.xp.skillPerLevel||6000;
+    const leveled=[];
+    for(const a of skillAwards){
+      if(!a.skillId||!a.xp) continue;
+      newStr=updateStreak(newStr,a.skillId);
+      const streak=newStr[a.skillId]||{count:0};
+      const mult=getMultiplier(streak.count);
+      const amt=Math.round(a.xp*mult);
+      curXp+=amt;
+      curSkills=curSkills.map(s=>{
+        if(s.id!==a.skillId) return s;
+        const oldLv=skillLv(s.xp,skPerLvLocal),newXp=s.xp+amt,newLv=skillLv(newXp,skPerLvLocal);
+        if(newLv>oldLv) leveled.push({name:s.name,level:newLv});
+        return {...s,xp:newXp};
+      });
+      await saveXpLog({id:uid(),amt,label:`✦ ${a.reason||"Journal"}`,skill:curSkills.find(s=>s.id===a.skillId)?.name||null,multiplier:mult,created:Date.now()});
+    }
+    setXp(curXp); await dbSet("cx_xp",curXp,userId);
+    setSkills(curSkills); await dbSet("cx_skills",curSkills,userId);
+    await saveStr(newStr);
+    leveled.forEach((lu,i)=>setTimeout(()=>showToast(`◆ ${lu.name} Level ${lu.level}`),(i+1)*600));
+  };
   const deleteJournalEntry=async(id)=>{
     const next=journal.filter(e=>e.id!==id);
     setJournal(next); await dbSet("cx_journal",next,userId);
@@ -1096,7 +1122,7 @@ export default function App(){
             {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest} onReorder={q=>saveQ(q)} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>}
             {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill} onReorder={reorderSkills} onLink={linkSubskill} onAward={async(skillId,amt,reason)=>{const {leveledUp}=await award(amt,skillId,xp,skills,streaks,`✦ ${reason}`);showToast(`+${amt} ${settings.labels.xpName}`);if(leveledUp)setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);}}/>}
             {tab==="practice" && <PracticeTab meds={meds} skills={skills} streaks={streaks} pending={pendingPractice} practiceTypes={practiceTypes} onAddType={addPracticeType} onDeleteType={deletePracticeType} onLog={logMed} onDelete={deleteMed} onEdit={editMed} onClearPending={()=>setPendingPractice(null)}/>}
-            {tab==="journal"  && <JournalTab entries={journal} onAdd={addJournalEntry} onDelete={deleteJournalEntry}/>}
+            {tab==="journal"  && <JournalTab entries={journal} skills={skills} quests={quests} onAdd={addJournalEntry} onDelete={deleteJournalEntry} onAwardXp={awardFromJournal} onEditQuest={editQuest}/>}
             {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} journal={journal} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest} aiMemory={aiMemory} onUpdateMemory={async(m)=>{setAiMemory(m);await dbSet("cx_aimem",m,userId);}}/>}
             {tab==="settings" && <SettingsTab showToast={showToast} onExport={exportData} onImport={importData} userId={userId} onSignIn={()=>setShowAuth(true)} onSignOut={handleSignOut}/>}
             {tab==="community" && <CommunityTab userId={userId} settings={settings} skills={skills} quests={quests} meds={meds} journal={journal} streaks={streaks} xp={xp} friends={friends} myFriendCode={myFriendCode} profiles={communityProfiles} onPublishProfile={publishProfile} onAddFriend={addFriend} onRemoveFriend={removeFriend} onRefresh={refreshCommunity} onEditSkillPublish={editSkillPublish} onEditQuestPublish={editQuestPublish} onSaveSettings={saveSettings} showToast={showToast}/>}
@@ -1175,11 +1201,14 @@ function QuestPlannerCard({quest,skills,onToggle,radiantAvailable,radiantCooldow
   const now=Date.now();
   const overdue=quest.due&&quest.due<now&&!quest.done;
   return (
-    <div className={`card quest-${quest.type} ${quest.done?"done":""}`}
-      style={{marginBottom:3,borderColor:locked?"var(--b1)":overdue?"var(--danger)":"var(--primaryb)",background:locked?"var(--bg)":"var(--primaryf)",opacity:locked?.55:1}}>
-      <button className="chk" style={locked?{color:"var(--tx3)",borderColor:"var(--b1)",cursor:"not-allowed"}:{color:"var(--primary)",borderColor:"var(--primaryb)"}}
-        onClick={()=>onToggle(quest.id)} title={locked?`Locked — complete "${prereqTitle}" first`:undefined}>
-        {locked?"🔒":quest.done?"✓":""}
+    <div className={`card quest-${quest.type} ${quest.done&&!isRadiant?"done":""}`}
+      style={{marginBottom:3,borderColor:locked?"var(--b1)":overdue?"var(--danger)":isRadiant?"var(--secondaryb)":"var(--primaryb)",background:locked?"var(--bg)":isRadiant?"var(--s2)":"var(--primaryf)",opacity:locked?.55:1}}>
+      <button className="chk"
+        style={locked?{color:"var(--tx3)",borderColor:"var(--b1)",cursor:"not-allowed"}
+          :isRadiant?{color:rAvail?"var(--secondary)":"var(--tx3)",borderColor:rAvail?"var(--secondaryb)":"var(--b1)",fontSize:rCool?7:undefined}
+          :{color:"var(--primary)",borderColor:"var(--primaryb)"}}
+        onClick={()=>onToggle(quest.id)} title={locked?`Locked — complete "${prereqTitle}" first`:rCool?`Available in ${rCool}`:undefined}>
+        {locked?"🔒":isRadiant?(rCool?rCool:"◉"):quest.done?"✓":""}
       </button>
       <div className="cbody">
         {locked&&<div style={{fontSize:9,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",marginBottom:2}}>after: {prereqTitle}</div>}
@@ -1396,12 +1425,6 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
         </select>
         <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0}} onClick={()=>setForm(null)}>✕</button>
       </div>
-      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-        <div className="label9" style={{flexShrink:0}}>Resets after</div>
-        <select className="fsel" style={{flex:1}} value={f.cooldown} onChange={e=>setF(v=>({...v,cooldown:Number(e.target.value)}))}>
-          {COOLDOWN_OPTIONS.map(o=><option key={o.ms} value={o.ms}>{o.label}</option>)}
-        </select>
-      </div>
       <textarea className="fi" rows={2} placeholder="Intention (optional)..." value={f.note} onChange={e=>setF(v=>({...v,note:e.target.value}))} style={{resize:"vertical",minHeight:44,fontFamily:"inherit",fontSize:12,marginBottom:4,width:"100%",boxSizing:"border-box"}}/>
       <div style={{marginBottom:6}}>
         <div className="label9" style={{marginBottom:5}}>Quest color</div>
@@ -1501,6 +1524,12 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
         </select>
         <input className="fi" type="date" style={{colorScheme:"dark",width:140}} value={f.dueDate} onChange={e=>setF(v=>({...v,dueDate:e.target.value}))}/>
         <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0}} onClick={()=>setForm(null)}>✕</button>
+      </div>
+      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+        <div className="label9" style={{flexShrink:0}}>Resets after</div>
+        <select className="fsel" style={{flex:1}} value={f.cooldown} onChange={e=>setF(v=>({...v,cooldown:Number(e.target.value)}))}>
+          {COOLDOWN_OPTIONS.map(o=><option key={o.ms} value={o.ms}>{o.label}</option>)}
+        </select>
       </div>
       <textarea className="fi" rows={2} placeholder="Intention (optional)..." value={f.note} onChange={e=>setF(v=>({...v,note:e.target.value}))} style={{resize:"vertical",minHeight:44,fontFamily:"inherit",fontSize:12,marginBottom:4,width:"100%",boxSizing:"border-box"}}/>
       <div style={{marginBottom:6}}>
@@ -3119,7 +3148,8 @@ function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,o
     if(!ef.title.trim()) return;
     const due=ef.dueDate?new Date(ef.dueDate+"T09:00").getTime():null;
     const newXp=xpSuggestion?.xp??(ef.xpVal!==null?ef.xpVal:quest.xpVal);
-    onEdit(quest.id,{title:ef.title.trim(),note:ef.note.trim(),due,skills:ef.skillIds,color:ef.color||null,priority:ef.priority,cooldown:ef.type==="radiant"?ef.cooldown:undefined,published:ef.published||false,notesPublic:ef.notesPublic||false,xpVal:newXp,type:ef.type,unlocksAfter:ef.unlocksAfter||null});
+    const wasMain=quest.type!=="radiant"; const nowRadiant=ef.type==="radiant";
+    onEdit(quest.id,{title:ef.title.trim(),note:ef.note.trim(),due,skills:ef.skillIds,color:ef.color||null,priority:ef.priority,cooldown:ef.type==="radiant"?ef.cooldown:undefined,published:ef.published||false,notesPublic:ef.notesPublic||false,xpVal:newXp,type:ef.type,unlocksAfter:ef.unlocksAfter||null,...(wasMain&&nowRadiant?{done:false,lastDone:null}:{})});
     setEditing(false); setXpSuggestion(null);
   };
   const suggestQuestXp=async()=>{
@@ -3346,13 +3376,17 @@ function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,o
 }
 
 // ─── JOURNAL TAB ────────────────────────────────────────────────────────────
-function JournalTab({entries,onAdd,onDelete}){
-  const {settings}=useSettings();
+function JournalTab({entries,skills,quests,onAdd,onDelete,onAwardXp,onEditQuest}){
+  const {settings}=useSettings(); const L=settings.labels;
   const [text,setText]=useState("");
   const [img,setImg]=useState(null);
   const [ocring,setOcring]=useState(false);
   const [showForm,setShowForm]=useState(false);
-  const [filter,setFilter]=useState("all"); // "all" | "practice" | "manual"
+  const [aiMode,setAiMode]=useState(false); // AI journal mode
+  const [aiParsing,setAiParsing]=useState(false);
+  const [proposal,setProposal]=useState(null); // {skills:[{id,name,xp,reason,accepted,editXp}], quests:[{id,name,accepted}], summary}
+  const [confirming,setConfirming]=useState(false);
+  const [filter,setFilter]=useState("all"); // "all" | "practice" | "manual" | "ai"
   const [story,setStory]=useState("");
   const [genning,setGenning]=useState(false);
   const [showStory,setShowStory]=useState(false);
@@ -3387,11 +3421,55 @@ function JournalTab({entries,onAdd,onDelete}){
 
   const submit=()=>{
     if(!text.trim()&&!img) return;
-    onAdd({text:text.trim(),img:img||null,source:"manual"});
-    setText(""); setImg(null); setShowForm(false);
+    if(aiMode&&text.trim()&&(skills?.length||quests?.length)){
+      parseWithAI();
+    } else {
+      onAdd({text:text.trim(),img:img||null,source:"manual"});
+      setText(""); setImg(null); setShowForm(false);
+    }
+  };
+
+  const parseWithAI=async()=>{
+    if(!text.trim()) return;
+    setAiParsing(true); setProposal(null);
+    try{
+      const skList=(skills||[]).filter(s=>s.type!=="subskill").map(s=>`${s.id}="${s.name}"`).join(", ")||"none";
+      const qList=(quests||[]).filter(q=>!q.done).map(q=>`${q.id}="${q.title}"`).join(", ")||"none";
+      const prompt=`You are analyzing a personal journal entry for a gamified life tracker.\n\nAvailable skills (id=name): ${skList}\nActive quests (id=title): ${qList}\n\nJournal entry:\n"${text.trim()}"\n\nAnalyze this entry and return JSON only (no markdown, no explanation):\n{\n  "skills": [{"id":"skill_id","name":"skill_name","xp":number_1_to_100,"reason":"why this skill, 8 words max"}],\n  "quests": [{"id":"quest_id","name":"quest_title"}],\n  "summary": "one sentence capturing the essence"\n}\n\nRules:\n- Only include skills genuinely reflected in the entry\n- XP should reflect time/effort described (mention of 2 hours ≈ 30-60xp, brief mention ≈ 5-15xp)\n- Only include quests clearly mentioned or worked on\n- If no skills/quests match, return empty arrays`;
+      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({max_tokens:400,messages:[{role:"user",content:prompt}]})
+      });
+      const data=await res.json();
+      const raw=data.choices?.[0]?.message?.content||"{}";
+      const m=raw.match(/\{[\s\S]*\}/);
+      const parsed=m?JSON.parse(m[0]):{skills:[],quests:[],summary:""};
+      // Validate IDs exist, attach accepted/editXp state
+      const validSkills=(parsed.skills||[]).filter(s=>(skills||[]).find(sk=>sk.id===s.id)).map(s=>({...s,accepted:true,editXp:s.xp}));
+      const validQuests=(parsed.quests||[]).filter(q=>(quests||[]).find(qq=>qq.id===q.id)).map(q=>({...q,accepted:true}));
+      setProposal({skills:validSkills,quests:validQuests,summary:parsed.summary||""});
+    }catch(e){setProposal({skills:[],quests:[],summary:"Couldn't parse — try again."});}
+    setAiParsing(false);
+  };
+
+  const confirmProposal=async()=>{
+    if(!proposal) return;
+    setConfirming(true);
+    const acceptedSkills=proposal.skills.filter(s=>s.accepted&&s.editXp>0);
+    const acceptedQuests=proposal.quests.filter(q=>q.accepted);
+    if(acceptedSkills.length&&onAwardXp){
+      await onAwardXp(acceptedSkills.map(s=>({skillId:s.id,xp:Number(s.editXp)||0,reason:s.reason})));
+    }
+    // Save journal entry with quest links and AI tag
+    const questIds=acceptedQuests.map(q=>q.id);
+    onAdd({text:text.trim(),img:img||null,source:"ai_journal",summary:proposal.summary,
+      linkedSkills:acceptedSkills.map(s=>({id:s.id,name:s.name,xp:Number(s.editXp)||0})),
+      linkedQuests:questIds,created:Date.now()});
+    setText(""); setImg(null); setProposal(null); setShowForm(false);
+    setConfirming(false);
   };
 
   const practiceEntries=entries.filter(e=>e.source==="practice");
+  const aiEntries=entries.filter(e=>e.source==="ai_journal");
   const canGenStory=practiceEntries.length>=3;
 
   const generateStory=async()=>{
@@ -3414,25 +3492,34 @@ function JournalTab({entries,onAdd,onDelete}){
     finally{ setGenning(false); }
   };
 
-  const filtered=filter==="all"?entries:entries.filter(e=>e.source===filter);
+  const filtered=filter==="all"?entries
+    :filter==="ai_journal"?entries.filter(e=>e.source==="ai_journal")
+    :entries.filter(e=>e.source===filter);
   const fmt=ts=>new Date(ts).toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"});
 
   return (<>
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
       <div className="slbl" style={{margin:0}}>Journal</div>
-      <button className="addbtn" style={{margin:0,padding:"5px 14px"}} onClick={()=>setShowForm(v=>!v)}>
-        {showForm?"Cancel":"+ New Entry"}
-      </button>
+      <div style={{display:"flex",gap:6}}>
+        {!showForm&&<button onClick={()=>{setAiMode(true);setShowForm(true);setProposal(null);}}
+          style={{margin:0,padding:"5px 12px",borderRadius:4,border:"1px solid var(--secondaryb)",background:"var(--s2)",color:"var(--secondary)",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.2,textTransform:"uppercase",cursor:"pointer"}}>
+          ✦ AI Entry
+        </button>}
+        <button className="addbtn" style={{margin:0,padding:"5px 14px"}} onClick={()=>{if(showForm){setShowForm(false);setProposal(null);setAiMode(false);}else{setAiMode(false);setShowForm(true);}}}>
+          {showForm?"Cancel":"+ Write"}
+        </button>
+      </div>
     </div>
 
     {/* Filter tabs */}
-    <div style={{display:"flex",gap:6,marginBottom:16}}>
-      {[["all","All"],["manual","Written"],["practice","Practice"]].map(([v,label])=>(
+    <div style={{display:"flex",gap:6,marginBottom:16,flexWrap:"wrap"}}>
+      {[["all","All"],["manual","Written"],["ai_journal","✦ AI"],["practice","Practice"]].map(([v,label])=>(
         <button key={v} onClick={()=>setFilter(v)}
           style={{padding:"4px 12px",borderRadius:20,fontSize:11,border:"1px solid var(--b2)",
-            background:filter===v?"var(--primaryb)":"var(--s1)",
-            color:filter===v?"var(--primary)":"var(--tx3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",letterSpacing:.5}}>
+            background:filter===v?v==="ai_journal"?"var(--secondaryf)":"var(--primaryb)":"var(--s1)",
+            color:filter===v?v==="ai_journal"?"var(--secondary)":"var(--primary)":"var(--tx3)",cursor:"pointer",fontFamily:"'DM Mono',monospace",letterSpacing:.5}}>
           {label} {v==="practice"&&practiceEntries.length>0&&<span style={{opacity:.7}}>({practiceEntries.length})</span>}
+          {v==="ai_journal"&&aiEntries.length>0&&<span style={{opacity:.7}}>({aiEntries.length})</span>}
         </button>
       ))}
     </div>
@@ -3470,13 +3557,18 @@ function JournalTab({entries,onAdd,onDelete}){
     )}
 
     {/* New entry form */}
-    {showForm&&(
+    {showForm&&!proposal&&(
       <div className="fwrap" style={{marginBottom:16}}>
+        {aiMode&&<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10,padding:"8px 10px",background:"var(--s2)",border:"1px solid var(--secondaryb)",borderRadius:4}}>
+          <span style={{color:"var(--secondary)",fontSize:12}}>✦</span>
+          <span style={{fontSize:11,color:"var(--tx2)",lineHeight:1.5}}>Write freely about your day. AI will detect which skills and quests you worked on and suggest XP — you review before anything is awarded.</span>
+        </div>}
         {img&&<img src={img} className="journal-img" alt="attached"/>}
-        <textarea className="fi full" placeholder="Write your entry... or attach a photo of your paper journal below."
+        <textarea className="fi full"
+          placeholder={aiMode?"Write about your day — what you worked on, how long, what happened. The more detail, the better the XP suggestions.":"Write your entry... or attach a photo of your paper journal below."}
           value={text} onChange={e=>setText(e.target.value)}
-          style={{minHeight:120,resize:"vertical",lineHeight:1.7}}/>
-        <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
+          style={{minHeight:aiMode?160:120,resize:"vertical",lineHeight:1.7}}/>
+        {!aiMode&&<div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
           <button className="fsbtn" style={{width:"auto",padding:"7px 14px",margin:0,background:"var(--s2)",color:"var(--tx2)",border:"1px solid var(--b2)"}}
             onClick={()=>fileRef.current?.click()}>
             {ocring?"◌ Reading image...":"📷 Attach / OCR Photo"}
@@ -3484,8 +3576,74 @@ function JournalTab({entries,onAdd,onDelete}){
           <a href="https://lens.google.com" target="_blank" rel="noreferrer"
             style={{fontSize:11,color:"var(--tx3)",textDecoration:"underline"}}>or Google Lens (free)</a>
           <input ref={fileRef} type="file" accept="image/*" style={{display:"none"}} onChange={handleImg}/>
+        </div>}
+        <button className="fsbtn" style={{marginTop:8,background:aiMode?"var(--secondaryf)":undefined,color:aiMode?"var(--secondary)":undefined,border:aiMode?"1px solid var(--secondaryb)":undefined}}
+          onClick={submit} disabled={aiParsing}>
+          {aiParsing?"✦ Reading entry...":aiMode?"✦ Analyse & Suggest XP":"Save Entry"}
+        </button>
+      </div>
+    )}
+
+    {/* AI proposal review */}
+    {proposal&&(
+      <div className="fwrap" style={{marginBottom:16,border:"1px solid var(--secondaryb)",background:"var(--s2)"}}>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,textTransform:"uppercase",color:"var(--secondary)",marginBottom:10}}>✦ Review XP proposal</div>
+        {proposal.summary&&<div style={{fontSize:12,color:"var(--tx2)",fontStyle:"italic",marginBottom:12,lineHeight:1.6,padding:"8px 10px",background:"var(--bg)",borderRadius:4,border:"1px solid var(--b1)"}}>{proposal.summary}</div>}
+
+        {proposal.skills.length>0&&<>
+          <div className="label9" style={{marginBottom:8}}>Skills detected</div>
+          {proposal.skills.map((s,i)=>(
+            <div key={s.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:8,padding:"8px 10px",background:"var(--bg)",border:`1px solid ${s.accepted?"var(--secondaryb)":"var(--b1)"}`,borderRadius:6,opacity:s.accepted?1:.5}}>
+              <button onClick={()=>setProposal(p=>({...p,skills:p.skills.map((sk,j)=>j===i?{...sk,accepted:!sk.accepted}:sk)}))}
+                style={{width:18,height:18,borderRadius:3,border:`1px solid ${s.accepted?"var(--secondary)":"var(--b2)"}`,background:s.accepted?"var(--secondaryf)":"none",color:"var(--secondary)",fontFamily:"'DM Mono',monospace",fontSize:9,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                {s.accepted?"✓":""}
+              </button>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:12,color:"var(--tx)",fontWeight:500}}>{s.name}</div>
+                <div style={{fontSize:10,color:"var(--tx3)",marginTop:1}}>{s.reason}</div>
+              </div>
+              <div style={{display:"flex",alignItems:"center",gap:4,flexShrink:0}}>
+                <input type="number" min={1} max={500} value={s.editXp}
+                  onChange={e=>setProposal(p=>({...p,skills:p.skills.map((sk,j)=>j===i?{...sk,editXp:Number(e.target.value)||0}:sk)}))}
+                  style={{width:44,background:"var(--bg)",border:"1px solid var(--b1)",borderRadius:3,color:"var(--secondary)",fontSize:11,fontFamily:"'DM Mono',monospace",padding:"2px 5px",textAlign:"center",outline:"none"}}/>
+                <span style={{fontSize:10,color:"var(--tx3)",fontFamily:"'DM Mono',monospace"}}>{L.xpName}</span>
+              </div>
+            </div>
+          ))}
+        </>}
+
+        {proposal.quests.length>0&&<>
+          <div className="label9" style={{marginBottom:8,marginTop:proposal.skills.length?12:0}}>Quests mentioned</div>
+          {proposal.quests.map((q,i)=>(
+            <div key={q.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6,padding:"6px 10px",background:"var(--bg)",border:`1px solid ${q.accepted?"var(--primaryb)":"var(--b1)"}`,borderRadius:6,opacity:q.accepted?1:.5}}>
+              <button onClick={()=>setProposal(p=>({...p,quests:p.quests.map((qq,j)=>j===i?{...qq,accepted:!qq.accepted}:qq)}))}
+                style={{width:18,height:18,borderRadius:3,border:`1px solid ${q.accepted?"var(--primary)":"var(--b2)"}`,background:q.accepted?"var(--primaryf)":"none",color:"var(--primary)",fontFamily:"'DM Mono',monospace",fontSize:9,cursor:"pointer",flexShrink:0,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                {q.accepted?"✓":""}
+              </button>
+              <div style={{flex:1}}>
+                <div style={{fontSize:12,color:"var(--tx)"}}>◆ {q.name}</div>
+                <div style={{fontSize:10,color:"var(--tx3)",marginTop:1}}>Activity will be noted in journal</div>
+              </div>
+            </div>
+          ))}
+        </>}
+
+        {proposal.skills.length===0&&proposal.quests.length===0&&(
+          <div style={{fontSize:12,color:"var(--tx3)",fontStyle:"italic",marginBottom:12}}>No skills or quests detected — entry will be saved as a plain journal note.</div>
+        )}
+
+        <div style={{display:"flex",gap:8,marginTop:12}}>
+          <button className="fsbtn" style={{flex:1,background:"var(--secondaryf)",color:"var(--secondary)",border:"1px solid var(--secondaryb)"}}
+            onClick={confirmProposal} disabled={confirming}>
+            {confirming?"Saving...":"✓ Confirm & Award XP"}
+          </button>
+          <button className="fsbtn" style={{width:"auto",padding:"8px 14px",background:"var(--s2)",color:"var(--tx3)",border:"1px solid var(--b1)"}}
+            onClick={()=>{setProposal(null);}}>
+            Edit
+          </button>
+          <button className="fsbtn" style={{width:"auto",padding:"8px 14px",background:"none",color:"var(--tx3)",border:"1px solid var(--b1)"}}
+            onClick={()=>{setProposal(null);setText("");setShowForm(false);setAiMode(false);}}>✕</button>
         </div>
-        <button className="fsbtn" onClick={submit}>Save Entry</button>
       </div>
     )}
 
@@ -3496,16 +3654,29 @@ function JournalTab({entries,onAdd,onDelete}){
     )}
 
     {filtered.map(e=>(
-      <div key={e.id} className={`journal-entry${e.source==="practice"?" practice-entry":""}`}>
+      <div key={e.id} className={`journal-entry${e.source==="practice"?" practice-entry":e.source==="ai_journal"?" ai-journal-entry":""}`}>
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start"}}>
-          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+          <div style={{display:"flex",gap:8,alignItems:"center",flexWrap:"wrap"}}>
             <div className="journal-date">{fmt(e.created)}</div>
             {e.source==="practice"&&<span style={{fontSize:8,fontFamily:"'DM Mono',monospace",letterSpacing:1,color:"var(--secondary)",border:"1px solid var(--secondaryb)",borderRadius:10,padding:"1px 6px"}}>PRACTICE</span>}
+            {e.source==="ai_journal"&&<span style={{fontSize:8,fontFamily:"'DM Mono',monospace",letterSpacing:1,color:"var(--secondary)",border:"1px solid var(--secondaryb)",borderRadius:10,padding:"1px 6px"}}>✦ AI</span>}
           </div>
           <button className="delbtn" style={{fontSize:9}} onClick={()=>onDelete(e.id)}>✕</button>
         </div>
+        {e.summary&&<div style={{fontSize:11,color:"var(--secondary)",fontStyle:"italic",marginBottom:6,lineHeight:1.5}}>"{e.summary}"</div>}
         {e.img&&<img src={e.img} className="journal-img" alt="journal page"/>}
         {e.text&&<div className="journal-text">{e.text}</div>}
+        {(e.linkedSkills?.length>0||e.linkedQuests?.length>0)&&(
+          <div style={{display:"flex",flexWrap:"wrap",gap:4,marginTop:8}}>
+            {(e.linkedSkills||[]).map(s=>(
+              <span key={s.id} style={{fontSize:9,fontFamily:"'DM Mono',monospace",letterSpacing:.5,color:"var(--secondary)",border:"1px solid var(--secondaryb)",borderRadius:10,padding:"2px 8px"}}>+{s.xp} {s.name}</span>
+            ))}
+            {(e.linkedQuests||[]).map(qId=>{
+              const q=(quests||[]).find(qq=>qq.id===qId);
+              return q?<span key={qId} style={{fontSize:9,fontFamily:"'DM Mono',monospace",letterSpacing:.5,color:"var(--primary)",border:"1px solid var(--primaryb)",borderRadius:10,padding:"2px 8px"}}>◆ {q.title}</span>:null;
+            })}
+          </div>
+        )}
       </div>
     ))}
   </>);
