@@ -3,6 +3,7 @@ import AuthScreen from "./AuthScreen";
 import { supabase, getSession, onAuthChange, signOut, loadUserData, saveField, migrateLocalStorage } from "./supabase";
 
 const GFONTS = `@import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;1,300&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');`;
+const GFONTS_RPG = `@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Cinzel+Decorative:wght@400;700&family=DM+Mono:ital,wght@0,300;0,400;1,300&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');`;
 const SettingsCtx = createContext(null);
 const COOLDOWN_OPTIONS=[
   {label:"Instant",ms:0},
@@ -68,6 +69,48 @@ function SkIcon({s, sz=14, style={}}){
 }
 // For contexts that can't render JSX (option text etc) — just show name without broken icon
 function skillLabel(s){ return s.customImg ? s.name : `${s.icon} ${s.name}`; }
+
+// Compress an image file to a small base64 JPEG for storage
+function compressImage(file, maxPx=200, quality=0.82){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const img=new Image();
+      img.onload=()=>{
+        const scale=Math.min(1,maxPx/Math.max(img.width,img.height));
+        const w=Math.round(img.width*scale), h=Math.round(img.height*scale);
+        const c=document.createElement("canvas"); c.width=w; c.height=h;
+        c.getContext("2d").drawImage(img,0,0,w,h);
+        resolve(c.toDataURL("image/jpeg",quality));
+      };
+      img.onerror=reject;
+      img.src=ev.target.result;
+    };
+    reader.onerror=reject;
+    reader.readAsDataURL(file);
+  });
+}
+// Compress to a wider banner size
+function compressBanner(file, maxW=800, maxH=240, quality=0.80){
+  return new Promise((resolve,reject)=>{
+    const reader=new FileReader();
+    reader.onload=ev=>{
+      const img=new Image();
+      img.onload=()=>{
+        const scale=Math.min(1,maxW/img.width,maxH/img.height);
+        const w=Math.round(img.width*scale), h=Math.round(img.height*scale);
+        const c=document.createElement("canvas"); c.width=w; c.height=h;
+        c.getContext("2d").drawImage(img,0,0,w,h);
+        resolve(c.toDataURL("image/jpeg",quality));
+      };
+      img.onerror=reject;
+      img.src=ev.target.result;
+    };
+    reader.onerror=reject;
+    reader.readAsDataURL(file);
+  });
+}
+
 const useSettings = () => useContext(SettingsCtx);
 
 const DEFAULT_SETTINGS = {
@@ -78,7 +121,7 @@ const DEFAULT_SETTINGS = {
     practiceTab:"Practice", advisorTab:"Advisor", settingsTab:"Settings", journalTab:"Journal",
     mainQuest:"Main Quest", sideQuest:"Side Quest", radiantQuest:"Radiant Quest",
     mainXp:"80", sideXp:"50", radiantXp:"30",
-    daily:"Daily", weekly:"Weekly", monthly:"Monthly",
+    daily:"Daily", weekly:"Weekly", monthly:"Monthly", yearly:"Yearly",
     xpName:"XP", levelName:"LVL", done:"Done", completed:"Completed",
     radiantDesc:"Recurring practices. Embodied, not completed.",
     skillsDesc:"Skills level up as you complete tagged tasks and quests.",
@@ -89,6 +132,7 @@ const DEFAULT_SETTINGS = {
   xp: { globalPerLevel:600, skillPerLevel:6000, practicePerMin:1, aiScoring:true },
   fontSize: 14,
   contentWidth: 700,
+  uiMode: "rpg",
 };
 
 const THEME_PRESETS = [
@@ -195,7 +239,7 @@ const TAB_EXPLAINERS = {
   advisor:  {icon:"✦",title:"Advisor",  body:"An AI that knows your full system — skills, quests, tasks, streaks, history. Ask anything or think out loud. It can create quests and tasks directly from conversation.",tip:"The more you've built in other tabs, the more useful it becomes."},
   settings: {icon:"⚙",title:"Settings", body:"Customize name, font size, theme, colors, XP rates, and tab labels. Changes save immediately. Export full data as JSON for backup.",tip:"Font size S/M/L/XL is at the top of the Profile section."},
 };
-const PERIODS = ["daily","weekly","monthly"];
+const PERIODS = ["daily","weekly","monthly","yearly"];
 
 
 function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
@@ -315,11 +359,58 @@ async function dbSet(k,v,userId){
   if(userId&&supabase){ const col=KEY_MAP[k]; if(col) await saveField(userId,col,v); }
 }
 
-function buildCSS(C,T,FS=14){
+function buildCSS(C,T,FS=14,MODE="rpg"){
   const t={...THEME_PRESETS[0],...T};
   const hb=t.bg.length===7?t.bg+"f5":t.bg;
   const f=FS||14; const f2=Math.round(f*0.857); const f3=Math.round(f*0.785);
-  return `${GFONTS}
+  const fonts = MODE==="rpg" ? GFONTS_RPG : GFONTS;
+
+  const rpgExtras = MODE==="rpg" ? `
+/* ── RPG MODE ── */
+@keyframes grain{0%,100%{transform:translate(0,0)}10%{transform:translate(-2%,-3%)}30%{transform:translate(3%,-1%)}50%{transform:translate(-1%,2%)}70%{transform:translate(2%,3%)}90%{transform:translate(-3%,1%)}}
+body::after{content:'';position:fixed;inset:-200%;width:400%;height:400%;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");animation:grain 8s steps(1) infinite;pointer-events:none;z-index:999;opacity:.4;}
+.hdr-title{font-family:'Cinzel',serif;font-size:10px;letter-spacing:2px;color:var(--tx2);}
+.side-title{font-family:'Cinzel',serif;font-size:9px;letter-spacing:2px;color:var(--tx2);}
+.lv-badge{font-family:'Cinzel',serif !important;letter-spacing:2px;box-shadow:0 0 14px var(--primaryb),0 0 4px var(--primaryb);}
+.side-lv{font-family:'Cinzel',serif !important;letter-spacing:2px;box-shadow:0 0 10px var(--primaryb);}
+.xp-fill{box-shadow:0 0 6px var(--primaryb);}
+.sk-bar{box-shadow:0 0 4px currentColor;}
+.nbtn.on::before{box-shadow:0 0 10px var(--primary),0 0 4px var(--primary);}
+.slink.on{box-shadow:inset 2px 0 8px var(--primaryb);}
+.card.quest-main{box-shadow:inset 2px 0 12px var(--primaryb);}
+.card.quest-radiant{box-shadow:inset 2px 0 12px var(--secondaryb);}
+.slbl{font-family:'DM Mono',monospace;letter-spacing:2.5px;}
+.sk-streak{box-shadow:0 0 8px var(--primaryb);}
+.toast{box-shadow:0 0 16px var(--primaryb),0 4px 20px #0008;}
+.ui-mode-btn{background:var(--bg);border:1px solid var(--b2);border-radius:4px;color:var(--tx3);font-family:'DM Mono',monospace;font-size:8px;letter-spacing:1.5px;text-transform:uppercase;padding:8px 12px;cursor:pointer;flex:1;transition:all .15s;}
+.ui-mode-btn:hover{border-color:var(--b3);color:var(--tx2);}
+.ui-mode-btn.on{background:var(--primaryf);border-color:var(--primaryb);color:var(--primary);box-shadow:0 0 8px var(--primaryb);}
+` : MODE==="minimal" ? `
+/* ── MINIMAL MODE ── */
+.lv-badge{box-shadow:none;border-radius:3px;letter-spacing:.5px;}
+.side-lv{box-shadow:none;border-radius:3px;}
+.xp-fill{background:var(--primary);box-shadow:none;}
+.sk-bar{box-shadow:none;}
+.nbtn.on::before{box-shadow:none;}
+.slink.on{box-shadow:none;}
+.card.quest-main{box-shadow:none;}
+.card.quest-radiant{box-shadow:none;}
+.card{border-radius:3px;}
+.sk-streak{box-shadow:none;}
+.toast{box-shadow:0 2px 8px #0006;}
+:root{--r:3px;}
+.slbl::after{display:none;}
+.slbl{letter-spacing:1px;opacity:.7;}
+.ui-mode-btn{background:var(--bg);border:1px solid var(--b2);border-radius:3px;color:var(--tx3);font-family:'DM Mono',monospace;font-size:8px;letter-spacing:1.5px;text-transform:uppercase;padding:8px 12px;cursor:pointer;flex:1;transition:all .15s;}
+.ui-mode-btn:hover{border-color:var(--b3);color:var(--tx2);}
+.ui-mode-btn.on{background:var(--s2);border-color:var(--b3);color:var(--tx);}
+` : `
+/* ── AI / CUSTOM MODE ── */
+.ui-mode-btn{background:var(--bg);border:1px solid var(--b2);border-radius:4px;color:var(--tx3);font-family:'DM Mono',monospace;font-size:8px;letter-spacing:1.5px;text-transform:uppercase;padding:8px 12px;cursor:pointer;flex:1;transition:all .15s;}
+.ui-mode-btn:hover{border-color:var(--b3);color:var(--tx2);}
+.ui-mode-btn.on{background:var(--primaryf);border-color:var(--primaryb);color:var(--primary);}
+`;
+  return `${fonts}
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
 :root{--bg:${t.bg};--s1:${t.s1};--s2:${t.s2};--b1:${t.b1};--b2:${t.b2};--b3:${t.tx3};--tx:${t.tx};--tx2:${t.tx2};--tx3:${t.tx3};--primary:${C.primary};--primaryf:${C.primary}22;--primaryb:${C.primary}40;--secondary:${C.secondary};--secondaryf:${C.secondary}18;--secondaryb:${C.secondary}38;--success:${C.success};--successf:${C.success}18;--danger:${C.danger};--dangerf:${C.danger}20;--r:5px;}
 body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;font-weight:300;-webkit-font-smoothing:antialiased;font-size:${f}px;}
@@ -647,7 +738,7 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 .tx3{color:var(--tx3);}
 .tx2{color:var(--tx2);}
 .card-row{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:8px 12px;margin-bottom:4px;}
-`;}
+${rpgExtras}`;}
 
 
 function NotifPrompt({dueDate,dueTime,title}){
@@ -827,7 +918,7 @@ export default function App(){
     }
   };
   const L=settings.labels; const C=settings.colors; const TH=settings.theme;
-  const css=useMemo(()=>buildCSS(C,TH,settings.fontSize||14),[C,TH,settings.fontSize]);
+  const css=useMemo(()=>buildCSS(C,TH,settings.fontSize||14,settings.uiMode||"rpg"),[C,TH,settings.fontSize,settings.uiMode]);
 
   const showToast=useCallback(msg=>{
     if(toastRef.current) clearTimeout(toastRef.current);
@@ -1185,7 +1276,8 @@ export default function App(){
   const periodTasks=useMemo(()=>{
     if(period==="daily") return tasks.filter(t=>t.period==="daily"&&t.dayKey===todayKey());
     if(period==="weekly") return tasks.filter(t=>t.period==="weekly");
-    return tasks.filter(t=>t.period==="monthly");
+    if(period==="monthly") return tasks.filter(t=>t.period==="monthly");
+    return tasks.filter(t=>t.period==="yearly");
   },[tasks,period]);
   // Must be before any conditional returns — hooks cannot be after early returns
   const ctxValue=useMemo(()=>({settings,saveSettings}),[settings,saveSettings]);
@@ -1490,12 +1582,13 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
 
   return (<>
     <div className="stabs">
-      {[L.daily,L.weekly,L.monthly].map((lbl,i)=>(
+      {[L.daily,L.weekly,L.monthly,L.yearly].map((lbl,i)=>(
         <button key={i} className={`stab ${period===PERIODS[i]?"on":""}`} onClick={()=>{setPeriod(PERIODS[i]);setShowForm(false);}}>{lbl}</button>
       ))}
     </div>
     {period==="daily"&&<div className="date-hdr">{todayLabel()}</div>}
     {period==="monthly"&&<div className="date-hdr">{monthLabel()}</div>}
+    {period==="yearly"&&<div className="date-hdr">{new Date().getFullYear()} — Annual Goals</div>}
     {period==="weekly"&&<div className="date-hdr">Week of {weekDays[0]?.toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>}
 
     {period==="daily"&&<>
@@ -1609,6 +1702,48 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
     }))}
 
     {period==="monthly"&&(()=>{const now2=new Date();const mq=questsForMonth(now2.getFullYear(),now2.getMonth());return mq.length>0?<><div className="slbl" style={{marginBottom:6}}>◆ Quests this month</div>{mq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}</>:null;})()}
+
+    {period==="monthly"&&tasks.length>0&&<>
+      <div className="slbl" style={{marginBottom:8,marginTop:12}}>◎ Monthly Tasks</div>
+      {tasks.map(t=>(
+        <div key={t.id} className={`card${t.done?" done":""}`} style={{marginBottom:4,opacity:t.done?.5:1}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <input type="checkbox" checked={!!t.done} onChange={()=>onToggle(t.id)} style={{accentColor:"var(--primary)",width:14,height:14,flexShrink:0}}/>
+            <span style={{flex:1,fontSize:13,color:t.done?"var(--tx3)":"var(--tx)",textDecoration:t.done?"line-through":"none"}}>{t.title}</span>
+            <button className="delbtn" onClick={()=>onDelete(t.id)}>✕</button>
+          </div>
+        </div>
+      ))}
+    </>}
+    {period==="monthly"&&tasks.length===0&&<div style={{fontSize:12,color:"var(--tx3)",fontStyle:"italic",padding:"16px 0",textAlign:"center"}}>No monthly tasks yet — add one above.</div>}
+
+    {period==="yearly"&&(()=>{
+      const yr=new Date().getFullYear();
+      const yearQuests=(quests||[]).filter(q=>{if(!q.due)return false;const d=new Date(q.due);return d.getFullYear()===yr;});
+      return(<>
+        {yearQuests.length>0&&<>
+          <div className="slbl" style={{marginBottom:6}}>◆ Quests due this year</div>
+          {yearQuests.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}
+          <div style={{height:16}}/>
+        </>}
+        {tasks.length>0&&<>
+          <div className="slbl" style={{marginBottom:8}}>◎ Annual Goals</div>
+          {tasks.map(t=>(
+            <div key={t.id} className={`card${t.done?" done":""}`} style={{marginBottom:4,opacity:t.done?.5:1}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <input type="checkbox" checked={!!t.done} onChange={()=>onToggle(t.id)} style={{accentColor:"var(--primary)",width:14,height:14,flexShrink:0}}/>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,color:t.done?"var(--tx3)":"var(--tx)",textDecoration:t.done?"line-through":"none"}}>{t.title}</div>
+                  {t.skill&&<div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)",marginTop:2}}>◈ {skills.find(s=>s.id===t.skill)?.name||""}</div>}
+                </div>
+                <button className="delbtn" onClick={()=>onDelete(t.id)}>✕</button>
+              </div>
+            </div>
+          ))}
+        </>}
+        {tasks.length===0&&yearQuests.length===0&&<div style={{fontSize:12,color:"var(--tx3)",fontStyle:"italic",padding:"16px 0",textAlign:"center"}}>No annual goals yet — add one above.</div>}
+      </>);
+    })()}
   </>);
 }
 
@@ -1620,16 +1755,26 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
   const [filterPrio,setFilterPrio]=useState("");
   const [sortBy,setSortBy]=useState("manual"); // "manual" | "priority" | "due"
   const [viewMode,setViewMode]=useState("list"); // "list" | "roadmap"
-  const [f,setF]=useState({title:"",skillIds:[],note:"",dueDate:"",type:"main",priority:"med",color:null,cooldown:60*60*1000});
+  const [f,setF]=useState({title:"",skillIds:[],note:"",dueDate:"",type:"main",priority:"med",color:null,cooldown:60*60*1000,customImg:null,banner:null});
   const [qXpSug,setQXpSug]=useState(null);
   const [qXpLoad,setQXpLoad]=useState(false);
-  const openForm=t=>{ setForm(t); setF({title:"",skillIds:[],note:"",dueDate:"",type:t,priority:"med",color:null,cooldown:60*60*1000}); setQXpSug(null); };
+  const openForm=t=>{ setForm(t); setF({title:"",skillIds:[],note:"",dueDate:"",type:t,priority:"med",color:null,cooldown:60*60*1000,customImg:null,banner:null}); setQXpSug(null); };
   const toggleQSkill=id=>setF(v=>{const next=v.skillIds.includes(id)?v.skillIds.filter(x=>x!==id):[...v.skillIds,id];const auto=next.length>0?(skills.find(s=>s.id===next[0])?.color)||null:null;return {...v,skillIds:next,color:v.color!==null?v.color:auto};});
   const submit=()=>{
     if(!f.title.trim()) return;
     const due=f.dueDate?new Date(f.dueDate+"T09:00").getTime():null;
-    onAdd({title:f.title.trim(),type:form,skills:f.skillIds,note:f.note.trim(),due,priority:f.priority,color:f.color||null,xpVal:qXpSug?.xp||null,cooldown:f.cooldown});
+    onAdd({title:f.title.trim(),type:form,skills:f.skillIds,note:f.note.trim(),due,priority:f.priority,color:f.color||null,xpVal:qXpSug?.xp||null,cooldown:f.cooldown,customImg:f.customImg||null,banner:f.banner||null});
     setForm(null); setQXpSug(null);
+  };
+  const handleQuestImg=async e=>{
+    const file=e.target.files[0]; if(!file) return;
+    try{ const b64=await compressImage(file,200,0.85); setF(v=>({...v,customImg:b64})); }
+    catch{ const r=new FileReader(); r.onload=ev=>setF(v=>({...v,customImg:ev.target.result})); r.readAsDataURL(file); }
+  };
+  const handleQuestBanner=async e=>{
+    const file=e.target.files[0]; if(!file) return;
+    try{ const b64=await compressBanner(file,800,240,0.78); setF(v=>({...v,banner:b64})); }
+    catch{ const r=new FileReader(); r.onload=ev=>setF(v=>({...v,banner:ev.target.result})); r.readAsDataURL(file); }
   };
   const suggestNewQuestXp=async()=>{
     if(!f.title.trim()) return;
@@ -1710,6 +1855,30 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
           <div onClick={()=>setF(v=>({...v,color:null}))} style={{width:18,height:18,borderRadius:"50%",background:"var(--bg)",cursor:"pointer",border:!f.color?"2px solid var(--tx)":"2px solid var(--b2)",fontSize:9,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--tx3)"}} title="Auto from skill">∅</div>
         </div>
       </div>
+      <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"flex-start"}}>
+        <div style={{flex:1}}>
+          <div className="label9" style={{marginBottom:5}}>Icon <span style={{opacity:.5,fontWeight:"normal",textTransform:"none",letterSpacing:0}}>(opt)</span></div>
+          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
+            {f.customImg
+              ?<img src={f.customImg} style={{width:36,height:36,borderRadius:4,objectFit:"cover",border:"1px solid var(--b2)"}}/>
+              :<div style={{width:36,height:36,borderRadius:4,background:"var(--bg)",border:"1px dashed var(--b2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"var(--tx3)"}}>◆</div>}
+            <input type="file" accept="image/*" style={{display:"none"}} onChange={handleQuestImg}/>
+            <span className="fsbtn" style={{width:"auto",padding:"4px 8px",margin:0,fontSize:9}}>{f.customImg?"Change":"Upload"}</span>
+            {f.customImg&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setF(v=>({...v,customImg:null}))}>✕</button>}
+          </label>
+        </div>
+        <div style={{flex:2}}>
+          <div className="label9" style={{marginBottom:5}}>Banner <span style={{opacity:.5,fontWeight:"normal",textTransform:"none",letterSpacing:0}}>(opt)</span></div>
+          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
+            {f.banner
+              ?<img src={f.banner} style={{height:36,maxWidth:100,borderRadius:3,objectFit:"cover",border:"1px solid var(--b2)"}}/>
+              :<div style={{height:36,width:80,borderRadius:3,background:"var(--bg)",border:"1px dashed var(--b2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",letterSpacing:.5}}>banner</div>}
+            <input type="file" accept="image/*" style={{display:"none"}} onChange={handleQuestBanner}/>
+            <span className="fsbtn" style={{width:"auto",padding:"4px 8px",margin:0,fontSize:9}}>{f.banner?"Change":"Upload"}</span>
+            {f.banner&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setF(v=>({...v,banner:null}))}>✕</button>}
+          </label>
+        </div>
+      </div>
             <button className="fsbtn secondary" style={{marginBottom:4}} onClick={suggestNewQuestXp} disabled={qXpLoad||!f.title.trim()}>
         {qXpLoad?"thinking...":"⟡ AI XP opinion"}
       </button>
@@ -1763,6 +1932,30 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
           <div onClick={()=>setF(v=>({...v,color:null}))} style={{width:18,height:18,borderRadius:"50%",background:"var(--bg)",cursor:"pointer",border:!f.color?"2px solid var(--tx)":"2px solid var(--b2)",fontSize:9,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--tx3)"}} title="Auto from skill">∅</div>
         </div>
       </div>
+      <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"flex-start"}}>
+        <div style={{flex:1}}>
+          <div className="label9" style={{marginBottom:5}}>Icon <span style={{opacity:.5,fontWeight:"normal",textTransform:"none",letterSpacing:0}}>(opt)</span></div>
+          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
+            {f.customImg
+              ?<img src={f.customImg} style={{width:36,height:36,borderRadius:4,objectFit:"cover",border:"1px solid var(--b2)"}}/>
+              :<div style={{width:36,height:36,borderRadius:4,background:"var(--bg)",border:"1px dashed var(--b2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"var(--tx3)"}}>◆</div>}
+            <input type="file" accept="image/*" style={{display:"none"}} onChange={handleQuestImg}/>
+            <span className="fsbtn" style={{width:"auto",padding:"4px 8px",margin:0,fontSize:9}}>{f.customImg?"Change":"Upload"}</span>
+            {f.customImg&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setF(v=>({...v,customImg:null}))}>✕</button>}
+          </label>
+        </div>
+        <div style={{flex:2}}>
+          <div className="label9" style={{marginBottom:5}}>Banner <span style={{opacity:.5,fontWeight:"normal",textTransform:"none",letterSpacing:0}}>(opt)</span></div>
+          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
+            {f.banner
+              ?<img src={f.banner} style={{height:36,maxWidth:100,borderRadius:3,objectFit:"cover",border:"1px solid var(--b2)"}}/>
+              :<div style={{height:36,width:80,borderRadius:3,background:"var(--bg)",border:"1px dashed var(--b2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",letterSpacing:.5}}>banner</div>}
+            <input type="file" accept="image/*" style={{display:"none"}} onChange={handleQuestBanner}/>
+            <span className="fsbtn" style={{width:"auto",padding:"4px 8px",margin:0,fontSize:9}}>{f.banner?"Change":"Upload"}</span>
+            {f.banner&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setF(v=>({...v,banner:null}))}>✕</button>}
+          </label>
+        </div>
+      </div>
             <button className="fsbtn secondary" style={{marginBottom:4}} onClick={suggestNewQuestXp} disabled={qXpLoad||!f.title.trim()}>
         {qXpLoad?"thinking...":"⟡ AI XP opinion"}
       </button>
@@ -1814,6 +2007,30 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
         <div style={{display:"flex",flexWrap:"wrap",gap:4,alignItems:"center"}}>
           {SKILL_COLORS.map(c=><div key={c} onClick={()=>setF(v=>({...v,color:c}))} style={{width:18,height:18,borderRadius:"50%",background:c,cursor:"pointer",border:f.color===c?"2px solid var(--tx)":"2px solid transparent",flexShrink:0}}/>)}
           <div onClick={()=>setF(v=>({...v,color:null}))} style={{width:18,height:18,borderRadius:"50%",background:"var(--bg)",cursor:"pointer",border:!f.color?"2px solid var(--tx)":"2px solid var(--b2)",fontSize:9,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--tx3)"}} title="Auto from skill">∅</div>
+        </div>
+      </div>
+      <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"flex-start"}}>
+        <div style={{flex:1}}>
+          <div className="label9" style={{marginBottom:5}}>Icon <span style={{opacity:.5,fontWeight:"normal",textTransform:"none",letterSpacing:0}}>(opt)</span></div>
+          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
+            {f.customImg
+              ?<img src={f.customImg} style={{width:36,height:36,borderRadius:4,objectFit:"cover",border:"1px solid var(--b2)"}}/>
+              :<div style={{width:36,height:36,borderRadius:4,background:"var(--bg)",border:"1px dashed var(--b2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"var(--tx3)"}}>◆</div>}
+            <input type="file" accept="image/*" style={{display:"none"}} onChange={handleQuestImg}/>
+            <span className="fsbtn" style={{width:"auto",padding:"4px 8px",margin:0,fontSize:9}}>{f.customImg?"Change":"Upload"}</span>
+            {f.customImg&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setF(v=>({...v,customImg:null}))}>✕</button>}
+          </label>
+        </div>
+        <div style={{flex:2}}>
+          <div className="label9" style={{marginBottom:5}}>Banner <span style={{opacity:.5,fontWeight:"normal",textTransform:"none",letterSpacing:0}}>(opt)</span></div>
+          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
+            {f.banner
+              ?<img src={f.banner} style={{height:36,maxWidth:100,borderRadius:3,objectFit:"cover",border:"1px solid var(--b2)"}}/>
+              :<div style={{height:36,width:80,borderRadius:3,background:"var(--bg)",border:"1px dashed var(--b2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",letterSpacing:.5}}>banner</div>}
+            <input type="file" accept="image/*" style={{display:"none"}} onChange={handleQuestBanner}/>
+            <span className="fsbtn" style={{width:"auto",padding:"4px 8px",margin:0,fontSize:9}}>{f.banner?"Change":"Upload"}</span>
+            {f.banner&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setF(v=>({...v,banner:null}))}>✕</button>}
+          </label>
         </div>
       </div>
             <button className="fsbtn secondary" style={{marginBottom:4}} onClick={suggestNewQuestXp} disabled={qXpLoad||!f.title.trim()}>
@@ -2166,13 +2383,13 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
   const [collapsedGroups,setCollapsedGroups]=useState(new Set());
   const toggleGroup=id=>setCollapsedGroups(prev=>{const n=new Set(prev);n.has(id)?n.delete(id):n.add(id);return n;});
   const [editingId,setEditingId]=useState(null);
-  const [ef,setEf]=useState({name:"",icon:"◈",color:SKILL_COLORS[0],customImg:null,intention:"",category:"other",published:false,notesPublic:false});
+  const [ef,setEf]=useState({name:"",icon:"◈",color:SKILL_COLORS[0],customImg:null,cardBg:null,intention:"",category:"other",published:false,notesPublic:false});
 
   // add form state (shared, type toggled)
   const [showForm,setShowForm]=useState(false);
   const [formType,setFormType]=useState("skill");
   const [showPresets,setShowPresets]=useState(false);
-  const [f,setF]=useState({name:"",icon:"◈",color:SKILL_COLORS[0],startLevel:1,customImg:null});
+  const [f,setF]=useState({name:"",icon:"◈",color:SKILL_COLORS[0],startLevel:1,customImg:null,cardBg:null});
 
   // drag state — HTML5 drag API (fixes pointer-capture bug)
   const [dragId,setDragId]=useState(null);
@@ -2253,20 +2470,24 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
   const submit=()=>{
     if(!f.name.trim()) return;
     const startXp=(Math.max(1,Number(f.startLevel)||1)-1)*skPerLv;
-    onAdd({name:f.name.trim(),icon:f.icon,color:f.color,startXp,customImg:f.customImg||null,type:formType,parentIds:[]});
-    setF({name:"",icon:"◈",color:SKILL_COLORS[0],startLevel:1,customImg:null}); setShowForm(false);
+    onAdd({name:f.name.trim(),icon:f.icon,color:f.color,startXp,customImg:f.customImg||null,cardBg:f.cardBg||null,type:formType,parentIds:[]});
+    setF({name:"",icon:"◈",color:SKILL_COLORS[0],startLevel:1,customImg:null,cardBg:null}); setShowForm(false);
   };
-  const openEdit=s=>{setEf({name:s.name,icon:s.icon,color:s.color,customImg:s.customImg||null,intention:s.intention||"",category:s.category||"other",published:s.published||false,notesPublic:s.notesPublic||false});setEditingId(s.id);};
+  const openEdit=s=>{setEf({name:s.name,icon:s.icon,color:s.color,customImg:s.customImg||null,cardBg:s.cardBg||null,intention:s.intention||"",category:s.category||"other",published:s.published||false,notesPublic:s.notesPublic||false});setEditingId(s.id);};
   const submitEdit=()=>{
     if(!ef.name.trim()) return;
-    onEdit(editingId,{name:ef.name.trim(),icon:ef.icon,color:ef.color,customImg:ef.customImg||null,intention:ef.intention||"",category:ef.category||"other",published:ef.published||false,notesPublic:ef.notesPublic||false});
+    onEdit(editingId,{name:ef.name.trim(),icon:ef.icon,color:ef.color,customImg:ef.customImg||null,cardBg:ef.cardBg||null,intention:ef.intention||"",category:ef.category||"other",published:ef.published||false,notesPublic:ef.notesPublic||false});
     setEditingId(null);
   };
-  const handleImg=(e,setter)=>{
+  const handleImg=async(e,setter)=>{
     const file=e.target.files[0]; if(!file) return;
-    const reader=new FileReader();
-    reader.onload=ev=>setter(v=>({...v,customImg:ev.target.result,icon:"img"}));
-    reader.readAsDataURL(file);
+    try{ const b64=await compressImage(file,200,0.82); setter(v=>({...v,customImg:b64,icon:"img"})); }
+    catch{ const reader=new FileReader(); reader.onload=ev=>setter(v=>({...v,customImg:ev.target.result,icon:"img"})); reader.readAsDataURL(file); }
+  };
+  const handleSkCardBg=async(e,setter)=>{
+    const file=e.target.files[0]; if(!file) return;
+    try{ const b64=await compressBanner(file,600,200,0.75); setter(v=>({...v,cardBg:b64})); }
+    catch{ const reader=new FileReader(); reader.onload=ev=>setter(v=>({...v,cardBg:ev.target.result})); reader.readAsDataURL(file); }
   };
   const applyPreset=async p=>{
     await onAddBatch(p.skills.map(s=>({name:s.name,icon:s.icon,color:s.color,startXp:0})));
@@ -2300,6 +2521,15 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
       <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>handleImg(e,setF)}/>
       <span className="fsbtn" style={{width:"auto",padding:"4px 10px",margin:0,fontSize:9}}>Choose</span>
       {f.customImg&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setF(v=>({...v,customImg:null,icon:"◈"}))}>✕</button>}
+    </label>
+    <div className="label9" style={{marginBottom:5}}>Card background image <span style={{opacity:.5,fontWeight:"normal",textTransform:"none",letterSpacing:0}}>(optional)</span></div>
+    <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",marginBottom:8}}>
+      {f.cardBg
+        ?<img src={f.cardBg} style={{width:64,height:28,borderRadius:3,objectFit:"cover",border:"1px solid var(--b2)"}}/>
+        :<span style={{fontSize:11,color:"var(--tx3)"}}>No background</span>}
+      <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>handleSkCardBg(e,setF)}/>
+      <span className="fsbtn" style={{width:"auto",padding:"4px 10px",margin:0,fontSize:9}}>Choose</span>
+      {f.cardBg&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setF(v=>({...v,cardBg:null}))}>✕</button>}
     </label>
     <div className="label9" style={{marginBottom:7}}>Color</div>
     <div className="color-grid">{SKILL_COLORS.map(c=><div key={c} className={`color-opt ${f.color===c?"on":""}`} style={{background:c}} onClick={()=>setF(v=>({...v,color:c}))}/>)}</div>
@@ -2387,6 +2617,20 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
             </div>
             <div className="label9" style={{marginBottom:6}}>Icon</div>
             <div className="icon-grid" style={{marginBottom:8}}>{SKILL_ICONS_EXTRA.map(ic=><button key={ic} className={`icon-opt ${ef.icon===ic?"on":""}`} onClick={()=>setEf(v=>({...v,icon:ic,customImg:null}))}>{ic}</button>)}</div>
+            <div className="label9" style={{marginBottom:5}}>Icon image <span style={{opacity:.5,fontWeight:"normal",textTransform:"none",letterSpacing:0}}>(optional, replaces icon)</span></div>
+            <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",marginBottom:10}}>
+              {ef.customImg?<img src={ef.customImg} style={{width:32,height:32,borderRadius:4,objectFit:"cover",border:"1px solid var(--b2)"}}/>:<span style={{fontSize:11,color:"var(--tx3)"}}>No image</span>}
+              <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>handleImg(e,setEf)}/>
+              <span className="fsbtn" style={{width:"auto",padding:"4px 10px",margin:0,fontSize:9}}>Choose</span>
+              {ef.customImg&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setEf(v=>({...v,customImg:null,icon:"◈"}))}>✕ Remove</button>}
+            </label>
+            <div className="label9" style={{marginBottom:5}}>Card background <span style={{opacity:.5,fontWeight:"normal",textTransform:"none",letterSpacing:0}}>(optional)</span></div>
+            <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",marginBottom:10}}>
+              {ef.cardBg?<img src={ef.cardBg} style={{width:64,height:28,borderRadius:3,objectFit:"cover",border:"1px solid var(--b2)"}}/>:<span style={{fontSize:11,color:"var(--tx3)"}}>No background</span>}
+              <input type="file" accept="image/*" style={{display:"none"}} onChange={e=>handleSkCardBg(e,setEf)}/>
+              <span className="fsbtn" style={{width:"auto",padding:"4px 10px",margin:0,fontSize:9}}>Choose</span>
+              {ef.cardBg&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setEf(v=>({...v,cardBg:null}))}>✕ Remove</button>}
+            </label>
             <div className="label9" style={{marginBottom:5}}>Color</div>
             <div className="color-grid" style={{marginBottom:8}}>{SKILL_COLORS.map(col=><div key={col} className={`color-opt ${ef.color===col?"on":""}`} style={{background:col}} onClick={()=>setEf(v=>({...v,color:col}))}/>)}</div>
             <div style={{display:"flex",gap:6}}>
@@ -2400,7 +2644,16 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
     return (
       <div key={s.id} id={"sk-"+s.id}
         {...getSkDragProps(s.id,section)}>
-        <div className="skill-card" style={{borderColor:isLinkHover?s.color:isReorderHover?s.color+"44":"",borderStyle:isLinkHover?"dashed":"solid",cursor:"default"}}>
+        <div className="skill-card" style={{
+          borderColor:isLinkHover?s.color:isReorderHover?s.color+"44":"",
+          borderStyle:isLinkHover?"dashed":"solid",
+          cursor:"default",
+          ...(s.cardBg?{
+            backgroundImage:`linear-gradient(to bottom, ${s.color}10 0%, var(--s1) 60%), url(${s.cardBg})`,
+            backgroundSize:"cover",
+            backgroundPosition:"center top",
+          }:{})
+        }}>
           <div className="sk-hdr">
             <div className="sk-name" style={{gap:5}}>
               <span style={{color:"var(--tx3)",fontSize:9,cursor:"grab",userSelect:"none",flexShrink:0}} title="Drag to reorder">⠿</span>
@@ -3233,6 +3486,119 @@ function ActionCard({action,skills,onAccept,onCancel}){
   );
 }
 
+// ─── AI THEME DESIGNER ───────────────────────────────────────────────────────
+function AIThemeDesigner({draft,setDraft,showToast}){
+  const [prompt,setPrompt]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [preview,setPreview]=useState(null);
+  const [error,setError]=useState("");
+
+  const generate=async()=>{
+    if(!prompt.trim()) return;
+    setLoading(true); setError(""); setPreview(null);
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-20250514",
+          max_tokens:800,
+          messages:[{role:"user",content:`You are a UI theme designer. Generate a cohesive dark (or light if requested) color theme for a productivity app based on this vibe: "${prompt}"
+
+Return ONLY a valid JSON object with this exact structure, no markdown, no explanation:
+{
+  "name": "Theme Name (2-3 words)",
+  "theme": {
+    "bg": "#hex",
+    "s1": "#hex",
+    "s2": "#hex",
+    "b1": "#hex",
+    "b2": "#hex",
+    "tx": "#hex",
+    "tx2": "#hex",
+    "tx3": "#hex"
+  },
+  "colors": {
+    "primary": "#hex",
+    "secondary": "#hex",
+    "success": "#hex",
+    "danger": "#hex"
+  },
+  "description": "One sentence describing the vibe"
+}
+
+Rules:
+- bg should be the darkest surface (unless light theme requested)
+- s1 slightly lighter than bg, s2 slightly lighter than s1
+- b1 is border color, b2 slightly brighter border
+- tx is primary text (high contrast vs bg), tx2 is secondary, tx3 is muted/disabled
+- primary should be vivid and thematic, secondary should complement
+- All values must be valid 6-digit hex colors`}]
+        })
+      });
+      const data=await res.json();
+      const raw=(data.content?.[0]?.text||"").replace(/```json|```/g,"").trim();
+      let parsed; try{parsed=JSON.parse(raw);}catch{throw new Error("Couldn't parse AI response");}
+      if(!parsed.theme||!parsed.colors) throw new Error("Incomplete theme data");
+      setPreview(parsed);
+    }catch(e){setError(e.message||"Generation failed");}
+    setLoading(false);
+  };
+
+  const apply=()=>{
+    if(!preview) return;
+    setDraft(d=>({...d,
+      theme:{bg:preview.theme.bg,s1:preview.theme.s1,s2:preview.theme.s2,b1:preview.theme.b1,b2:preview.theme.b2,tx:preview.theme.tx,tx2:preview.theme.tx2,tx3:preview.theme.tx3},
+      colors:{primary:preview.colors.primary,secondary:preview.colors.secondary,success:preview.colors.success,danger:preview.colors.danger}
+    }));
+    if(showToast) showToast(`Applied "${preview.name}"`);
+    setPreview(null); setPrompt("");
+  };
+
+  return(
+    <div style={{padding:"4px 0 8px"}}>
+      <div style={{fontSize:12,color:"var(--tx2)",marginBottom:10,lineHeight:1.6}}>
+        Describe your vibe and the AI will generate a matching color theme. You can still fine-tune individual colors after.
+      </div>
+      <div style={{display:"flex",gap:6,marginBottom:8}}>
+        <input
+          className="fi" style={{flex:1,minWidth:0}}
+          placeholder='e.g. "dark ocean", "warm coffee shop", "neon cyberpunk", "ancient parchment"'
+          value={prompt} onChange={e=>setPrompt(e.target.value)}
+          onKeyDown={e=>e.key==="Enter"&&generate()}
+        />
+        <button className="fsbtn" style={{width:"auto",padding:"7px 14px",margin:0,flexShrink:0}}
+          onClick={generate} disabled={loading||!prompt.trim()}>
+          {loading?"…":"✦ Generate"}
+        </button>
+      </div>
+      {error&&<div style={{fontSize:11,color:"var(--danger)",marginBottom:8,fontFamily:"'DM Mono',monospace"}}>{error}</div>}
+      {preview&&(
+        <div style={{background:"var(--bg)",border:"1px solid var(--b2)",borderRadius:"var(--r)",padding:12,marginBottom:8}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+            <div>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,letterSpacing:1.5,color:preview.colors.primary,textTransform:"uppercase",marginBottom:2}}>{preview.name}</div>
+              <div style={{fontSize:11,color:"var(--tx3)"}}>{preview.description}</div>
+            </div>
+            <div style={{display:"flex",gap:4,flexShrink:0}}>
+              {[preview.theme.bg,preview.theme.s1,preview.colors.primary,preview.colors.secondary].map((c,i)=>(
+                <div key={i} style={{width:16,height:16,borderRadius:"50%",background:c,border:"1px solid #ffffff18"}}/>
+              ))}
+            </div>
+          </div>
+          <div style={{display:"flex",gap:6}}>
+            <button className="fsbtn primary" style={{margin:0}} onClick={apply}>◆ Apply Theme</button>
+            <button className="fsbtn" style={{margin:0,width:"auto",padding:"8px 12px"}} onClick={()=>setPreview(null)}>Discard</button>
+          </div>
+        </div>
+      )}
+      <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",letterSpacing:.5,lineHeight:1.6}}>
+        AI-generated themes apply to your color + background settings. Fine-tune below if needed, then Save.
+      </div>
+    </div>
+  );
+}
+
 function SettingsTab({showToast,onExport,onImport,userId,onSignIn,onSignOut}){
   const {settings,saveSettings}=useSettings();
   const importRef=useRef(null);
@@ -3266,6 +3632,28 @@ function SettingsTab({showToast,onExport,onImport,userId,onSignIn,onSignOut}){
   );
 
   return (<div style={{paddingBottom:8}}>
+    {/* UI Style */}
+    <div className="slbl" style={{marginBottom:8}}>UI Style</div>
+    <div className="fwrap" style={{marginBottom:18}}>
+      <div style={{fontSize:12,color:"var(--tx3)",marginBottom:10,fontFamily:"'DM Mono',monospace",lineHeight:1.5}}>
+        Choose how the app looks and feels. Saved with your other settings.
+      </div>
+      <div style={{display:"flex",gap:6,marginBottom:draft.uiMode==="ai"?12:0}}>
+        {[
+          {id:"rpg",   icon:"⟡", label:"RPG",     sub:"Glows, grain, Cinzel font"},
+          {id:"minimal",icon:"◻", label:"Minimal",  sub:"Flat, clean, no effects"},
+          {id:"ai",    icon:"✦", label:"AI Design", sub:"Generate from a vibe"},
+        ].map(({id,icon,label,sub})=>(
+          <button key={id} className={`ui-mode-btn ${draft.uiMode===id?"on":""}`}
+            onClick={()=>setDraft(d=>({...d,uiMode:id}))}
+            style={{display:"flex",flexDirection:"column",alignItems:"flex-start",gap:2,padding:"9px 12px",textAlign:"left"}}>
+            <span style={{fontSize:11}}>{icon} {label}</span>
+            <span style={{fontSize:8,opacity:.6,letterSpacing:.3,textTransform:"none"}}>{sub}</span>
+          </button>
+        ))}
+      </div>
+      {draft.uiMode==="ai"&&<AIThemeDesigner draft={draft} setDraft={setDraft} showToast={showToast}/>}
+    </div>
     {/* Account */}
     <div className="slbl" style={{marginBottom:8}}>Account</div>
     <div className="fwrap" style={{marginBottom:18}}>
@@ -3466,7 +3854,7 @@ function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,o
   const [showSubs,setShowSubs]=useState(false);
   const [newSub,setNewSub]=useState("");
   const defaultQColor=(sIds)=>{ const s=skills.find(sk=>sk.id===(sIds||[])[0]); return s?s.color:null; };
-  const [ef,setEf]=useState({title:quest.title,note:quest.note||"",dueDate:quest.due?new Date(quest.due).toISOString().split("T")[0]:"",skillIds:quest.skills||[],color:quest.color||defaultQColor(quest.skills)||null,priority:quest.priority||"med",cooldown:quest.cooldown??60*60*1000,published:quest.published||false,notesPublic:quest.notesPublic||false,xpVal:quest.xpVal??null,type:quest.type,unlocksAfter:quest.unlocksAfter||""});
+  const [ef,setEf]=useState({title:quest.title,note:quest.note||"",dueDate:quest.due?new Date(quest.due).toISOString().split("T")[0]:"",skillIds:quest.skills||[],color:quest.color||defaultQColor(quest.skills)||null,priority:quest.priority||"med",cooldown:quest.cooldown??60*60*1000,published:quest.published||false,notesPublic:quest.notesPublic||false,xpVal:quest.xpVal??null,type:quest.type,unlocksAfter:quest.unlocksAfter||"",customImg:quest.customImg||null,banner:quest.banner||null});
   const [xpSuggestion,setXpSuggestion]=useState(null);
   const [xpLoading,setXpLoading]=useState(false);
   const [subXpSug,setSubXpSug]=useState(null);
@@ -3483,8 +3871,18 @@ function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,o
     const due=ef.dueDate?new Date(ef.dueDate+"T09:00").getTime():null;
     const newXp=xpSuggestion?.xp??(ef.xpVal!==null?ef.xpVal:quest.xpVal);
     const wasMain=quest.type!=="radiant"; const nowRadiant=ef.type==="radiant";
-    onEdit(quest.id,{title:ef.title.trim(),note:ef.note.trim(),due,skills:ef.skillIds,color:ef.color||null,priority:ef.priority,cooldown:ef.type==="radiant"?ef.cooldown:undefined,published:ef.published||false,notesPublic:ef.notesPublic||false,xpVal:newXp,type:ef.type,unlocksAfter:ef.unlocksAfter||null,...(wasMain&&nowRadiant?{done:false,lastDone:null}:{})});
+    onEdit(quest.id,{title:ef.title.trim(),note:ef.note.trim(),due,skills:ef.skillIds,color:ef.color||null,priority:ef.priority,cooldown:ef.type==="radiant"?ef.cooldown:undefined,published:ef.published||false,notesPublic:ef.notesPublic||false,xpVal:newXp,type:ef.type,unlocksAfter:ef.unlocksAfter||null,customImg:ef.customImg||null,banner:ef.banner||null,...(wasMain&&nowRadiant?{done:false,lastDone:null}:{})});
     setEditing(false); setXpSuggestion(null);
+  };
+  const handleQuestEditImg=async e=>{
+    const file=e.target.files[0]; if(!file) return;
+    try{ const b64=await compressImage(file,200,0.85); setEf(v=>({...v,customImg:b64})); }
+    catch{ const r=new FileReader(); r.onload=ev=>setEf(v=>({...v,customImg:ev.target.result})); r.readAsDataURL(file); }
+  };
+  const handleQuestEditBanner=async e=>{
+    const file=e.target.files[0]; if(!file) return;
+    try{ const b64=await compressBanner(file,800,240,0.78); setEf(v=>({...v,banner:b64})); }
+    catch{ const r=new FileReader(); r.onload=ev=>setEf(v=>({...v,banner:ev.target.result})); r.readAsDataURL(file); }
   };
   const suggestQuestXp=async()=>{
     if(!ef.title.trim()) return;
@@ -3584,6 +3982,30 @@ function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,o
           <div onClick={()=>setEf(v=>({...v,color:null}))} style={{width:20,height:20,borderRadius:"50%",background:"var(--bg)",cursor:"pointer",border:!ef.color?"2px solid var(--tx)":"2px solid var(--b2)",fontSize:10,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--tx3)"}} title="Default">∅</div>
         </div>
       </div>
+      <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"flex-start"}}>
+        <div style={{flex:1}}>
+          <div className="label9" style={{marginBottom:5}}>Icon <span style={{opacity:.5,fontWeight:"normal",textTransform:"none",letterSpacing:0}}>(opt)</span></div>
+          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
+            {ef.customImg
+              ?<img src={ef.customImg} style={{width:36,height:36,borderRadius:4,objectFit:"cover",border:"1px solid var(--b2)"}}/>
+              :<div style={{width:36,height:36,borderRadius:4,background:"var(--bg)",border:"1px dashed var(--b2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"var(--tx3)"}}>◆</div>}
+            <input type="file" accept="image/*" style={{display:"none"}} onChange={handleQuestEditImg}/>
+            <span className="fsbtn" style={{width:"auto",padding:"4px 8px",margin:0,fontSize:9}}>{ef.customImg?"Change":"Upload"}</span>
+            {ef.customImg&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setEf(v=>({...v,customImg:null}))}>✕</button>}
+          </label>
+        </div>
+        <div style={{flex:2}}>
+          <div className="label9" style={{marginBottom:5}}>Banner <span style={{opacity:.5,fontWeight:"normal",textTransform:"none",letterSpacing:0}}>(opt)</span></div>
+          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
+            {ef.banner
+              ?<img src={ef.banner} style={{height:36,maxWidth:100,borderRadius:3,objectFit:"cover",border:"1px solid var(--b2)"}}/>
+              :<div style={{height:36,width:80,borderRadius:3,background:"var(--bg)",border:"1px dashed var(--b2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",letterSpacing:.5}}>banner</div>}
+            <input type="file" accept="image/*" style={{display:"none"}} onChange={handleQuestEditBanner}/>
+            <span className="fsbtn" style={{width:"auto",padding:"4px 8px",margin:0,fontSize:9}}>{ef.banner?"Change":"Upload"}</span>
+            {ef.banner&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setEf(v=>({...v,banner:null}))}>✕</button>}
+          </label>
+        </div>
+      </div>
 
       <button className="fsbtn secondary" style={{marginTop:4,marginBottom:2}} onClick={suggestQuestXp} disabled={xpLoading||!ef.title.trim()}>
         {xpLoading?"thinking...":"⟡ AI XP opinion"}
@@ -3622,11 +4044,22 @@ function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,o
       <div className={`card quest-${quest.type} ${quest.done&&!isRadiant?"done":""}`}
         style={(()=>{
           const qc=quest.color||(qSkills[0]?.color)||null;
-          if(overdue) return {borderColor:"var(--danger)"};
-          if(dueSoon) return {borderColor:"var(--primary)"};
-          if(qc) return {borderColor:qc,borderLeftWidth:3};
-          return {};
+          const base={};
+          if(overdue) base.borderColor="var(--danger)";
+          else if(dueSoon) base.borderColor="var(--primary)";
+          else if(qc){base.borderColor=qc;base.borderLeftWidth=3;}
+          if(quest.banner) base.paddingTop=0;
+          return base;
         })()}>
+        {/* Banner image */}
+        {quest.banner&&<div style={{
+          width:"calc(100% + 24px)",margin:"-0px -12px 10px",height:72,overflow:"hidden",
+          borderRadius:"var(--r) var(--r) 0 0",flexShrink:0,position:"relative",
+          marginTop:0,
+        }}>
+          <img src={quest.banner} style={{width:"100%",height:"100%",objectFit:"cover",display:"block",opacity:.85}}/>
+          <div style={{position:"absolute",inset:0,background:"linear-gradient(to bottom,transparent 30%,rgba(0,0,0,.6))"}}/>
+        </div>}
         <button className="chk" style={isLocked?{color:"var(--tx3)",borderColor:"var(--b1)",opacity:.5,cursor:"not-allowed"}:isRadiant?{color:rAvail?"var(--secondary)":"var(--tx3)",borderColor:rAvail?"var(--secondaryb)":"var(--b1)",fontSize:rCool?7:undefined}:{}}
           onClick={()=>onToggle(quest.id)} title={isLocked?`Locked — complete "${prereq?.title}" first`:rCool?`Available in ${rCool}`:undefined}>
           {isLocked?"🔒":isRadiant?(rCool?rCool:"◉"):quest.done?"✓":""}
@@ -3635,6 +4068,8 @@ function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,o
           <div className="row-gap4">
             {isLocked&&<span style={{fontSize:8,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",letterSpacing:.5}}>after: {prereq?.title}</span>}
             {!isLocked&&quest.priority&&<span className={`prio-dot prio-${quest.priority||"med"}`} title={`Priority: ${quest.priority}`}/>}
+            {/* Quest icon */}
+            {quest.customImg&&<img src={quest.customImg} style={{width:18,height:18,borderRadius:3,objectFit:"cover",flexShrink:0,border:"1px solid rgba(255,255,255,.12)"}}/>}
             <span className={`ctitle ${isLocked?"":quest.done&&!isRadiant?"done":""}`} style={isLocked?{color:"var(--tx3)"}:{}}>{quest.title}</span>
           </div>
           {subs.length>0&&<div className="sub-progress"><div className="sub-progress-fill" style={{width:`${subs.length?Math.round(subsDone/subs.length*100):0}%`}}/></div>}
