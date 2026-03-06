@@ -234,19 +234,33 @@ function updateStreak(cur, skillId){
   const today=todayKey(), yest=new Date();
   yest.setDate(yest.getDate()-1);
   const yKey=dayKey(yest);
-  const s=cur[skillId]||{count:0,lastDay:""};
-  const count=s.lastDay===today?s.count:s.lastDay===yKey?s.count+1:1;
-  return {...cur,[skillId]:{count,lastDay:today}};
+  const twoDaysAgo=new Date(); twoDaysAgo.setDate(twoDaysAgo.getDate()-2);
+  const t2Key=dayKey(twoDaysAgo);
+  const s=cur[skillId]||{count:0,lastDay:"",graceUsed:0};
+  let count, graceUsed=s.graceUsed||0;
+  if(s.lastDay===today){ count=s.count; }
+  else if(s.lastDay===yKey){ count=s.count+1; }
+  else if(s.lastDay===t2Key && graceUsed<(Date.now()-14*86400000)){
+    // missed one day, use grace if not used in last 14 days
+    count=s.count+1; graceUsed=Date.now();
+  } else { count=1; }
+  return {...cur,[skillId]:{count,lastDay:today,graceUsed}};
 }
 function computedTabTitle(tab,s){
   if(s.appName) return s.appName;
-  const pre=s.profile.name?`${s.profile.name}\'s`:"Your";
+  const pre=s.profile.name?`${s.profile.name}'s`:"Your";
   if(tab==="planner"||tab==="quests") return `${pre} Quests`;
-  if(tab==="skills"||tab==="practice") return `${pre} Stats`;
-  if(tab==="advisor") return `${pre} Quests & Stats`;
+  if(tab==="skills") return `${pre} Skills`;
+  if(tab==="journal") return `${pre} Log`;
+  if(tab==="advisor") return `${pre} Advisor`;
   if(tab==="settings") return `${pre} Settings`;
   return pre;
 }
+function deepMerge(def,saved){
+
+
+
+
 function deepMerge(def,saved){
   const out={...def};
   for(const k in saved){
@@ -315,15 +329,17 @@ button,input,textarea,select{font-family:\'DM Sans\',sans-serif;}
 .hdr{padding:12px 18px 0;border-bottom:1px solid var(--b1);background:${hb};position:sticky;top:0;z-index:40;backdrop-filter:blur(14px);}
 .hdr-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;gap:10px;}
 .hdr-title{font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:.8px;color:var(--tx2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.lv-badge{font-family:\'DM Mono\',monospace;font-size:10px;color:var(--primary);background:var(--primaryf);border:1px solid var(--primaryb);border-radius:20px;padding:2px 10px;letter-spacing:1px;white-space:nowrap;flex-shrink:0;}
+.lv-badge{font-family:\'DM Mono\',monospace;font-size:10px;color:var(--primary);background:var(--primaryf);border:1px solid var(--primaryb);border-radius:20px;padding:2px 10px;letter-spacing:1px;white-space:nowrap;flex-shrink:0;box-shadow:0 0 8px var(--primaryb);}
 .xp-row{display:flex;align-items:center;gap:8px;margin-bottom:12px;}
-.xp-track{flex:1;height:2px;background:var(--b1);border-radius:1px;overflow:hidden;}
-.xp-fill{height:100%;background:linear-gradient(90deg,var(--secondary),var(--primary));border-radius:1px;transition:width .5s ease;}
+.xp-track{flex:1;height:3px;background:var(--b1);border-radius:2px;overflow:hidden;}
+.xp-fill{height:100%;background:linear-gradient(90deg,var(--secondary),var(--primary));border-radius:2px;transition:width .5s ease;}
 .xp-lbl{font-family:\'DM Mono\',monospace;font-size:10px;color:var(--tx3);white-space:nowrap;}
 .bnav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:460px;display:flex;background:${hb};border-top:1px solid var(--b1);backdrop-filter:blur(14px);z-index:40;padding-bottom:env(safe-area-inset-bottom);}
-.nbtn{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px 10px;background:none;border:none;cursor:pointer;color:var(--tx3);transition:color .15s;}
+.nbtn{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 2px 12px;background:none;border:none;cursor:pointer;color:var(--tx3);transition:color .2s,transform .15s;position:relative;overflow:hidden;}
 .nbtn.on{color:var(--tx);}.nbtn:hover:not(.on){color:var(--tx2);}
-.nicon{font-size:13px;line-height:1;}.nlbl{font-family:\'DM Mono\',monospace;font-size:6.5px;letter-spacing:.8px;text-transform:uppercase;}
+.nbtn.on::before{content:'';position:absolute;top:0;left:25%;right:25%;height:2px;background:var(--primary);border-radius:0 0 3px 3px;box-shadow:0 0 8px var(--primary);}
+.nicon{font-size:17px;line-height:1;transition:transform .2s,color .2s;}.nbtn.on .nicon{color:var(--primary);transform:scale(1.1);}
+.nlbl{font-family:\'DM Mono\',monospace;font-size:7.5px;letter-spacing:.8px;text-transform:uppercase;transition:color .2s;}
 .pg{padding:18px 18px 88px;flex:1;}
 .stabs{display:flex;gap:3px;margin-bottom:18px;background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:3px;}
 .stab{flex:1;padding:6px 4px;border:none;border-radius:4px;background:none;cursor:pointer;font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:var(--tx3);transition:all .15s;}
@@ -501,10 +517,10 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
   .side-title{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.8px;color:var(--tx2);margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
   .side-lv{font-family:'DM Mono',monospace;font-size:10px;color:var(--primary);background:var(--primaryf);border:1px solid var(--primaryb);border-radius:20px;padding:2px 10px;letter-spacing:1px;display:inline-block;}
   .side-links{display:flex;flex-direction:column;gap:2px;padding:0 8px;}
-  .slink{display:flex;align-items:center;gap:10px;background:none;border:none;cursor:pointer;color:var(--tx3);padding:9px 10px;border-radius:var(--r);transition:all .15s;width:100%;text-align:left;}
+  .slink{display:flex;align-items:center;gap:10px;background:none;border:none;cursor:pointer;color:var(--tx3);padding:9px 10px;border-radius:var(--r);transition:all .15s;width:100%;text-align:left;position:relative;}
   .slink:hover:not(.on){background:var(--s1);color:var(--tx2);}
-  .slink.on{background:var(--s2);color:var(--tx);}
-  .slink-icon{font-size:13px;flex-shrink:0;}
+  .slink.on{background:var(--s2);color:var(--tx);border-left:2px solid var(--primary);padding-left:8px;}
+  .slink-icon{font-size:15px;flex-shrink:0;}
   .slink-lbl{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1.2px;text-transform:uppercase;}
   .main-wrap{flex:1;display:flex;justify-content:center;overflow-y:auto;}
   .pg{padding:28px 32px 40px;width:100%;max-width:var(--content-width,700px);}
@@ -515,6 +531,85 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 
 .prio-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;display:inline-block;margin-right:2px;}
 .prio-high{background:#c85858;}.prio-med{background:#c8a96e;}.prio-low{background:#5b9e9e;}
+/* ── PROFILE MODAL ── */
+.profile-modal{position:fixed;inset:0;z-index:200;display:flex;align-items:flex-end;justify-content:center;}
+.profile-modal-bg{position:absolute;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);}
+.profile-sheet{position:relative;background:var(--s1);border:1px solid var(--b1);border-radius:12px 12px 0 0;width:100%;max-width:460px;max-height:88vh;overflow-y:auto;padding:20px 18px 40px;z-index:1;}
+@media(min-width:768px){.profile-sheet{max-width:420px;border-radius:12px;margin-bottom:40px;}}
+.profile-pill{width:36px;height:3px;background:var(--b2);border-radius:2px;margin:0 auto 18px;}
+.profile-avatar{width:52px;height:52px;border-radius:50%;background:var(--primaryf);border:2px solid var(--primaryb);display:flex;align-items:center;justify-content:center;font-size:20px;margin-bottom:10px;}
+.profile-name{font-size:18px;font-weight:400;margin-bottom:2px;}
+.profile-xp-bar{height:4px;background:var(--b1);border-radius:2px;overflow:hidden;margin:10px 0 4px;}
+.profile-xp-fill{height:100%;background:linear-gradient(90deg,var(--secondary),var(--primary));border-radius:2px;transition:width .5s ease;}
+.badge-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}
+.badge{display:flex;align-items:center;gap:4px;background:var(--s2);border:1px solid var(--b2);border-radius:20px;padding:3px 10px;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.8px;color:var(--tx2);}
+/* ── PLANNER TIME BLOCKS ── */
+.block-hdr{display:flex;align-items:center;gap:8px;margin-bottom:6px;cursor:pointer;user-select:none;}
+.block-hdr-lbl{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--tx3);}
+.block-hdr-lbl.overdue{color:var(--danger);}
+.block-count{font-family:'DM Mono',monospace;font-size:8px;color:var(--tx3);background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:1px 6px;}
+.block-wrap{margin-bottom:14px;}
+.block-body{display:flex;flex-direction:column;gap:2px;}
+/* ── PLANNER QUICK-ADD TOGGLE ── */
+.qa-toggle{display:flex;gap:3px;background:var(--s2);border:1px solid var(--b1);border-radius:var(--r);padding:3px;margin-bottom:10px;}
+.qa-opt{flex:1;padding:5px 8px;border:none;border-radius:3px;background:none;cursor:pointer;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--tx3);transition:all .15s;}
+.qa-opt.on{background:var(--s1);color:var(--tx);border:1px solid var(--b2);}
+/* ── POST-COMPLETION NUDGE ── */
+.practice-nudge{display:flex;align-items:center;gap:8px;background:var(--secondaryf);border:1px solid var(--secondaryb);border-radius:var(--r);padding:7px 10px;margin-top:3px;animation:fadeIn .2s ease;}
+@keyframes fadeIn{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:translateY(0);}}
+.nudge-text{flex:1;font-family:'DM Mono',monospace;font-size:9px;color:var(--secondary);letter-spacing:.5px;}
+.nudge-btn{font-family:'DM Mono',monospace;font-size:8px;letter-spacing:1px;padding:3px 8px;border-radius:3px;border:1px solid var(--secondaryb);background:none;cursor:pointer;transition:all .15s;}
+.nudge-yes{color:var(--secondary);}.nudge-yes:hover{background:var(--secondary);color:var(--bg);}
+.nudge-no{color:var(--tx3);}.nudge-no:hover{color:var(--tx2);}
+/* ── NL QUICK-ADD ── */
+.nl-row{display:flex;gap:6px;margin-bottom:10px;}
+.nl-input{flex:1;background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);color:var(--tx);font-size:13px;padding:8px 12px;outline:none;transition:border-color .15s;}
+.nl-input:focus{border-color:var(--primaryb);}
+.nl-input::placeholder{color:var(--tx3);font-size:12px;}
+.nl-btn{background:var(--s2);border:1px solid var(--primaryb);border-radius:var(--r);color:var(--primary);font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1px;padding:0 12px;cursor:pointer;transition:all .15s;white-space:nowrap;}
+.nl-btn:hover:not(:disabled){background:var(--primaryf);}.nl-btn:disabled{opacity:.35;cursor:default;}
+/* ── FOCUS TIMER ── */
+.timer-overlay{position:fixed;inset:0;background:var(--bg);z-index:300;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px;}
+.timer-face{font-family:'DM Mono',monospace;font-size:72px;letter-spacing:-2px;color:var(--tx);line-height:1;margin-bottom:8px;font-weight:300;}
+.timer-skill{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--tx3);margin-bottom:40px;}
+.timer-btn{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;padding:12px 28px;border-radius:var(--r);cursor:pointer;transition:all .15s;border:1px solid var(--b2);}
+.timer-start{background:var(--secondary);border-color:var(--secondary);color:var(--bg);}
+.timer-stop{background:var(--dangerf);border-color:var(--danger);color:var(--danger);}
+.timer-cancel{background:none;color:var(--tx3);margin-top:10px;}
+.timer-ring{width:200px;height:200px;position:relative;margin-bottom:16px;}
+.timer-ring svg{transform:rotate(-90deg);}
+.timer-bar{position:fixed;bottom:72px;left:50%;transform:translateX(-50%);background:var(--s2);border:1px solid var(--secondaryb);border-radius:20px;padding:6px 16px;display:flex;align-items:center;gap:10px;z-index:60;cursor:pointer;transition:all .15s;}
+.timer-bar:hover{background:var(--secondaryf);}
+.timer-bar-time{font-family:'DM Mono',monospace;font-size:12px;color:var(--secondary);letter-spacing:1px;}
+.timer-bar-lbl{font-family:'DM Mono',monospace;font-size:9px;color:var(--tx3);}
+@media(min-width:768px){.timer-bar{bottom:20px;right:auto;}}
+/* ── SKILL STALENESS ── */
+.stale-dot{width:6px;height:6px;border-radius:50%;background:var(--tx3);opacity:.4;flex-shrink:0;}
+.stale-label{font-family:'DM Mono',monospace;font-size:8px;color:var(--tx3);letter-spacing:.5px;}
+/* ── QUEST ROADMAP ── */
+.roadmap-node{position:relative;padding-left:20px;margin-bottom:4px;}
+.roadmap-line{position:absolute;left:6px;top:18px;width:1px;background:var(--b2);bottom:-4px;}
+.roadmap-dot{position:absolute;left:2px;top:8px;width:9px;height:9px;border-radius:50%;border:1px solid var(--b2);background:var(--bg);}
+.roadmap-dot.done{background:var(--primary);border-color:var(--primaryb);}
+.roadmap-dot.locked{background:var(--b1);border-color:var(--b1);}
+.roadmap-card{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:8px 11px;cursor:default;}
+.roadmap-card.done{opacity:.5;}
+.roadmap-title{font-size:13px;font-weight:400;margin-bottom:3px;}
+.roadmap-meta{display:flex;gap:5px;flex-wrap:wrap;}
+/* ── SHARE CARD ── */
+.share-card{background:var(--s2);border:1px solid var(--b1);border-radius:8px;padding:20px;text-align:center;margin-bottom:12px;}
+.share-level{font-family:'DM Mono',monospace;font-size:32px;color:var(--primary);line-height:1;}
+.share-name{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--tx3);margin-top:4px;margin-bottom:16px;}
+.share-stats{display:flex;justify-content:center;gap:20px;margin-bottom:16px;}
+.share-stat{text-align:center;}.share-stat-num{font-family:'DM Mono',monospace;font-size:18px;color:var(--tx);}.share-stat-lbl{font-family:'DM Mono',monospace;font-size:8px;letter-spacing:1px;color:var(--tx3);}
+/* ── COMING UP STRIP ── */
+.coming-up-card{display:flex;align-items:center;gap:8px;background:var(--s1);border:1px solid var(--b1);border-left:2px solid var(--primaryb);border-radius:var(--r);padding:7px 10px;margin-bottom:3px;opacity:.75;}
+.coming-up-title{flex:1;font-size:12px;color:var(--tx2);}
+.coming-up-due{font-family:'DM Mono',monospace;font-size:8px;color:var(--tx3);}
+/* ── JOURNAL MERGED SUB-TABS ── */
+.jtab-row{display:flex;gap:3px;background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:3px;margin-bottom:16px;}
+.jtab{flex:1;padding:6px 4px;border:none;border-radius:4px;background:none;cursor:pointer;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:var(--tx3);transition:all .15s;}
+.jtab.on{background:var(--s2);color:var(--tx);}
 .sub-progress{height:2px;background:var(--b1);border-radius:1px;margin-top:5px;overflow:hidden;}
 .sub-progress-fill{height:100%;background:var(--primary);border-radius:1px;transition:width .3s;}
 .card.quest-side{border-color:var(--secondaryb);}
@@ -612,6 +707,11 @@ export default function App(){
   const [friends,setFriends]=useState([]); // [{userId,name,code}]
   const [communityProfiles,setCommunityProfiles]=useState([]);
   const [myFriendCode,setMyFriendCode]=useState("");
+  const [showProfile,setShowProfile]=useState(false);
+  const [journalSubTab,setJournalSubTab]=useState("log"); // log | entries | history
+  const [focusTimer,setFocusTimer]=useState(null); // null | {skillId, startMs, running}
+  const [focusElapsed,setFocusElapsed]=useState(0);
+  const [nudge,setNudge]=useState(null); // {taskId, skillId, skillName}
   const toastRef=useRef(null);
 
   // Load data from Supabase if logged in, otherwise localStorage
@@ -697,7 +797,28 @@ export default function App(){
     setStreaks({}); setJournal([]); setXpLog([]);
     setSettings(DEFAULT_SETTINGS);
   };
+  // Focus timer tick
+  useEffect(()=>{
+    if(!focusTimer?.running) return;
+    const iv=setInterval(()=>setFocusElapsed(Math.floor((Date.now()-focusTimer.startMs)/1000)),1000);
+    return ()=>clearInterval(iv);
+  },[focusTimer?.running, focusTimer?.startMs]);
+
+  const startFocus=(skillId)=>{ const now=Date.now(); setFocusTimer({skillId,startMs:now,running:true}); setFocusElapsed(0); };
+  const stopFocus=()=>{
+    if(!focusTimer) return;
+    const mins=Math.max(1,Math.round(focusElapsed/60));
+    const sk=skills.find(s=>s.id===focusTimer.skillId);
+    setPendingPractice({skillId:focusTimer.skillId,questTitle:null,prefillDur:mins});
+    setFocusTimer(null); setFocusElapsed(0);
+    setTab("journal"); setJournalSubTab("log");
+  };
+  const cancelFocus=()=>{ setFocusTimer(null); setFocusElapsed(0); };
+
   const handleTabChange=async id=>{
+    // Redirect old "practice" and "community" tab ids
+    if(id==="practice"){ setTab("journal"); setJournalSubTab("log"); return; }
+    if(id==="community"){ setShowProfile(true); return; }
     setTab(id);
     if(!seenTabs[id]&&TAB_EXPLAINERS[id]){
       const next={...seenTabs,[id]:true};
@@ -749,6 +870,13 @@ export default function App(){
   const reorderSkills=useCallback(async newOrder=>{setSkills(newOrder);await dbSet("cx_skills",newOrder,userId);},[userId]);
   const saveStr=useCallback(async s=>{setStreaks(s);await dbSet("cx_streaks",s,userId);},[userId]);
 
+  // Wire up quick-add quest event from PlannerTab
+  useEffect(()=>{
+    const handler=(e)=>addQuest(e.detail);
+    window.addEventListener("cx:addquest",handler);
+    return ()=>window.removeEventListener("cx:addquest",handler);
+  },[]);
+
   const addTask=async d=>{
     await saveT([{id:uid(),...d,done:false,dayKey:d.period==="daily"?todayKey():null,created:Date.now()},...tasks]);
     showToast("Task added");
@@ -793,7 +921,7 @@ export default function App(){
       showToast(msg);
       if(leveledUp) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);
       setPendingPractice({skillId:primary,questTitle:q.title,questId:q.id,questType:"radiant"});
-      setTab("practice");
+      setTab("journal"); setJournalSubTab("log");
       return;
     }
     await saveQ(quests.map(q=>q.id===id?{...q,done:!q.done}:q));
@@ -804,7 +932,7 @@ export default function App(){
       showToast(`+${amt} ${L.xpName}`);
       if(leveledUp) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);
       setPendingPractice({skillId:primary,questTitle:q.title,questType:q.type});
-      setTab("practice");
+      setTab("journal"); setJournalSubTab("log");
     }
   };
   const deleteQuest=async id=>saveQ(quests.filter(q=>q.id!==id));
@@ -1008,6 +1136,13 @@ export default function App(){
     showToast(msg);
     leveledUpAll.forEach((lu,i)=>setTimeout(()=>showToast(`◆ ${lu.name} Level ${lu.level}`),(i+1)*600));
     setPendingPractice(null);
+    // Proactive advisor suggestion: if skill has no active quest linked, nudge after 2s
+    if(primary){
+      const hasLinkedQuest=quests.some(q=>!q.done&&(q.skills||[]).includes(primary));
+      if(!hasLinkedQuest){
+        setTimeout(()=>showToast(`◈ No quest for ${curSkillsState.find(s=>s.id===primary)?.name||"this skill"} yet — add one in Quests`),2200);
+      }
+    }
   };
   const deleteMed=async id=>saveM(meds.filter(m=>m.id!==id));
   const editMed=async(id,updates)=>saveM(meds.map(m=>m.id===id?{...m,...updates}:m));
@@ -1059,10 +1194,8 @@ export default function App(){
     {id:"planner",  icon:"□", label:L.plannerTab},
     {id:"quests",   icon:"◆", label:L.questsTab},
     {id:"skills",   icon:"◈", label:L.skillsTab},
-    {id:"practice", icon:"◉", label:L.practiceTab},
-    {id:"journal",  icon:"✦", label:L.journalTab},
+    {id:"journal",  icon:"✦", label:"Log"},
     {id:"advisor",  icon:"◎", label:L.advisorTab},
-    {id:"community",icon:"⬡", label:"Community"},
     {id:"settings", icon:"⚙", label:L.settingsTab},
   ];
 
@@ -1100,40 +1233,64 @@ export default function App(){
                 </button>
               ))}
             </div>
+            {/* Sidebar profile button */}
+            <div style={{marginTop:"auto",padding:"16px 8px 0",borderTop:"1px solid var(--b1)"}}>
+              <button className="slink" onClick={()=>setShowProfile(true)} style={{color:"var(--tx2)"}}>
+                <span className="slink-icon">◎</span>
+                <span className="slink-lbl">Profile</span>
+              </button>
+            </div>
           </nav>
           {/* Mobile header */}
           <header className="hdr">
             <div className="hdr-row">
               <div className="hdr-title">{computedTabTitle(tab,settings)}</div>
               <div className="row-gap8">
-                <span className="lv-badge">{L.levelName} {level}</span>
-                {userId&&<button onClick={handleSignOut} title="Sign out" style={{background:"none",border:"none",cursor:"pointer",color:"var(--tx3)",fontSize:11,padding:"2px 4px",fontFamily:"'DM Mono',monospace",letterSpacing:.5}}>↪ out</button>}
-                {!userId&&<button onClick={()=>setShowAuth(true)} title="Sign in" style={{background:"none",border:"none",cursor:"pointer",color:"var(--tx2,#999999)",fontSize:9,padding:"2px 4px",fontFamily:"'DM Mono',monospace",letterSpacing:1,textDecoration:"underline"}}>sign in</button>}
+                <button onClick={()=>setShowProfile(true)} className="lv-badge" style={{cursor:"pointer",background:"var(--primaryf)",border:"1px solid var(--primaryb)"}}>
+                  {L.levelName} {level}
+                </button>
               </div>
             </div>
-            <div className="xp-row">
+            <button onClick={()=>setShowProfile(true)} className="xp-row" style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:0,textAlign:"left"}}>
               <div className="xp-track"><div className="xp-fill" style={{width:`${prog}%`}}/></div>
               <span className="xp-lbl">{xp} {L.xpName}</span>
-            </div>
+            </button>
           </header>
           <div className="main-wrap">
           <main className="pg">
-            {tab==="planner"  && <PlannerTab period={period} setPeriod={setPeriod} tasks={periodTasks} weekDays={weekDays} allTasks={tasks} skills={skills} quests={quests} onAddTask={addTask} onToggle={toggleTask} onDelete={deleteTask} onEdit={editTask} onToggleQuest={toggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>}
+            {tab==="planner"  && <PlannerTab period={period} setPeriod={setPeriod} tasks={periodTasks} weekDays={weekDays} allTasks={tasks} skills={skills} quests={quests} onAddTask={addTask} onToggle={(id)=>{
+              const t=tasks.find(x=>x.id===id);
+              toggleTask(id);
+              if(t&&!t.done&&t.skill){
+                const sk=skills.find(s=>s.id===t.skill);
+                if(sk) setNudge({taskId:id,skillId:t.skill,skillName:sk.name});
+              }
+            }} onDelete={deleteTask} onEdit={editTask} onToggleQuest={toggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} nudge={nudge} onDismissNudge={()=>setNudge(null)} onAcceptNudge={()=>{if(nudge){setPendingPractice({skillId:nudge.skillId});setNudge(null);setTab("journal");setJournalSubTab("log");}}}/>}
             {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest} onReorder={q=>saveQ(q)} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>}
-            {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill} onReorder={reorderSkills} onLink={linkSubskill} onAward={async(skillId,amt,reason)=>{const {leveledUp}=await award(amt,skillId,xp,skills,streaks,`✦ ${reason}`);showToast(`+${amt} ${settings.labels.xpName}`);if(leveledUp)setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);}}/>}
-            {tab==="practice" && <PracticeTab meds={meds} skills={skills} streaks={streaks} pending={pendingPractice} practiceTypes={practiceTypes} onAddType={addPracticeType} onDeleteType={deletePracticeType} onLog={logMed} onDelete={deleteMed} onEdit={editMed} onClearPending={()=>setPendingPractice(null)}/>}
-            {tab==="journal"  && <JournalTab entries={journal} skills={skills} quests={quests} onAdd={addJournalEntry} onDelete={deleteJournalEntry} onAwardXp={awardFromJournal} onEditQuest={editQuest}/>}
-            {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} journal={journal} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest} aiMemory={aiMemory} onUpdateMemory={async(m)=>{setAiMemory(m);await dbSet("cx_aimem",m,userId);}}/>}
+            {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill} onReorder={reorderSkills} onLink={linkSubskill} onStartFocus={startFocus} onAward={async(skillId,amt,reason)=>{const {leveledUp}=await award(amt,skillId,xp,skills,streaks,`✦ ${reason}`);showToast(`+${amt} ${settings.labels.xpName}`);if(leveledUp)setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);}}/>}
+            {tab==="journal"  && <JournalTab entries={journal} skills={skills} quests={quests} meds={meds} practiceTypes={practiceTypes} streaks={streaks} pending={pendingPractice} subTab={journalSubTab} onSubTab={setJournalSubTab} onAdd={addJournalEntry} onDelete={deleteJournalEntry} onAwardXp={awardFromJournal} onEditQuest={editQuest} onLog={logMed} onDeleteMed={deleteMed} onEditMed={editMed} onAddType={addPracticeType} onDeleteType={deletePracticeType} onClearPending={()=>setPendingPractice(null)}/>}
+            {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} journal={journal} meds={meds} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest} aiMemory={aiMemory} onUpdateMemory={async(m)=>{setAiMemory(m);await dbSet("cx_aimem",m,userId);}}/>}
             {tab==="settings" && <SettingsTab showToast={showToast} onExport={exportData} onImport={importData} userId={userId} onSignIn={()=>setShowAuth(true)} onSignOut={handleSignOut}/>}
-            {tab==="community" && <CommunityTab userId={userId} settings={settings} skills={skills} quests={quests} meds={meds} journal={journal} streaks={streaks} xp={xp} friends={friends} myFriendCode={myFriendCode} profiles={communityProfiles} onPublishProfile={publishProfile} onAddFriend={addFriend} onRemoveFriend={removeFriend} onRefresh={refreshCommunity} onEditSkillPublish={editSkillPublish} onEditQuestPublish={editQuestPublish} onSaveSettings={saveSettings} showToast={showToast}/>}
           </main>
           </div>
           {/* Weekly Review floating button */}
           <button className="review-btn" onClick={()=>setShowReview(true)} title="Weekly Review">◈ Review</button>
-          {showReview&&<WeeklyReview tasks={tasks} quests={quests} skills={skills} meds={meds} xpLog={xpLog} journal={journal} settings={settings} onClose={()=>setShowReview(false)} onNavigate={id=>{setShowReview(false);handleTabChange(id);}}/>}
+          {showReview&&<WeeklyReview tasks={tasks} quests={quests} skills={skills} meds={meds} xpLog={xpLog} journal={journal} settings={settings} onClose={()=>setShowReview(false)} onNavigate={id=>{setShowReview(false);handleTabChange(id);}} onAddTask={addTask}/>}
+          {/* Focus Timer mini-bar (when running in background) */}
+          {focusTimer?.running&&tab!=="focus"&&(
+            <div className="timer-bar" onClick={()=>setTab("__focus__")}>
+              <span className="timer-bar-time">{String(Math.floor(focusElapsed/60)).padStart(2,"0")}:{String(focusElapsed%60).padStart(2,"0")}</span>
+              <span className="timer-bar-lbl">◉ {skills.find(s=>s.id===focusTimer.skillId)?.name||"Focus"}</span>
+              <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--danger)",marginLeft:4}} onClick={e=>{e.stopPropagation();stopFocus();}}>■ stop</span>
+            </div>
+          )}
+          {/* Full-screen focus timer */}
+          {tab==="__focus__"&&<FocusTimer elapsed={focusElapsed} skillName={skills.find(s=>s.id===focusTimer?.skillId)?.name||""} onStop={stopFocus} onCancel={cancelFocus}/>}
           {/* Jarvis FAB */}
           <button onClick={()=>setShowJarvis(true)} style={{position:"fixed",bottom:72,right:16,width:44,height:44,borderRadius:"50%",background:"var(--s2)",border:"1px solid var(--b2)",color:"var(--tx)",fontSize:18,cursor:"pointer",zIndex:50,display:"flex",alignItems:"center",justifyContent:"center",boxShadow:"0 2px 12px rgba(0,0,0,.4)",transition:"all .15s"}} title="Jarvis AI">⟡</button>
           {showJarvis&&<JarvisOverlay tasks={tasks} quests={quests} skills={skills} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onClose={()=>setShowJarvis(false)}/>}
+          {/* Profile modal */}
+          {showProfile&&<ProfileModal settings={settings} xp={xp} level={level} prog={prog} skills={skills} streaks={streaks} meds={meds} quests={quests} journal={journal} userId={userId} myFriendCode={myFriendCode} friends={friends} profiles={communityProfiles} onSignIn={()=>setShowAuth(true)} onSignOut={handleSignOut} onClose={()=>setShowProfile(false)} onPublish={publishProfile} onAddFriend={addFriend} onRemoveFriend={removeFriend} onRefresh={refreshCommunity} onSaveSettings={saveSettings} showToast={showToast}/>}
           {/* Mobile bottom nav */}
           <nav className="bnav">
             {NAV.map(n=>(
@@ -1224,30 +1381,113 @@ function QuestPlannerCard({quest,skills,onToggle,radiantAvailable,radiantCooldow
   );
 }
 
-function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAddTask,onToggle,onDelete,onEdit,onToggleQuest,radiantAvailable,radiantCooldownLabel}){
+function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAddTask,onToggle,onDelete,onEdit,onToggleQuest,radiantAvailable,radiantCooldownLabel,nudge,onDismissNudge,onAcceptNudge}){
   const {settings}=useSettings(); const L=settings.labels;
   const [showForm,setShowForm]=useState(false);
-  const [f,setF]=useState({title:"",skill:"",xpVal:20,questId:"",recurrenceDays:[]});
+  const [qaMode,setQaMode]=useState("task");
+  const [f,setF]=useState({title:"",skill:"",xpVal:20,questId:"",recurrenceDays:[],timeBlock:"",priority:"med"});
+  const [qf,setQf]=useState({title:"",type:"side",note:"",priority:"med",pinToday:true});
+  const [nlInput,setNlInput]=useState("");
+  const [nlLoading,setNlLoading]=useState(false);
+  const [collapsed,setCollapsed]=useState({overdue:false,morning:false,afternoon:false,evening:false,flexible:false,coming:true});
+  const [dragId,setDragId]=useState(null);
   const WDAY_LABELS=["Mo","Tu","We","Th","Fr","Sa","Su"];
+  const TIME_BLOCKS=[{id:"morning",label:"Morning"},{id:"afternoon",label:"Afternoon"},{id:"evening",label:"Evening"}];
+  const todayDk=dayKey(new Date());
   const toggleWday=i=>setF(v=>({...v,recurrenceDays:v.recurrenceDays.includes(i)?v.recurrenceDays.filter(x=>x!==i):[...v.recurrenceDays,i]}));
   useEffect(()=>{if(skills.length&&!f.skill)setF(v=>({...v,skill:skills[0]?.id||""}));},[skills]);
+
   const submit=()=>{
     if(!f.title.trim()) return;
-    onAddTask({title:f.title.trim(),period,skill:f.skill||null,xpVal:f.xpVal,questId:f.questId||null,recurrenceDays:period==="weekly"&&f.recurrenceDays.length?f.recurrenceDays:null});
-    setF(v=>({...v,title:"",questId:"",recurrenceDays:[]})); setShowForm(false);
+    onAddTask({title:f.title.trim(),period,skill:f.skill||null,xpVal:f.xpVal,questId:f.questId||null,recurrenceDays:period==="weekly"&&f.recurrenceDays.length?f.recurrenceDays:null,timeBlock:f.timeBlock||null,priority:f.priority||"med"});
+    setF(v=>({...v,title:"",questId:"",recurrenceDays:[],timeBlock:""})); setShowForm(false);
   };
-  const activeQuests=(quests||[]).filter(q=>!q.done);
 
-  // Helper: get quests due on a specific dayKey string (YYYY-MM-DD)
+  const submitQuest=()=>{
+    if(!qf.title.trim()) return;
+    window.dispatchEvent(new CustomEvent("cx:addquest",{detail:{title:qf.title.trim(),type:qf.type,note:qf.note,priority:qf.priority}}));
+    if(qf.pinToday) onAddTask({title:qf.title.trim(),period:"daily",skill:null,xpVal:20,questId:null,timeBlock:f.timeBlock||null,priority:qf.priority});
+    setQf({title:"",type:"side",note:"",priority:"med",pinToday:true}); setShowForm(false);
+  };
+
+  const nlParse=async()=>{
+    if(!nlInput.trim()) return;
+    setNlLoading(true);
+    try{
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+        model:"claude-sonnet-4-20250514",max_tokens:200,
+        system:`Parse a natural language task into JSON only. Fields: title(string), timeBlock("morning"|"afternoon"|"evening"|null), skillName(string or null, from list: ${skills.map(s=>s.name).join(", ")||"none"}), dayOffset(int, 0=today). Reply only valid JSON.`,
+        messages:[{role:"user",content:nlInput}]
+      })});
+      const data=await res.json();
+      const txt=(data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim();
+      let parsed; try{parsed=JSON.parse(txt);}catch{parsed={};}
+      const matchedSkill=skills.find(s=>s.name.toLowerCase()===(parsed.skillName||"").toLowerCase());
+      const targetDate=new Date(); if((parsed.dayOffset||0)>0) targetDate.setDate(targetDate.getDate()+(parsed.dayOffset||0));
+      onAddTask({title:parsed.title||nlInput.trim(),period:"daily",skill:matchedSkill?.id||null,xpVal:20,questId:null,timeBlock:parsed.timeBlock||null,priority:"med",dayKey:dayKey(targetDate)});
+      setNlInput("");
+    }catch(e){console.error(e);}
+    setNlLoading(false);
+  };
+
   const questsForDay=(dk)=>(quests||[]).filter(q=>q.due&&!q.done&&dayKey(new Date(q.due))===dk);
   const questsForMonth=(year,month)=>(quests||[]).filter(q=>{
     if(!q.due||q.done) return false;
     const d=new Date(q.due); return d.getFullYear()===year&&d.getMonth()===month;
   });
-  const todayDk=dayKey(new Date());
+
+  const doneTasks=tasks.filter(t=>t.done);
+  const now=new Date();
+  const todayStart=new Date(now.getFullYear(),now.getMonth(),now.getDate());
+  const overdueQuests=(quests||[]).filter(q=>q.due&&!q.done&&new Date(q.due)<todayStart);
   const todayQuests=questsForDay(todayDk);
   const availableRadiant=(quests||[]).filter(q=>q.type==="radiant"&&(radiantAvailable?radiantAvailable(q):true));
-  const active=tasks.filter(t=>!t.done), done=tasks.filter(t=>t.done);
+  const prioOrder={high:0,med:1,low:2};
+  const sortByPrio=(a,b)=>((prioOrder[a.priority]??1)-(prioOrder[b.priority]??1));
+  const byBlock=(blk)=>tasks.filter(t=>!t.done&&t.timeBlock===blk).sort(sortByPrio);
+  const flexible=[...tasks.filter(t=>!t.done&&!t.timeBlock).sort(sortByPrio),...availableRadiant];
+
+  const tomorrow=new Date(); tomorrow.setDate(tomorrow.getDate()+1);
+  const threeDays=new Date(); threeDays.setDate(threeDays.getDate()+3);
+  const comingUp=(quests||[]).filter(q=>{if(!q.due||q.done) return false; const d=new Date(q.due); return d>=tomorrow&&d<=threeDays;});
+  const activeQuests=(quests||[]).filter(q=>!q.done);
+
+  const Block=({id,label,items,isOverdue=false})=>{
+    const cnt=items.length; if(!cnt&&id!=="flexible") return null;
+    const open=!collapsed[id];
+    return(
+      <div className="block-wrap">
+        <div className="block-hdr" onClick={()=>setCollapsed(v=>({...v,[id]:!v[id]}))}>
+          <span className={`block-hdr-lbl ${isOverdue?"overdue":""}`}>{label}</span>
+          {cnt>0&&<span className="block-count">{cnt}</span>}
+          <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",marginLeft:"auto"}}>{open?"▾":"▸"}</span>
+        </div>
+        {open&&<div className="block-body">
+          {items.map(item=>item.type==="radiant"
+            ?<QuestPlannerCard key={item.id} quest={item} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>
+            :<React.Fragment key={item.id}><TaskCard task={item} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>
+              {nudge?.taskId===item.id&&(
+                <div className="practice-nudge">
+                  <span className="nudge-text">◉ Log practice for {nudge.skillName}?</span>
+                  <button className="nudge-btn nudge-yes" onClick={onAcceptNudge}>Yes</button>
+                  <button className="nudge-btn nudge-no" onClick={onDismissNudge}>Skip</button>
+                </div>
+              )}
+            </React.Fragment>
+          )}
+          {!cnt&&<div style={{fontSize:12,color:"var(--tx3)",padding:"4px 0 2px"}}>Nothing scheduled</div>}
+        </div>}
+      </div>
+    );
+  };
+
+  const handleDragStart=(e,taskId)=>{ setDragId(taskId); e.dataTransfer.effectAllowed="move"; };
+  const handleDrop=(e,dk)=>{
+    e.preventDefault(); if(!dragId) return;
+    const t=allTasks.find(x=>x.id===dragId); if(t) onEdit(dragId,{...t,dayKey:dk,period:"daily"});
+    setDragId(null);
+  };
+
   return (<>
     <div className="stabs">
       {[L.daily,L.weekly,L.monthly].map((lbl,i)=>(
@@ -1257,91 +1497,121 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
     {period==="daily"&&<div className="date-hdr">{todayLabel()}</div>}
     {period==="monthly"&&<div className="date-hdr">{monthLabel()}</div>}
     {period==="weekly"&&<div className="date-hdr">Week of {weekDays[0]?.toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>}
-    {showForm?(
-      <div className="fwrap">
-        <div className="frow"><input className="fi full" placeholder="What needs doing..." autoFocus value={f.title} onChange={e=>setF(v=>({...v,title:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
-        <div className="frow">
-          <select className="fsel" value={f.skill} onChange={e=>setF(v=>({...v,skill:e.target.value}))}>
-            <option value="">No skill</option>
-            {skills.map(s=><option key={s.id} value={s.id}>{skillLabel(s)}</option>)}
-          </select>
-          <select className="fsel" value={f.xpVal} onChange={e=>setF(v=>({...v,xpVal:Number(e.target.value)}))}>
-            {[5,10,20,30,50,80].map(v=><option key={v} value={v}>{v} {L.xpName}</option>)}
-          </select>
-          <button className="fsbtn" style={{width:"auto",padding:"7px 12px",marginTop:0}} onClick={()=>setShowForm(false)}>✕</button>
+
+    {period==="daily"&&<>
+      <div className="nl-row">
+        <input className="nl-input" placeholder='Quick add: "Study guitar 30min morning"' value={nlInput} onChange={e=>setNlInput(e.target.value)} onKeyDown={e=>e.key==="Enter"&&nlParse()}/>
+        <button className="nl-btn" onClick={nlParse} disabled={nlLoading||!nlInput.trim()}>{nlLoading?"…":"↵"}</button>
+      </div>
+
+      {showForm?(<div className="fwrap">
+        <div className="qa-toggle">
+          <button className={`qa-opt ${qaMode==="task"?"on":""}`} onClick={()=>setQaMode("task")}>Task</button>
+          <button className={`qa-opt ${qaMode==="quest"?"on":""}`} onClick={()=>setQaMode("quest")}>Quest</button>
         </div>
-        {activeQuests.length>0&&(
+        {qaMode==="task"?(<>
+          <div className="frow"><input className="fi full" placeholder="What needs doing..." autoFocus value={f.title} onChange={e=>setF(v=>({...v,title:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
           <div className="frow">
-            <select className="fsel" style={{flex:1}} value={f.questId} onChange={e=>setF(v=>({...v,questId:e.target.value}))}>
-              <option value="">No quest link</option>
-              {activeQuests.map(q=><option key={q.id} value={q.id}>◆ {q.title}</option>)}
+            <select className="fsel" value={f.timeBlock} onChange={e=>setF(v=>({...v,timeBlock:e.target.value}))}>
+              <option value="">Flexible</option>
+              {TIME_BLOCKS.map(b=><option key={b.id} value={b.id}>{b.label}</option>)}
+            </select>
+            <select className="fsel" value={f.priority} onChange={e=>setF(v=>({...v,priority:e.target.value}))}>
+              <option value="high">High</option><option value="med">Med</option><option value="low">Low</option>
+            </select>
+            <button className="fsbtn" style={{width:"auto",padding:"7px 12px",marginTop:0}} onClick={()=>setShowForm(false)}>✕</button>
+          </div>
+          <div className="frow">
+            <select className="fsel" value={f.skill} onChange={e=>setF(v=>({...v,skill:e.target.value}))}>
+              <option value="">No skill</option>
+              {skills.map(s=><option key={s.id} value={s.id}>{skillLabel(s)}</option>)}
+            </select>
+            <select className="fsel" value={f.xpVal} onChange={e=>setF(v=>({...v,xpVal:Number(e.target.value)}))}>
+              {[5,10,20,30,50,80].map(v=><option key={v} value={v}>{v} {L.xpName}</option>)}
             </select>
           </div>
-        )}
-        {period==="weekly"&&<div style={{marginBottom:8}}>
-          <div className="label9" style={{marginBottom:5}}>Repeat on days <span style={{opacity:.5,fontWeight:"normal",textTransform:"none",letterSpacing:0}}>(optional)</span></div>
-          <div style={{display:"flex",gap:4}}>
-            {WDAY_LABELS.map((d,i)=>(
-              <button key={i} onClick={()=>toggleWday(i)}
-                style={{flex:1,padding:"4px 0",borderRadius:3,border:`1px solid ${f.recurrenceDays.includes(i)?"var(--primary)":"var(--b2)"}`,background:f.recurrenceDays.includes(i)?"var(--primaryf)":"var(--bg)",color:f.recurrenceDays.includes(i)?"var(--primary)":"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,cursor:"pointer",transition:"all .15s"}}>
-                {d}
-              </button>
-            ))}
+          {activeQuests.length>0&&(<div className="frow"><select className="fsel" style={{flex:1}} value={f.questId} onChange={e=>setF(v=>({...v,questId:e.target.value}))}><option value="">No quest link</option>{activeQuests.map(q=><option key={q.id} value={q.id}>◆ {q.title}</option>)}</select></div>)}
+          <button className="fsbtn" onClick={submit}>Add Task</button>
+        </>):(<>
+          <div className="frow"><input className="fi full" placeholder="Quest title..." autoFocus value={qf.title} onChange={e=>setQf(v=>({...v,title:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submitQuest()}/></div>
+          <div className="frow">
+            <select className="fsel" value={qf.type} onChange={e=>setQf(v=>({...v,type:e.target.value}))}>
+              <option value="main">Main Quest</option><option value="side">Side Quest</option><option value="radiant">Radiant</option>
+            </select>
+            <select className="fsel" value={qf.priority} onChange={e=>setQf(v=>({...v,priority:e.target.value}))}>
+              <option value="high">High</option><option value="med">Med</option><option value="low">Low</option>
+            </select>
           </div>
-        </div>}
-        <button className="fsbtn" onClick={submit}>Add Task</button>
-      </div>
-    ):<button className="addbtn" onClick={()=>setShowForm(true)}><span>+</span> Add task</button>}
-    {period==="weekly"?(weekDays.map((d,i)=>{
-      const dk=dayKey(d), isToday=dk===dayKey(new Date()), dayIdx=i; // 0=Mon..6=Sun
+          <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+            <input type="checkbox" checked={qf.pinToday} onChange={e=>setQf(v=>({...v,pinToday:e.target.checked}))} id="pin-today"/>
+            <label htmlFor="pin-today" style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx2)",cursor:"pointer"}}>Add task for today</label>
+          </div>
+          <div style={{display:"flex",gap:6}}>
+            <button className="fsbtn" onClick={submitQuest}>Add Quest</button>
+            <button className="fsbtn" style={{width:"auto",padding:"8px 12px"}} onClick={()=>setShowForm(false)}>✕</button>
+          </div>
+        </>)}
+      </div>):<button className="addbtn" onClick={()=>setShowForm(true)}><span>+</span> Add task or quest</button>}
+
+      {overdueQuests.length>0&&<>
+        <div className="block-wrap">
+          <div className="block-hdr" onClick={()=>setCollapsed(v=>({...v,overdue:!v.overdue}))}>
+            <span className="block-hdr-lbl overdue">⚠ Overdue</span>
+            <span className="block-count">{overdueQuests.length}</span>
+            <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",marginLeft:"auto"}}>{!collapsed.overdue?"▾":"▸"}</span>
+          </div>
+          {!collapsed.overdue&&<div className="block-body">{overdueQuests.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}</div>}
+        </div>
+      </>}
+
+      <Block id="morning" label="🌅 Morning" items={byBlock("morning")}/>
+      <Block id="afternoon" label="☀️ Afternoon" items={byBlock("afternoon")}/>
+      <Block id="evening" label="🌙 Evening" items={byBlock("evening")}/>
+      <Block id="flexible" label="◈ Flexible" items={flexible}/>
+
+      {todayQuests.length>0&&<>
+        <div className="slbl" style={{marginBottom:6}}>◆ Due today</div>
+        {todayQuests.map(q=>{const prereq=(quests||[]).find(p=>p.id===q.unlocksAfter);const locked=prereq&&!prereq.done;return <QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} locked={locked} prereqTitle={prereq?.title}/>;})}
+      </>}
+
+      {doneTasks.length>0&&<><div className="gap"/><div className="slbl">{L.done}</div>
+        <div className="clist">{doneTasks.map(t=><TaskCard key={t.id} task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div>
+      </>}
+
+      {comingUp.length>0&&<div className="block-wrap" style={{marginTop:8}}>
+        <div className="block-hdr" onClick={()=>setCollapsed(v=>({...v,coming:!v.coming}))}>
+          <span className="block-hdr-lbl">◇ Coming up</span>
+          <span className="block-count">{comingUp.length}</span>
+          <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",marginLeft:"auto"}}>{!collapsed.coming?"▾":"▸"}</span>
+        </div>
+        {!collapsed.coming&&comingUp.map(q=>{
+          const diff=Math.round((new Date(q.due)-now)/86400000);
+          return(<div key={q.id} className="coming-up-card"><span style={{fontSize:11}}>{q.type==="main"?"◆":q.type==="radiant"?"◉":"◇"}</span><span className="coming-up-title">{q.title}</span><span className="coming-up-due">in {diff}d</span></div>);
+        })}
+      </div>}
+
+      {tasks.length===0&&todayQuests.length===0&&overdueQuests.length===0&&(<div className="empty-state"><div className="es-icon">☐</div><div className="es-title">Day is clear</div><div className="es-desc">Type a task above or tap + to schedule. Try: "meditate 20min morning".</div></div>)}
+    </>}
+
+    {period==="weekly"&&(weekDays.map((d,i)=>{
+      const dk=dayKey(d), isToday=dk===dayKey(new Date()), dayIdx=i;
       const dt=[...new Map([...allTasks.filter(t=>t.dayKey===dk),...allTasks.filter(t=>t.period==="weekly"&&(t.recurrenceDays||[]).includes(dayIdx))].map(t=>[t.id,t])).values()];
       const dq=questsForDay(dk);
       return (
-        <div key={i} className="wk-day">
+        <div key={i} className="wk-day" onDragOver={e=>{e.preventDefault();e.currentTarget.style.outline="1px dashed var(--primaryb)";}} onDragLeave={e=>{e.currentTarget.style.outline="none";}} onDrop={e=>{e.currentTarget.style.outline="none";handleDrop(e,dk);}}>
           <div className={`wk-day-lbl ${isToday?"today":""}`}>{["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][i]} {d.getDate()}{isToday?" · today":""}</div>
           {dt.length===0&&dq.length===0?<div style={{fontSize:12,color:"var(--tx3)",paddingLeft:2}}>—</div>:<>
             {dq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}
-            <div className="clist">{dt.map(t=><TaskCard key={t.id} task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div>
+            <div className="clist">{dt.map(t=><div key={t.id} draggable onDragStart={e=>handleDragStart(e,t.id)} style={{cursor:"grab"}}><TaskCard task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/></div>)}</div>
           </>}
         </div>
       );
-    })):(
-      <>
-        {(todayQuests.length>0||availableRadiant.length>0)&&period==="daily"&&<>
-          {todayQuests.length>0&&<>
-            <div className="slbl" style={{marginBottom:6}}>◆ Quests due today</div>
-            {todayQuests.map(q=>{
-              const prereq=(quests||[]).find(p=>p.id===q.unlocksAfter);
-              const locked=prereq&&!prereq.done;
-              return <QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} locked={locked} prereqTitle={prereq?.title}/>;
-            })}
-          </>}
-          {availableRadiant.length>0&&<>
-            <div className="slbl" style={{marginBottom:6,marginTop:todayQuests.length?8:0}}>◉ Ready to practice</div>
-            {availableRadiant.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}
-          </>}
-          {(active.length>0||done.length>0)&&<div className="gap"/>}
-        </>}
-        {period==="monthly"&&(()=>{
-          const now=new Date(); const mq=questsForMonth(now.getFullYear(),now.getMonth());
-          return mq.length>0?<><div className="slbl" style={{marginBottom:6}}>◆ Quests this month</div>
-            {mq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}
-            {(active.length>0||done.length>0)&&<div className="gap"/>}</>:null;
-        })()}
-        {active.length===0&&done.length===0&&todayQuests.length===0&&(
-      <div className="empty-state">
-        <div className="es-icon">☐</div>
-        <div className="es-title">No tasks yet</div>
-        <div className="es-desc">Tasks are small repeatable actions — daily, weekly, monthly. Link them to skills and quests to build momentum toward your bigger goals.</div>
-      </div>
-    )}
-        <div className="clist">{active.map(t=><TaskCard key={t.id} task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div>
-        {done.length>0&&<><div className="gap"/><div className="slbl">{L.done}</div>
-          <div className="clist">{done.map(t=><TaskCard key={t.id} task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div></>}
-      </>
-    )}
+    }))}
+
+    {period==="monthly"&&(()=>{const now2=new Date();const mq=questsForMonth(now2.getFullYear(),now2.getMonth());return mq.length>0?<><div className="slbl" style={{marginBottom:6}}>◆ Quests this month</div>{mq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}</>:null;})()}
   </>);
 }
+
 
 function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,onToggleSubquest,onDeleteSubquest,onReorder,radiantAvailable,radiantCooldownLabel}){
   const {settings}=useSettings(); const L=settings.labels;
@@ -1349,6 +1619,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
   const [search,setSearch]=useState("");
   const [filterPrio,setFilterPrio]=useState("");
   const [sortBy,setSortBy]=useState("manual"); // "manual" | "priority" | "due"
+  const [viewMode,setViewMode]=useState("list"); // "list" | "roadmap"
   const [f,setF]=useState({title:"",skillIds:[],note:"",dueDate:"",type:"main",priority:"med",color:null,cooldown:60*60*1000});
   const [qXpSug,setQXpSug]=useState(null);
   const [qXpLoad,setQXpLoad]=useState(false);
@@ -1410,8 +1681,14 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
         title="Sort order">
         {sortBy==="manual"?"⇅ manual":sortBy==="priority"?"⬤ priority":"◷ due date"}
       </button>
+      <button onClick={()=>setViewMode(v=>v==="list"?"roadmap":"list")}
+        style={{background:viewMode==="roadmap"?"var(--primaryf)":"none",border:`1px solid ${viewMode==="roadmap"?"var(--primaryb)":"var(--b2)"}`,borderRadius:3,padding:"5px 8px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:viewMode==="roadmap"?"var(--primary)":"var(--tx3)",flexShrink:0}}
+        title="Roadmap view">
+        ⬡ map
+      </button>
     </div>
-    <div className="slbl">{L.mainQuest}s</div>
+    {viewMode==="roadmap"&&<QuestRoadmap quests={quests} skills={skills}/>}
+    {viewMode==="list"&&<><div className="slbl">{L.mainQuest}s</div>
     {form==="main"?(<div className="fwrap">
       <div className="frow"><input className="fi full" autoFocus placeholder="Quest title..." value={f.title} onChange={e=>setF(v=>({...v,title:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
       {skills.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
@@ -1561,7 +1838,57 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
         <button className="fsbtn" style={{width:"auto",padding:"8px 16px",margin:"8px auto 0"}} onClick={()=>openForm("radiant")}>+ Add Radiant Quest</button>
       </div>
     )}
-  </>);
+  </>}
+</>);
+}
+
+function QuestRoadmap({quests,skills}){
+  // Build chains: find root quests (not unlocked by others) and follow unlocksAfter links
+  const chainRoots=(quests||[]).filter(q=>!q.done||(q.done)).reduce((acc,q)=>{
+    if(!(quests||[]).some(other=>other.unlocksAfter===q.id)&&q.unlocksAfter) return acc;
+    if(!(quests||[]).some(other=>other.unlocksAfter===q.id)) acc.push(q);
+    return acc;
+  },[]);
+  // Actually show all quests grouped by chain
+  const chains=[];
+  const visited=new Set();
+  const buildChain=(q,depth=0)=>{
+    if(visited.has(q.id)) return;
+    visited.add(q.id);
+    chains.push({q,depth});
+    const children=(quests||[]).filter(other=>other.unlocksAfter===q.id);
+    children.forEach(c=>buildChain(c,depth+1));
+  };
+  // Start from quests with no prereq
+  (quests||[]).filter(q=>!q.unlocksAfter).forEach(q=>buildChain(q));
+  // Add any remaining (orphans)
+  (quests||[]).filter(q=>!visited.has(q.id)).forEach(q=>buildChain(q));
+
+  if(!chains.length) return <div className="empty">No quests to map</div>;
+  return(
+    <div style={{marginBottom:16}}>
+      <div className="slbl" style={{marginBottom:10}}>Quest Chains</div>
+      {chains.map(({q,depth},i)=>{
+        const isLast=i===chains.length-1||chains[i+1]?.depth<=depth;
+        const sk=q.skills?.map(id=>skills.find(s=>s.id===id)).filter(Boolean)||[];
+        return(
+          <div key={q.id} className="roadmap-node" style={{paddingLeft:20+depth*16}}>
+            {!isLast&&<div className="roadmap-line"/>}
+            <div className={`roadmap-dot ${q.done?"done":q.unlocksAfter&&!(quests||[]).find(p=>p.id===q.unlocksAfter)?.done?"locked":""}`}/>
+            <div className={`roadmap-card ${q.done?"done":""}`}>
+              <div className="roadmap-title">{q.title}</div>
+              <div className="roadmap-meta">
+                <span className="ctag">{q.type}</span>
+                {q.done&&<span className="ctag" style={{color:"var(--success)"}}>✓ done</span>}
+                {sk.map(s=><span key={s.id} className="ctag" style={{color:s.color}}>{s.icon} {s.name}</span>)}
+                {q.xpVal&&<span className="ctag" style={{color:"var(--primary)"}}>+{q.xpVal} XP</span>}
+              </div>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
 }
 
 const SKILL_ICONS_EXTRA = ["◈","◉","◎","◆","◬","✦","◌","◊","△","○","□","◇","❋","⊕","◐","◑","⬡","✧","⟡","◿","⚔","🧠","💪","🎯","🎨","📚","🎵","🌱","⚡","🔥","💎","🏆","🎭","🔬","🌟","✍","🎸","🏋","🧘","💻","🗺","🎲","⚙","🛡","🌊","🦾","🧩","🎤","📖","🌙"];
@@ -1825,7 +2152,7 @@ function SkAiCatBtn({name,intention,onAssign}){
   );
 }
 
-function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,onEdit,onReorder,onLink,onAward}){
+function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,onEdit,onReorder,onLink,onStartFocus,onAward}){
   const {settings}=useSettings(); const L=settings.labels;
   const mainSkills=skills.filter(s=>s.type!=="subskill");
   const subSkills=skills.filter(s=>s.type==="subskill");
@@ -2082,7 +2409,9 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
             </div>
             <div className="sk-meta">
               {streak.count>=3&&<span className="sk-streak">{streak.count}d{mult>1?` ${mult}×`:""}</span>}
+              {(()=>{const lastMed=meds.filter(m=>(m.skills||[m.skillId]).includes(s.id)).sort((a,b)=>b.ts-a.ts)[0];const daysSince=lastMed?Math.floor((Date.now()-lastMed.ts)/86400000):999;return daysSince>=7?<span className="stale-label" title={`${daysSince}d since last practice`}>·{daysSince}d ago</span>:null;})()}
               <div className="sk-lv">{L.levelName} <span>{lv}</span></div>
+              {onStartFocus&&<button className="sk-delbtn" onClick={()=>onStartFocus(s.id)} title="Start focus timer" style={{fontSize:10}}>◉</button>}
               <button className="sk-delbtn" style={{marginLeft:2}} onClick={()=>openEdit(s)}>✎</button>
               <button className="sk-delbtn" onClick={()=>onDelete(s.id)}>✕</button>
             </div>
@@ -2468,7 +2797,12 @@ Suggest fair XP and a short reason. Reply ONLY with JSON, no markdown: {"xp": NU
             <span className="dur-val">· +{estXp} {L.xpName}{mult>1&&<span style={{color:"var(--primary)"}}> · {streak.count}d {mult}×</span>}</span>
           </div>
         </div>
-        <input type="range" min={1} max={240} value={Math.min(f.dur,240)} onChange={e=>setF(v=>({...v,dur:Number(e.target.value)}))}/>
+        <input type="range"
+          min={timeUnit==="day"?0.1:timeUnit==="hr"?0.25:1}
+          max={timeUnit==="day"?14:timeUnit==="hr"?24:240}
+          step={timeUnit==="day"?0.1:timeUnit==="hr"?0.25:1}
+          value={fromMin(f.dur)}
+          onChange={e=>setF(v=>({...v,dur:Math.max(1,toMin(Number(e.target.value)||0))}))}/>
         <textarea className="fi full" placeholder={`Journal (optional)${aiEnabled?" — triggers AI scoring":""}...`}
           style={{minHeight:72,resize:"vertical",marginBottom:8}} value={f.note} onChange={e=>setF(v=>({...v,note:e.target.value}))}/>
         {f.note.trim()&&aiEnabled&&<div className="ai-lbl">✦ Advisor will score this session</div>}
@@ -3376,7 +3710,39 @@ function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,o
 }
 
 // ─── JOURNAL TAB ────────────────────────────────────────────────────────────
-function JournalTab({entries,skills,quests,onAdd,onDelete,onAwardXp,onEditQuest}){
+function JournalTab({entries,skills,quests,meds,practiceTypes,streaks,pending,subTab,onSubTab,onAdd,onDelete,onAwardXp,onEditQuest,onLog,onDeleteMed,onEditMed,onAddType,onDeleteType,onClearPending}){
+  const {settings}=useSettings(); const L=settings.labels;
+  return(<>
+    <div className="jtab-row">
+      <button className={`jtab ${subTab==="log"?"on":""}`} onClick={()=>onSubTab("log")}>◉ Log</button>
+      <button className={`jtab ${subTab==="entries"?"on":""}`} onClick={()=>onSubTab("entries")}>✦ Entries</button>
+      <button className={`jtab ${subTab==="history"?"on":""}`} onClick={()=>onSubTab("history")}>◈ History</button>
+    </div>
+    {subTab==="log"&&<PracticeTab meds={meds} skills={skills} streaks={streaks} pending={pending} practiceTypes={practiceTypes} onAddType={onAddType} onDeleteType={onDeleteType} onLog={onLog} onDelete={onDeleteMed} onEdit={onEditMed} onClearPending={onClearPending}/>}
+    {subTab==="entries"&&<JournalEntries entries={entries} skills={skills} quests={quests} onAdd={onAdd} onDelete={onDelete} onAwardXp={onAwardXp} onEditQuest={onEditQuest}/>}
+    {subTab==="history"&&<PracticeHistory meds={meds} skills={skills}/>}
+  </>);
+}
+
+function PracticeHistory({meds,skills}){
+  const sorted=[...(meds||[])].sort((a,b)=>b.ts-a.ts);
+  if(!sorted.length) return <div className="empty">No sessions logged yet</div>;
+  return(<div className="clist">{sorted.map(m=>{
+    const sk=skills.find(s=>s.id===m.skillId||(m.skills||[]).includes(s.id));
+    const mins=m.dur||0; const display=mins>=60?`${Math.floor(mins/60)}h ${mins%60}m`:`${mins}m`;
+    return(<div key={m.id} className="med-card">
+      <div className="med-icon">{sk?.icon||"◉"}</div>
+      <div className="med-body">
+        <div className="med-name">{sk?.name||"Practice"}</div>
+        <div className="med-sub">{display} · {m.type||"session"}</div>
+        <div className="med-sub" style={{color:"var(--tx3)"}}>{fmtDate(m.ts)}</div>
+        {m.note&&<div className="med-journal">{m.note}</div>}
+      </div>
+    </div>);
+  })}</div>);
+}
+
+function JournalEntries({entries,skills,quests,onAdd,onDelete,onAwardXp,onEditQuest}){
   const {settings}=useSettings(); const L=settings.labels;
   const [text,setText]=useState("");
   const [img,setImg]=useState(null);
@@ -4067,10 +4433,14 @@ function CommunityCard({profile,isFriend,badges,filterCat}){
   );
 }
 
-function WeeklyReview({tasks,quests,skills,meds,xpLog,journal,settings,onClose,onNavigate}){
+function WeeklyReview({tasks,quests,skills,meds,xpLog,journal,settings,onClose,onNavigate,onAddTask}){
   const L=settings.labels;
   const [analysis,setAnalysis]=useState("");
   const [loading,setLoading]=useState(false);
+  const [planStep,setPlanStep]=useState(false); // show planning step after review
+  const [planLoading,setPlanLoading]=useState(false);
+  const [planSuggestions,setPlanSuggestions]=useState([]); // [{questId,title,reason}]
+  const [planAccepted,setPlanAccepted]=useState(false);
 
   const weekAgo=Date.now()-7*86400000;
   const recentTasks=tasks.filter(t=>t.done&&t.created>weekAgo);
@@ -4124,10 +4494,10 @@ function WeeklyReview({tasks,quests,skills,meds,xpLog,journal,settings,onClose,o
         dayActivity,
         journalEntriesThisWeek:journal.filter(j=>j.created>weekAgo).length,
       };
-      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
-          model:"llama-3.3-70b-versatile",max_tokens:1000,
-          messages:[{role:"user",content:`You are a grounded, direct life coach doing a weekly rewind for ${summary.playerName}. You have full context about their week. Be specific, personal, and honest — not just cheerleading. Acknowledge real struggles and patterns.
+          model:"claude-sonnet-4-20250514",max_tokens:600,
+          messages:[{role:"user",content:`You are a grounded, direct life coach doing a weekly rewind for ${summary.playerName}. Be specific, personal, and honest — not just cheerleading. Acknowledge real struggles and patterns.
 
 Week data:
 ${JSON.stringify(summary,null,2)}
@@ -4137,81 +4507,319 @@ Write a weekly rewind in exactly this structure:
 [2-3 specific things they actually did — reference real session notes, quest titles, skills if available]
 
 **◉ PATTERNS**
-[What does this week reveal about their habits? Be honest. What showed up consistently? What was avoided? What do the practice notes say about quality vs just showing up?]
+[What does this week reveal about their habits? Be honest. What showed up consistently? What was avoided?]
 
 **◆ ONE FOCUS FOR NEXT WEEK**
-[One specific, concrete thing — not generic advice. Based on their intentions and where they fell short or can build momentum.]
+[One specific, concrete thing. Based on their intentions and where they fell short or can build momentum.]
 
-Keep it under 350 words. Be like a coach who read the actual notes, not a bot reciting stats.`}]
+Keep it under 300 words. Be like a coach who read the actual notes, not a bot reciting stats.`}]
         })
       });
       const data=await res.json();
-      const msg=data?.choices?.[0]?.message?.content||data?.content?.[0]?.text||"";
+      const msg=(data.content?.[0]?.text||"Couldn't generate review. Try again.");
       setAnalysis(msg);
     }catch(e){ setAnalysis("Couldn't connect to advisor. Try again."); }
     finally{ setLoading(false); }
+  };
+
+  const runPlan=async()=>{
+    setPlanLoading(true);
+    try{
+      const activeQ=quests.filter(q=>!q.done).map(q=>({id:q.id,title:q.title,type:q.type,skills:(q.skills||[]).map(id=>skills.find(s=>s.id===id)?.name).filter(Boolean)}));
+      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+          model:"claude-sonnet-4-20250514",max_tokens:400,
+          system:"You are a planning assistant. Reply ONLY with valid JSON array, no markdown, no explanation.",
+          messages:[{role:"user",content:`Based on this player's active quests, pick 3 to focus on next week. Prioritize momentum and skill variety.
+
+Active quests: ${JSON.stringify(activeQ)}
+Weekly review: ${analysis.slice(0,300)}
+
+Reply with JSON only: [{"questId":"id","title":"title","reason":"one sentence, 10 words max"}]`}]
+        })
+      });
+      const data=await res.json();
+      const txt=(data.content?.[0]?.text||"[]").replace(/```json|```/g,"").trim();
+      let parsed; try{parsed=JSON.parse(txt);}catch{parsed=[];}
+      setPlanSuggestions(parsed.slice(0,3));
+    }catch(e){setPlanSuggestions([]);}
+    setPlanLoading(false);
+  };
+
+  const acceptPlan=()=>{
+    planSuggestions.forEach(s=>{
+      if(onAddTask) onAddTask({title:s.title,period:"daily",skill:null,xpVal:20,questId:s.questId,timeBlock:null,priority:"med"});
+    });
+    setPlanAccepted(true);
   };
 
   return (
     <div style={{position:"fixed",inset:0,background:"#000a",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,padding:16}}>
       <div className="review-modal">
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-          <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,letterSpacing:2,color:"var(--primary)"}}>WEEKLY REVIEW</div>
-          <button className="delbtn" onClick={onClose}>✕</button>
-        </div>
-
-        <div className="review-section">
-          <div className="slbl" style={{margin:"0 0 10px"}}>This Week's Stats</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-            {[
-              ["Tasks done",recentTasks.length],
-              ["Quests completed",recentQuests.length],
-              ["Practice sessions",recentMeds.length],
-              ["XP earned",recentXp],
-              ["Minutes practiced",recentMeds.reduce((s,m)=>s+(m.dur||0),0)],
-            ].map(([label,val])=>(
-              <div key={label} style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"10px 14px"}}>
-                <div style={{fontFamily:"'DM Mono',monospace",fontSize:16,color:"var(--primary)"}}>{val}</div>
-                <div style={{fontSize:11,color:"var(--tx2)",marginTop:2}}>{label}</div>
-              </div>
-            ))}
+          <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,letterSpacing:2,color:"var(--primary)"}}>
+            {planStep?"◆ PLAN NEXT WEEK":"WEEKLY REVIEW"}
+          </div>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            {planStep&&<button className="delbtn" style={{fontSize:9,color:"var(--tx3)"}} onClick={()=>setPlanStep(false)}>← Back</button>}
+            <button className="delbtn" onClick={onClose}>✕</button>
           </div>
         </div>
 
-        {recentQuests.length>0&&(
+        {!planStep?(<>
           <div className="review-section">
-            <div className="slbl" style={{margin:"0 0 8px"}}>Quests Completed</div>
-            {recentQuests.map(q=>(
-              <div key={q.id} style={{fontSize:12,color:"var(--tx2)",padding:"3px 0",borderBottom:"1px solid var(--b1)"}}>◆ {q.title}</div>
+            <div className="slbl" style={{margin:"0 0 10px"}}>This Week's Stats</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
+              {[
+                ["Tasks done",recentTasks.length],
+                ["Quests completed",recentQuests.length],
+                ["Practice sessions",recentMeds.length],
+                ["XP earned",recentXp],
+                ["Minutes practiced",recentMeds.reduce((s,m)=>s+(m.dur||0),0)],
+              ].map(([label,val])=>(
+                <div key={label} style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"10px 14px"}}>
+                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:16,color:"var(--primary)"}}>{val}</div>
+                  <div style={{fontSize:11,color:"var(--tx2)",marginTop:2}}>{label}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {recentQuests.length>0&&(
+            <div className="review-section">
+              <div className="slbl" style={{margin:"0 0 8px"}}>Quests Completed</div>
+              {recentQuests.map(q=>(
+                <div key={q.id} style={{fontSize:12,color:"var(--tx2)",padding:"3px 0",borderBottom:"1px solid var(--b1)"}}>◆ {q.title}</div>
+              ))}
+            </div>
+          )}
+
+          <div className="review-section">
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+              <div className="slbl" style={{margin:0}}>AI Analysis</div>
+              {!analysis&&<button className="fsbtn" style={{width:"auto",padding:"6px 14px",margin:0,fontSize:10}} onClick={runReview} disabled={loading}>
+                {loading?"◌ Analysing...":"Get Review"}
+              </button>}
+            </div>
+            {analysis?(
+              <div style={{fontSize:13,color:"var(--tx)",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{analysis}</div>
+            ):(
+              <div style={{fontSize:12,color:"var(--tx3)",fontStyle:"italic"}}>Click "Get Review" for an AI-powered analysis of your week.</div>
+            )}
+          </div>
+
+          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}>
+            {analysis&&<button className="fsbtn primary" style={{width:"auto",padding:"6px 14px",margin:0,fontSize:10}} onClick={()=>{setPlanStep(true);if(!planSuggestions.length)runPlan();}}>◆ Plan Next Week →</button>}
+            {[["quests","Quests"],["skills","Skills"],["journal","Log"],["advisor","Advisor"]].map(([t,label])=>(
+              <button key={t} className="fsbtn" style={{width:"auto",padding:"6px 14px",margin:0,fontSize:10,background:"var(--s2)",color:"var(--tx2)",border:"1px solid var(--b2)"}}
+                onClick={()=>onNavigate(t)}>
+                {label}
+              </button>
             ))}
           </div>
-        )}
-
-        <div className="review-section">
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-            <div className="slbl" style={{margin:0}}>AI Analysis</div>
-            {!analysis&&<button className="fsbtn" style={{width:"auto",padding:"6px 14px",margin:0,fontSize:10}} onClick={runReview} disabled={loading}>
-              {loading?"◌ Analysing...":"Get Review"}
-            </button>}
-          </div>
-          {analysis?(
-            <div style={{fontSize:13,color:"var(--tx)",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{analysis}</div>
-          ):(
-            <div style={{fontSize:12,color:"var(--tx3)",fontStyle:"italic"}}>Click "Get Review" for an AI-powered analysis of your week.</div>
-          )}
-        </div>
-
-        <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}>
-          {["quests","skills","practice","journal"].map(t=>(
-            <button key={t} className="fsbtn" style={{width:"auto",padding:"6px 14px",margin:0,fontSize:10,background:"var(--s2)",color:"var(--tx2)",border:"1px solid var(--b2)"}}
-              onClick={()=>onNavigate(t)}>
-              Go to {t}
-            </button>
+        </>):(<>
+          <div style={{fontSize:12,color:"var(--tx3)",marginBottom:16,lineHeight:1.6}}>Based on your week, here are 3 quests to focus on. Accept to pin them as today's tasks.</div>
+          {planLoading&&<div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"var(--tx3)",letterSpacing:1,padding:"20px 0",textAlign:"center"}}>◌ Thinking...</div>}
+          {!planLoading&&planSuggestions.map((s,i)=>(
+            <div key={i} style={{background:"var(--primaryf)",border:"1px solid var(--primaryb)",borderRadius:"var(--r)",padding:"10px 14px",marginBottom:6}}>
+              <div style={{fontSize:13,color:"var(--tx)",marginBottom:3}}>◆ {s.title}</div>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)",letterSpacing:.5}}>{s.reason}</div>
+            </div>
           ))}
-        </div>
+          {!planLoading&&planSuggestions.length===0&&<div style={{fontSize:12,color:"var(--tx3)",fontStyle:"italic",padding:"12px 0"}}>No active quests to suggest. Add some quests first.</div>}
+          {!planLoading&&planSuggestions.length>0&&(
+            planAccepted
+              ?<div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"var(--success)",letterSpacing:1,padding:"12px 0",textAlign:"center"}}>✓ Added to today's planner</div>
+              :<div style={{display:"flex",gap:8,marginTop:8}}>
+                <button className="fsbtn primary" style={{margin:0}} onClick={acceptPlan}>◆ Add to Planner</button>
+                <button className="fsbtn" style={{width:"auto",padding:"8px 14px",margin:0,color:"var(--tx3)",background:"none"}} onClick={()=>onNavigate("planner")}>Open Planner</button>
+              </div>
+          )}
+        </>)}
       </div>
     </div>
   );
+}
+
+// ─── FOCUS TIMER ─────────────────────────────────────────────────────────────
+function FocusTimer({elapsed,skillName,onStop,onCancel}){
+  const mins=String(Math.floor(elapsed/60)).padStart(2,"0");
+  const secs=String(elapsed%60).padStart(2,"0");
+  return (
+    <div className="timer-overlay">
+      <div className="timer-skill">◉ {skillName||"Focus Session"}</div>
+      <div className="timer-face">{mins}:{secs}</div>
+      <div style={{color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,marginBottom:48}}>IN SESSION</div>
+      <button className="timer-btn timer-stop" onClick={onStop}>■ Stop & Log</button>
+      <button className="timer-btn timer-cancel" onClick={onCancel}>Cancel</button>
+    </div>
+  );
+}
+
+// ─── PROFILE MODAL ────────────────────────────────────────────────────────────
+function ProfileModal({settings,xp,level,prog,skills,streaks,meds,quests,journal,userId,myFriendCode,friends,profiles,onSignIn,onSignOut,onClose,onPublish,onAddFriend,onRemoveFriend,onRefresh,onSaveSettings,showToast}){
+  const L=settings.labels;
+  const [view,setView]=useState("profile"); // profile | community | friends | share
+  const [friendInput,setFriendInput]=useState("");
+  const [loading,setLoading]=useState(false);
+  const [profilePublic,setProfilePublic]=useState(settings.profile.public||false);
+  const perLv=settings.xp.globalPerLevel||600;
+
+  const getBadges=()=>{
+    const badges=[];
+    if(Object.values(streaks).some(s=>s.count>=7)) badges.push({icon:"◆",label:"Immaculate",tip:"7-day streak"});
+    if((journal||[]).length>=5) badges.push({icon:"✦",label:"Chronicler",tip:"5+ journal entries"});
+    if((meds||[]).length>=10) badges.push({icon:"◉",label:"Practitioner",tip:"10+ sessions"});
+    if(quests.filter(q=>q.done).length>=5) badges.push({icon:"◈",label:"Seeker",tip:"5+ quests completed"});
+    return badges;
+  };
+  const badges=getBadges();
+  const topSkills=skills.filter(s=>s.type!=="subskill").sort((a,b)=>(b.xp||0)-(a.xp||0)).slice(0,3);
+  const totalMins=meds.reduce((a,m)=>a+(m.dur||0),0);
+  const doneQuests=quests.filter(q=>q.done).length;
+
+  const togglePublic=async(val)=>{
+    setProfilePublic(val);
+    const next={...settings,profile:{...settings.profile,public:val}};
+    await onSaveSettings(next);
+    await onPublish(next);
+    showToast(val?"Profile published":"Profile hidden");
+  };
+
+  const addFriend=async()=>{
+    if(!friendInput.trim()) return;
+    setLoading(true);
+    await onAddFriend(friendInput.trim().toUpperCase());
+    setFriendInput(""); setLoading(false);
+    showToast("Friend added");
+  };
+
+  return (
+    <div className="profile-modal" onClick={onClose}>
+      <div className="profile-modal-bg"/>
+      <div className="profile-sheet" onClick={e=>e.stopPropagation()}>
+        <div className="profile-pill"/>
+        {/* Sub-nav */}
+        <div className="stabs" style={{marginBottom:18}}>
+          {[["profile","◎ Profile"],["community","⬡ Community"],["share","◈ Share"]].map(([id,lbl])=>(
+            <button key={id} className={`stab ${view===id?"on":""}`} onClick={()=>setView(id)}>{lbl}</button>
+          ))}
+        </div>
+
+        {view==="profile"&&<>
+          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:16}}>
+            <div className="profile-avatar">{settings.profile.name?settings.profile.name[0].toUpperCase():"?"}</div>
+            <div style={{flex:1}}>
+              <div className="profile-name">{settings.profile.name||"Adventurer"}</div>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--primary)",letterSpacing:1}}>{L.levelName} {level}</div>
+              <div className="profile-xp-bar"><div className="profile-xp-fill" style={{width:`${prog}%`}}/></div>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)"}}>{xp % perLv} / {perLv} {L.xpName}</div>
+            </div>
+          </div>
+          {badges.length>0&&<div className="badge-row" style={{marginBottom:14}}>{badges.map(b=><div key={b.label} className="badge" title={b.tip}>{b.icon} {b.label}</div>)}</div>}
+          <div className="stats" style={{marginBottom:16}}>
+            <div className="sbox"><div className="snum">{doneQuests}</div><div className="slb2">Quests</div></div>
+            <div className="sbox"><div className="snum">{totalMins>=60?Math.round(totalMins/60)+"h":totalMins+"m"}</div><div className="slb2">Practiced</div></div>
+            <div className="sbox"><div className="snum">{(journal||[]).length}</div><div className="slb2">Entries</div></div>
+          </div>
+          {topSkills.length>0&&<>
+            <div className="slbl" style={{marginBottom:8}}>Top Skills</div>
+            {topSkills.map(s=>{const lv=Math.floor((s.xp||0)/(settings.xp.skillPerLevel||6000))+1;return(
+              <div key={s.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
+                <span style={{fontSize:14}}>{s.icon}</span>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:12,color:"var(--tx)",marginBottom:2}}>{s.name}</div>
+                  <div style={{height:2,background:"var(--b1)",borderRadius:1,overflow:"hidden"}}><div style={{height:"100%",width:`${skillProg(s.xp||0,settings.xp.skillPerLevel||6000)}%`,background:s.color,borderRadius:1}}/></div>
+                </div>
+                <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)"}}>Lv {lv}</span>
+              </div>
+            );})}
+          </>}
+          <div style={{height:12}}/>
+          {/* Account */}
+          <div className="slbl" style={{marginBottom:8}}>Account</div>
+          {userId
+            ?<div style={{display:"flex",gap:8,marginBottom:8}}>
+              <div style={{flex:1,fontSize:11,color:"var(--tx2)",fontFamily:"'DM Mono',monospace",padding:"8px 0"}}>Signed in · syncing</div>
+              <button className="fsbtn" style={{width:"auto",padding:"6px 14px",margin:0}} onClick={onSignOut}>Sign Out</button>
+            </div>
+            :<button className="fsbtn" style={{marginBottom:8}} onClick={onSignIn}>Sign In / Create Account</button>
+          }
+          {myFriendCode&&<div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)",marginBottom:8}}>Friend code: <span style={{color:"var(--tx2)",letterSpacing:2}}>{myFriendCode}</span></div>}
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 0",borderTop:"1px solid var(--b1)",marginTop:4}}>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)"}}>Public profile</div>
+            <button className={`tog ${profilePublic?"on":""}`} onClick={()=>togglePublic(!profilePublic)}><div className="tog-knob"/></button>
+          </div>
+          {/* Add friend */}
+          {userId&&<div style={{marginTop:12}}>
+            <div className="slbl" style={{marginBottom:6}}>Add Friend</div>
+            <div style={{display:"flex",gap:6}}>
+              <input className="fi" placeholder="Friend code..." value={friendInput} onChange={e=>setFriendInput(e.target.value.toUpperCase())} style={{letterSpacing:2,fontFamily:"'DM Mono',monospace"}}/>
+              <button className="fsbtn" style={{width:"auto",padding:"7px 12px",margin:0}} onClick={addFriend} disabled={loading}>Add</button>
+            </div>
+          </div>}
+        </>}
+
+        {view==="community"&&<>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
+            <div className="slbl" style={{margin:0}}>Community Board</div>
+            <button className="fsbtn" style={{width:"auto",padding:"5px 12px",margin:0,fontSize:8}} onClick={async()=>{setLoading(true);await onRefresh();setLoading(false);}}>
+              {loading?"…":"↺ Refresh"}
+            </button>
+          </div>
+          {(profiles||[]).filter(p=>p.public!==false).slice(0,10).map(p=>(
+            <div key={p.userId} style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"10px 12px",marginBottom:6}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
+                <div style={{fontSize:13}}>{p.name||"Adventurer"}</div>
+                <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--primary)"}}>Lv {Math.floor((p.xp||0)/(settings.xp.globalPerLevel||600))+1}</div>
+              </div>
+              {p.skills?.slice(0,3).map(s=><span key={s.id} className="ctag" style={{marginRight:4}}>{s.icon} {s.name}</span>)}
+            </div>
+          ))}
+          {(profiles||[]).length===0&&<div className="empty">No profiles yet</div>}
+        </>}
+
+        {view==="share"&&<ShareCard settings={settings} level={level} xp={xp} skills={skills} streaks={streaks} meds={meds} quests={quests} journal={journal} showToast={showToast}/>}
+      </div>
+    </div>
+  );
+}
+
+// ─── SHARE CARD ───────────────────────────────────────────────────────────────
+function ShareCard({settings,level,xp,skills,streaks,meds,quests,journal,showToast}){
+  const L=settings.labels;
+  const topSkills=skills.filter(s=>s.type!=="subskill").sort((a,b)=>(b.xp||0)-(a.xp||0)).slice(0,3);
+  const topStreak=Math.max(0,...Object.values(streaks).map(s=>s.count||0));
+  const totalMins=meds.reduce((a,m)=>a+(m.dur||0),0);
+  const doneQuests=quests.filter(q=>q.done).length;
+  const cardRef=useRef();
+
+  const copyText=()=>{
+    const lines=[
+      `${settings.profile.name||"Adventurer"} — ${L.levelName} ${level}`,
+      `◆ ${doneQuests} quests completed`,
+      `◉ ${totalMins>=60?Math.round(totalMins/60)+"h practiced":totalMins+"min practiced"}`,
+      `✦ ${topStreak} day streak`,
+      topSkills.length?`Top skills: ${topSkills.map(s=>s.name).join(", ")}`:"",
+    ].filter(Boolean).join("\n");
+    navigator.clipboard?.writeText(lines).then(()=>showToast("Copied to clipboard!"));
+  };
+
+  return (<>
+    <div className="share-card" ref={cardRef}>
+      <div className="share-level">{level}</div>
+      <div className="share-name">{settings.profile.name||"Adventurer"}</div>
+      <div className="share-stats">
+        <div className="share-stat"><div className="share-stat-num">{doneQuests}</div><div className="share-stat-lbl">Quests</div></div>
+        <div className="share-stat"><div className="share-stat-num">{totalMins>=60?Math.round(totalMins/60)+"h":totalMins+"m"}</div><div className="share-stat-lbl">Practice</div></div>
+        <div className="share-stat"><div className="share-stat-num">{topStreak}</div><div className="share-stat-lbl">Streak</div></div>
+      </div>
+      {topSkills.length>0&&<div style={{display:"flex",justifyContent:"center",gap:8,flexWrap:"wrap"}}>
+        {topSkills.map(s=><span key={s.id} style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)",border:"1px solid var(--b2)",borderRadius:20,padding:"2px 8px"}}>{s.icon} {s.name}</span>)}
+      </div>}
+    </div>
+    <button className="fsbtn" onClick={copyText}>◈ Copy Progress to Clipboard</button>
+  </>);
 }
 
 // ─── CUSTOM IMAGES SUPPORT ──────────────────────────────────────────────────
