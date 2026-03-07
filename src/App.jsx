@@ -133,6 +133,7 @@ const DEFAULT_SETTINGS = {
   fontSize: 14,
   contentWidth: 700,
   uiMode: "rpg",
+  compact: false,
 };
 
 const THEME_PRESETS = [
@@ -300,10 +301,6 @@ function computedTabTitle(tab,s){
   if(tab==="settings") return `${pre} Settings`;
   return pre;
 }
-function deepMerge(def,saved){
-
-
-
 
 function deepMerge(def,saved){
   const out={...def};
@@ -439,7 +436,7 @@ button,input,textarea,select{font-family:\'DM Sans\',sans-serif;}
 .slbl::after{content:\'\';flex:1;height:1px;background:var(--b1);}
 .gap{height:18px;}
 .clist{display:flex;flex-direction:column;gap:2px;margin-bottom:4px;}
-.card{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:10px 12px;display:flex;align-items:flex-start;gap:10px;transition:border-color .15s;}
+.card{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:10px 12px;display:flex;align-items:flex-start;gap:10px;transition:border-color .15s,opacity .3s;}
 .card:hover{border-color:var(--b2);}.card.done{opacity:.35;}
 .card.quest-main{border-left:2px solid var(--primary);}.card.quest-radiant{border-left:2px solid var(--secondary);}
 .chk{width:16px;height:16px;border-radius:3px;border:1px solid var(--b2);flex-shrink:0;cursor:pointer;background:none;display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--success);transition:all .15s;margin-top:1px;}
@@ -462,7 +459,16 @@ button,input,textarea,select{font-family:\'DM Sans\',sans-serif;}
 .fsbtn:hover{background:var(--b1);border-color:var(--b3);}.fsbtn.primary{color:var(--primary);border-color:var(--primaryb);}.fsbtn.secondary{color:var(--secondary);border-color:var(--secondaryb);}.fsbtn:disabled{opacity:.4;cursor:default;}
 .exp-tog{background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:6px;color:var(--tx3);font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;padding:6px 0;transition:color .15s;width:100%;}
 .exp-tog:hover{color:var(--tx2);}.exp-arr{font-size:8px;transition:transform .15s;}.exp-arr.open{transform:rotate(180deg);}
-.skill-card{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:13px;margin-bottom:6px;}
+.skill-card{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:13px;margin-bottom:6px;transition:transform .15s,box-shadow .15s,border-color .15s;}
+.skill-card:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.35);border-color:var(--b2);}
+@keyframes xpPulse{0%{filter:brightness(1)}45%{filter:brightness(2) saturate(1.3)}100%{filter:brightness(1)}}
+.xp-fill.pulse{animation:xpPulse .5s ease;}
+@keyframes dotPulse{0%,60%,100%{opacity:.2;transform:scale(.85)}30%{opacity:1;transform:scale(1.15)}}
+.tdot{display:inline-block;color:var(--secondary);font-size:13px;line-height:1;animation:dotPulse 1.2s infinite ease-in-out;}
+.tdot:nth-child(3){animation-delay:.2s;}.tdot:nth-child(4){animation-delay:.4s;}
+.compact .card{padding:6px 10px;}.compact .skill-card{padding:9px;}.compact .skill-card:hover{transform:translateY(-1px);}
+.compact .pg{padding:12px 14px 80px;}.compact .clist{gap:1px;}.compact .gap{height:10px;}
+.compact .fwrap{padding:10px;}.compact .sbox{padding:8px;}.compact .med-card{padding:7px 10px;}
 .sk-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
 .sk-name{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:400;}
 .sk-meta{display:flex;align-items:center;gap:6px;}
@@ -595,8 +601,21 @@ input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;heigh
 .modal{background:var(--s1);border:1px solid var(--b2);border-radius:8px;padding:20px;max-width:300px;width:90%;}
 .modal-title{font-size:14px;margin-bottom:8px;}.modal-sub{font-size:12px;color:var(--tx2);margin-bottom:16px;line-height:1.5;}
 .modal-btns{display:flex;gap:8px;}
-.mbtn{flex:1;padding:8px;border-radius:4px;border:1px solid var(--b2);background:none;cursor:pointer;font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--tx2);transition:all .15s;}
+.mbtn{flex:1;padding:8px;border-radius:4px;border:1px solid var(--b2);background:none;cursor:pointer;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--tx2);transition:all .15s;}
 .mbtn:hover{background:var(--b1);}.mbtn.danger{color:var(--danger);border-color:var(--dangerf);}.mbtn.danger:hover{background:var(--dangerf);}
+@keyframes floatUp{0%{opacity:1;transform:translateX(var(--fx,0)) translateY(0);}100%{opacity:0;transform:translateX(var(--fx,0)) translateY(-38px);}}
+.xp-float{position:fixed;bottom:74px;left:50%;transform:translateX(-50%);font-family:'DM Mono',monospace;font-size:11px;letter-spacing:1px;color:var(--primary);pointer-events:none;z-index:300;animation:floatUp 1.1s ease-out forwards;}
+.milestone-modal{background:var(--s1);border:1px solid var(--b2);border-radius:10px;padding:20px 22px;max-width:320px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.5);}
+.milestone-modal.big{max-width:360px;text-align:center;padding:32px 28px;border-color:var(--primaryb);box-shadow:0 0 40px var(--primaryb),0 8px 32px rgba(0,0,0,.6);}
+.ms-row{display:flex;align-items:center;gap:14px;margin-bottom:10px;}
+.ms-glyph{font-size:26px;line-height:1;flex-shrink:0;}.ms-glyph.big{font-size:48px;display:block;margin-bottom:12px;}
+.ms-level{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:2px;color:var(--tx3);text-transform:uppercase;margin-bottom:6px;}
+.ms-skill{font-size:14px;font-weight:600;letter-spacing:.3px;margin-bottom:2px;}
+.ms-title{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--tx3);}.ms-title.big{font-size:16px;color:var(--primary);letter-spacing:3px;margin-bottom:10px;}
+.ms-sub{font-size:12px;color:var(--tx2);line-height:1.65;margin-top:8px;}.ms-sub.big{font-size:13px;color:var(--tx2);line-height:1.7;margin-bottom:18px;}
+@keyframes msBarFill{from{width:0%}to{width:100%}}
+.ms-bar{height:2px;background:var(--b2);border-radius:2px;overflow:hidden;margin-bottom:4px;}
+.ms-bar-fill{height:100%;animation:msBarFill 1.4s ease-out forwards;border-radius:2px;}
 /* ── RESPONSIVE DESKTOP ── */
 .sidenav{display:none;}
 @media(min-width:768px){
@@ -770,6 +789,54 @@ function Collapsible({question,children}){
   );
 }
 
+const SKILL_MILESTONES = {
+  25:  {title:"Dedicated",   sub:"You show up. That's rarer than it sounds.",        glyph:"◈", big:false},
+  50:  {title:"Invested",    sub:"This is becoming part of who you are.",             glyph:"◉", big:false},
+  75:  {title:"Experienced", sub:"You know what this practice actually demands.",     glyph:"◆", big:false},
+  100: {title:"Master",      sub:"10,000 hours is a metaphor. You understand it now. Most people never get here.", glyph:"✦", big:true},
+};
+
+function FloatXP({floats}){
+  if(!floats.length) return null;
+  return <>{floats.map(f=>(
+    <div key={f.id} className="xp-float" style={{"--fx":`${f.xOff}px`}}>+{f.amt}</div>
+  ))}</>;
+}
+
+function MilestoneOverlay({milestone,onClose}){
+  const {settings}=useSettings();
+  if(!milestone) return null;
+  const m=SKILL_MILESTONES[milestone.level]||{title:`Level ${milestone.level}`,sub:"",glyph:"◆",big:false};
+  if(m.big) return (
+    <div className="overlay" onClick={onClose}>
+      <div className="milestone-modal big" onClick={e=>e.stopPropagation()}>
+        <div className="ms-glyph big" style={{color:milestone.color||"var(--primary)"}}>{m.glyph}</div>
+        <div className="ms-level">Level {milestone.level}</div>
+        <div className="ms-skill" style={{color:milestone.color||"var(--primary)"}}>{milestone.name}</div>
+        <div className="ms-title big">{m.title}</div>
+        <div className="ms-sub big">{m.sub}</div>
+        <div className="ms-bar"><div className="ms-bar-fill" style={{background:milestone.color||"var(--primary)"}}/></div>
+        <button className="fsbtn primary" style={{margin:"8px 0 0",width:"auto",padding:"10px 28px"}} onClick={onClose}>Continue</button>
+      </div>
+    </div>
+  );
+  return (
+    <div className="overlay" onClick={onClose}>
+      <div className="milestone-modal" onClick={e=>e.stopPropagation()}>
+        <div className="ms-row">
+          <div className="ms-glyph" style={{color:milestone.color||"var(--primary)"}}>{m.glyph}</div>
+          <div>
+            <div className="ms-skill">{milestone.name} · <span style={{color:milestone.color||"var(--primary)"}}>Level {milestone.level}</span></div>
+            <div className="ms-title">{m.title}</div>
+          </div>
+        </div>
+        <div className="ms-sub">{m.sub}</div>
+        <button className="fsbtn" style={{margin:"10px 0 0"}} onClick={onClose}>✓ Nice</button>
+      </div>
+    </div>
+  );
+}
+
 export default function App(){
   const [session,setSession]=useState(null);
   const [userId,setUserId]=useState(null);
@@ -803,6 +870,10 @@ export default function App(){
   const [focusTimer,setFocusTimer]=useState(null); // null | {skillId, startMs, running}
   const [focusElapsed,setFocusElapsed]=useState(0);
   const [nudge,setNudge]=useState(null); // {taskId, skillId, skillName}
+  const [xpFlash,setXpFlash]=useState(false);
+  const [floats,setFloats]=useState([]);
+  const [milestone,setMilestone]=useState(null);
+  const [advisorLog,setAdvisorLog]=useState([]);
   const toastRef=useRef(null);
 
   // Load data from Supabase if logged in, otherwise localStorage
@@ -840,6 +911,7 @@ export default function App(){
     const xl=await sget("cx_xplog");   if(xl) setXpLog(xl);
     const fr=await sget("cx_friends"); if(fr) setFriends(fr);
     const am=await sget("cx_aimem");   if(am) setAiMemory(am);
+    const al=await sget("cx_advisor"); if(al) setAdvisorLog(al);
     setLoaded(true);
   };
 
@@ -926,6 +998,13 @@ export default function App(){
     toastRef.current=setTimeout(()=>setToast({msg:"",on:false}),2200);
   },[]);
 
+  const spawnFloat=useCallback((amt)=>{
+    const id=uid();
+    const xOff=(Math.random()-.5)*44;
+    setFloats(prev=>[...prev.slice(-4),{id,amt,xOff}]);
+    setTimeout(()=>setFloats(prev=>prev.filter(f=>f.id!==id)),1150);
+  },[]);
+
   const saveXpLog=async(entry)=>{
     setXpLog(prev=>{const next=[entry,...prev].slice(0,100);dbSet("cx_xplog",next,userId);return next;});
   };
@@ -936,19 +1015,23 @@ export default function App(){
     const multiplier=getMultiplier(streak.count);
     const amt=Math.round(baseAmt*multiplier);
     const nx=curXp+amt; setXp(nx); await dbSet("cx_xp",nx,userId);
-    let leveledUp=null, newSkills=curSkills;
+    setXpFlash(true); setTimeout(()=>setXpFlash(false),500);
+    let leveledUp=null, skillMilestone=null, newSkills=curSkills;
     if(skillId){
       newSkills=curSkills.map(s=>{
         if(s.id!==skillId) return s;
         const oldLv=skillLv(s.xp,skPerLv), newXp=s.xp+amt, newLv=skillLv(newXp,skPerLv);
-        if(newLv>oldLv) leveledUp={name:s.name,level:newLv};
+        if(newLv>oldLv){
+          leveledUp={name:s.name,level:newLv};
+          if(SKILL_MILESTONES[newLv]) skillMilestone={name:s.name,level:newLv,color:s.color||"var(--primary)"};
+        }
         return {...s,xp:newXp};
       });
       setSkills(newSkills); await dbSet("cx_skills",newSkills,userId);
     }
     const sk=curSkills.find(s=>s.id===skillId);
     await saveXpLog({id:uid(),amt,label:label||"Task",skill:sk?.name||null,skillId:skillId||null,questId:questId||null,multiplier,created:Date.now()});
-    return {amt,multiplier,leveledUp,newSkills};
+    return {amt,multiplier,leveledUp,newSkills,milestone:skillMilestone};
   },[settings.xp.skillPerLevel]);
 
   const saveT=useCallback(async t=>{setTasks(t);await dbSet("cx_tasks",t,userId);},[userId]);
@@ -976,9 +1059,11 @@ export default function App(){
     const task=tasks.find(t=>t.id===id); if(!task) return;
     await saveT(tasks.map(t=>t.id===id?{...t,done:!t.done}:t));
     if(!task.done){
-      const {amt,leveledUp}=await award(task.xpVal,task.skill,xp,skills,streaks,task.title);
+      const {amt,leveledUp,milestone:ms}=await award(task.xpVal,task.skill,xp,skills,streaks,task.title);
+      spawnFloat(amt);
       showToast(`+${amt} ${L.xpName}`);
-      if(leveledUp) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);
+      if(leveledUp&&!ms) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);
+      if(ms) setMilestone(ms);
     }
   };
   const deleteTask=async id=>saveT(tasks.filter(t=>t.id!==id));
@@ -1003,14 +1088,16 @@ export default function App(){
       const qSkills=q.skills||[]; const primary=qSkills[0]||null;
       let newStr=streaks;
       if(primary){ newStr=updateStreak(streaks,primary); await saveStr(newStr); }
-      const {amt,multiplier,leveledUp}=await award(q.xpVal,primary,xp,skills,newStr,`◉ ${q.title}`,q.id);
+      const {amt,multiplier,leveledUp,milestone:ms}=await award(q.xpVal,primary,xp,skills,newStr,`◉ ${q.title}`,q.id);
       const streak=newStr[primary]||{count:0};
       // Store lastDone timestamp on the quest
       await saveQ(quests.map(qq=>qq.id===id?{...qq,lastDone:Date.now()}:qq));
       let msg=`+${amt} ${L.xpName}`;
       if(multiplier>1) msg+=` · ${streak.count}d ${L.comboName||"Combo"} ${multiplier}×`;
+      spawnFloat(amt);
       showToast(msg);
-      if(leveledUp) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);
+      if(leveledUp&&!ms) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);
+      if(ms) setMilestone(ms);
       setPendingPractice({skillId:primary,questTitle:q.title,questId:q.id,questType:"radiant"});
       setTab("journal"); setJournalSubTab("log");
       return;
@@ -1019,9 +1106,11 @@ export default function App(){
     if(!q.done){
       const primary=(q.skills||[])[0]||null;
       const prefix=q.type==="main"?"◆":q.type==="side"?"◇":"";
-      const {amt,leveledUp}=await award(q.xpVal,primary,xp,skills,streaks,`${prefix} ${q.title}`,q.id);
+      const {amt,leveledUp,milestone:ms}=await award(q.xpVal,primary,xp,skills,streaks,`${prefix} ${q.title}`,q.id);
+      spawnFloat(amt);
       showToast(`+${amt} ${L.xpName}`);
-      if(leveledUp) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);
+      if(leveledUp&&!ms) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);
+      if(ms) setMilestone(ms);
       setPendingPractice({skillId:primary,questTitle:q.title,questType:q.type});
       setTab("journal"); setJournalSubTab("log");
     }
@@ -1036,9 +1125,11 @@ export default function App(){
     const wasUndone=sub&&!sub.done;
     if(wasUndone&&sub.xpVal){
       const primary=(parentQ.skills||[])[0]||null;
-      const {amt,leveledUp}=await award(sub.xpVal,primary,xp,skills,streaks,`◇ ${sub.title}`);
+      const {amt,leveledUp,milestone:ms}=await award(sub.xpVal,primary,xp,skills,streaks,`◇ ${sub.title}`);
+      spawnFloat(amt);
       showToast(`+${amt} ${settings.labels.xpName}`);
-      if(leveledUp) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);
+      if(leveledUp&&!ms) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);
+      if(ms) setMilestone(ms);
     }
     await saveQ(quests.map(q=>{
       if(q.id!==questId) return q;
@@ -1079,7 +1170,16 @@ export default function App(){
     setXp(curXp); await dbSet("cx_xp",curXp,userId);
     setSkills(curSkills); await dbSet("cx_skills",curSkills,userId);
     await saveStr(newStr);
-    leveled.forEach((lu,i)=>setTimeout(()=>showToast(`◆ ${lu.name} Level ${lu.level}`),(i+1)*600));
+    // Float the total awarded
+    const totalAmt=skillAwards.reduce((s,a)=>s+(a.xp||0),0);
+    if(totalAmt) spawnFloat(totalAmt);
+    leveled.forEach((lu,i)=>{
+      if(SKILL_MILESTONES[lu.level]){
+        setTimeout(()=>setMilestone({...lu,color:curSkills.find(s=>s.name===lu.name)?.color||"var(--primary)"}),(i+1)*400);
+      } else {
+        setTimeout(()=>showToast(`◆ ${lu.name} Level ${lu.level}`),(i+1)*600);
+      }
+    });
   };
   const deleteJournalEntry=async(id)=>{
     const next=journal.filter(e=>e.id!==id);
@@ -1224,8 +1324,15 @@ export default function App(){
     }
     let msg=`+${amt} ${L.xpName}`;
     if(multiplier>1) msg+=` · ${streak.count}d ${L.comboName||"Combo"} ${multiplier}×`;
+    spawnFloat(amt);
     showToast(msg);
-    leveledUpAll.forEach((lu,i)=>setTimeout(()=>showToast(`◆ ${lu.name} Level ${lu.level}`),(i+1)*600));
+    leveledUpAll.forEach((lu,i)=>{
+      if(SKILL_MILESTONES[lu.level]){
+        setTimeout(()=>setMilestone({...lu,color:curSkillsState.find(s=>s.name===lu.name)?.color||"var(--primary)"}),(i+1)*400);
+      } else {
+        setTimeout(()=>showToast(`◆ ${lu.name} Level ${lu.level}`),(i+1)*600);
+      }
+    });
     setPendingPractice(null);
     // Proactive advisor suggestion: if skill has no active quest linked, nudge after 2s
     if(primary){
@@ -1305,7 +1412,7 @@ export default function App(){
   return (
     <SettingsCtx.Provider value={ctxValue}>
       <style>{css}</style>
-      <div className="app" style={{"--content-width":`${settings.contentWidth||700}px`,...(settings.images?.bg?{backgroundImage:`url(${settings.images.bg})`,backgroundSize:"cover",backgroundAttachment:"fixed",backgroundPosition:"center"}:{})}}>
+      <div className={`app${settings.compact?" compact":""}`} style={{"--content-width":`${settings.contentWidth||700}px`,...(settings.images?.bg?{backgroundImage:`url(${settings.images.bg})`,backgroundSize:"cover",backgroundAttachment:"fixed",backgroundPosition:"center"}:{})}}>
         {!settings.profile.setup&&<ProfileSetup onComplete={completeSetup}/>}
         {settings.profile.setup&&<>
           {settings.images?.banner&&<div style={{width:"100%",maxHeight:80,overflow:"hidden",flexShrink:0}}><img src={settings.images.banner} alt="" style={{width:"100%",objectFit:"cover",maxHeight:80}}/></div>}
@@ -1314,7 +1421,7 @@ export default function App(){
             <div className="side-top">
               <div className="side-title">{computedTabTitle(tab,settings)}</div>
               <div className="side-lv">{L.levelName} {level}</div>
-              <div className="xp-track" style={{margin:"10px 0 4px"}}><div className="xp-fill" style={{width:`${prog}%`}}/></div>
+              <div className="xp-track" style={{margin:"10px 0 4px"}}><div className={`xp-fill${xpFlash?" pulse":""}`} style={{width:`${prog}%`}}/></div>
               <div className="xp-lbl">{xp} {L.xpName}</div>
             </div>
             <div className="side-links">
@@ -1344,7 +1451,7 @@ export default function App(){
               </div>
             </div>
             <button onClick={()=>setShowProfile(true)} className="xp-row" style={{width:"100%",background:"none",border:"none",cursor:"pointer",padding:0,textAlign:"left"}}>
-              <div className="xp-track"><div className="xp-fill" style={{width:`${prog}%`}}/></div>
+              <div className="xp-track"><div className={`xp-fill${xpFlash?" pulse":""}`} style={{width:`${prog}%`}}/></div>
               <span className="xp-lbl">{xp} {L.xpName}</span>
             </button>
           </header>
@@ -1359,9 +1466,9 @@ export default function App(){
               }
             }} onDelete={deleteTask} onEdit={editTask} onToggleQuest={toggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} nudge={nudge} onDismissNudge={()=>setNudge(null)} onAcceptNudge={()=>{if(nudge){setPendingPractice({skillId:nudge.skillId});setNudge(null);setTab("journal");setJournalSubTab("log");}}}/>}
             {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest} onReorder={q=>saveQ(q)} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>}
-            {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill} onReorder={reorderSkills} onLink={linkSubskill} onStartFocus={startFocus} onAward={async(skillId,amt,reason)=>{const {leveledUp}=await award(amt,skillId,xp,skills,streaks,`✦ ${reason}`);showToast(`+${amt} ${settings.labels.xpName}`);if(leveledUp)setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);}}/>}
+            {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill} onReorder={reorderSkills} onLink={linkSubskill} onStartFocus={startFocus} onAward={async(skillId,amt,reason)=>{const {leveledUp,milestone:ms}=await award(amt,skillId,xp,skills,streaks,`✦ ${reason}`);spawnFloat(amt);showToast(`+${amt} ${settings.labels.xpName}`);if(leveledUp&&!ms)setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);if(ms)setMilestone(ms);}}/>}
             {tab==="journal"  && <JournalTab entries={journal} skills={skills} quests={quests} meds={meds} practiceTypes={practiceTypes} streaks={streaks} pending={pendingPractice} subTab={journalSubTab} onSubTab={setJournalSubTab} onAdd={addJournalEntry} onDelete={deleteJournalEntry} onAwardXp={awardFromJournal} onEditQuest={editQuest} onLog={logMed} onDeleteMed={deleteMed} onEditMed={editMed} onAddType={addPracticeType} onDeleteType={deletePracticeType} onClearPending={()=>setPendingPractice(null)}/>}
-            {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} journal={journal} meds={meds} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest} aiMemory={aiMemory} onUpdateMemory={async(m)=>{setAiMemory(m);await dbSet("cx_aimem",m,userId);}}/>}
+            {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} journal={journal} meds={meds} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest} aiMemory={aiMemory} onUpdateMemory={async(m)=>{setAiMemory(m);await dbSet("cx_aimem",m,userId);}} initialMsgs={advisorLog} onSaveMsgs={async(m)=>{setAdvisorLog(m);await dbSet("cx_advisor",m,userId);}}/>}
             {tab==="settings" && <SettingsTab showToast={showToast} onExport={exportData} onImport={importData} userId={userId} onSignIn={()=>setShowAuth(true)} onSignOut={handleSignOut}/>}
           </main>
           </div>
@@ -1422,6 +1529,9 @@ export default function App(){
           </div>
         )}
       </div>
+      <div className={`toast ${toast.on?"on":""}`}>{toast.msg}</div>
+      <FloatXP floats={floats}/>
+      {milestone&&<MilestoneOverlay milestone={milestone} onClose={()=>setMilestone(null)}/>}
     </SettingsCtx.Provider>
   );
 }
@@ -3317,13 +3427,14 @@ function JarvisOverlay({tasks,quests,skills,onAddQuest,onAddTask,onClose,onLogMe
 }
 
 
-function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,onLogMed,onEditQuest,aiMemory,onUpdateMemory}){
+function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,onLogMed,onEditQuest,aiMemory,onUpdateMemory,initialMsgs,onSaveMsgs}){
   const {settings}=useSettings(); const L=settings.labels;
-  const [msgs,setMsgs]=useState([]);
+  const [msgs,setMsgs]=useState(initialMsgs||[]);
   const [input,setInput]=useState("");
   const [loading,setLoading]=useState(false);
   const bottomRef=useRef(null);
   useEffect(()=>{bottomRef.current?.scrollIntoView({behavior:"smooth"});},[msgs,loading]);
+  useEffect(()=>{if(msgs.length&&onSaveMsgs) onSaveMsgs(msgs);},[msgs]);
 
   const QUICK=["What should I focus on today?","Which skill needs the most attention?",
     "Help me break down my biggest quest","Am I overloaded right now?","Give me a 30-minute win"];
@@ -3419,8 +3530,7 @@ function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,o
       <div className="ai-intro">
         <div className="ai-intro-title">✦ {L.advisorTab}</div>
         <div className="ai-intro-body">Has full access to your quests, tasks, and skill data. Can add quests, log sessions, and schedule tasks — confirm before anything is written.</div>
-      </div>
-      {aiMemory?.facts?.length>0&&<div style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:6,padding:"8px 12px",marginBottom:8,fontSize:10,color:"var(--tx3)"}}>
+      </div>      {aiMemory?.facts?.length>0&&<div style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:6,padding:"8px 12px",marginBottom:8,fontSize:10,color:"var(--tx3)"}}>
         <div style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",fontSize:9,marginBottom:4}}>✦ ADVISOR MEMORY</div>
         {(aiMemory.facts||[]).slice(-3).map((f,i)=><div key={i}>· {f}</div>)}
         {(aiMemory.facts||[]).length>3&&<div style={{marginTop:2}}>+{aiMemory.facts.length-3} more facts stored</div>}
@@ -3428,6 +3538,9 @@ function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,o
       </div>}
       <div className="ai-chips">{QUICK.map((q,i)=><button key={i} className="ai-chip" onClick={()=>send(q)}>{q}</button>)}</div>
     </>}
+    {msgs.length>0&&<div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
+      <button onClick={()=>{setMsgs([]);if(onSaveMsgs)onSaveMsgs([]);}} style={{background:"none",border:"none",color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1,cursor:"pointer",padding:"2px 0"}}>✕ clear conversation</button>
+    </div>}
     <div className="ai-msgs">
       {msgs.map((m,mi)=>(
         <div key={mi} className={`ai-msg ${m.role}`}>
@@ -3443,7 +3556,10 @@ function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,o
           )}
         </div>
       ))}
-      {loading&&<div className="ai-msg loading">◈ thinking...</div>}
+      {loading&&<div className="ai-msg loading" style={{display:"flex",alignItems:"center",gap:4}}>
+        <span style={{color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:10,letterSpacing:1}}>thinking</span>
+        <span className="tdot">·</span><span className="tdot">·</span><span className="tdot">·</span>
+      </div>}
       <div ref={bottomRef}/>
     </div>
     <div className="ai-input-row">
@@ -3653,6 +3769,13 @@ function SettingsTab({showToast,onExport,onImport,userId,onSignIn,onSignOut}){
         ))}
       </div>
       {draft.uiMode==="ai"&&<AIThemeDesigner draft={draft} setDraft={setDraft} showToast={showToast}/>}
+      <div style={{borderTop:"1px solid var(--b1)",marginTop:10,paddingTop:10,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
+        <div>
+          <div className="srow-label">Compact density</div>
+          <div className="srow-sub">Tighter padding on cards and lists</div>
+        </div>
+        <button className={`tog ${draft.compact?"on":""}`} onClick={()=>setDraft(d=>({...d,compact:!d.compact}))}><div className="tog-knob"/></button>
+      </div>
     </div>
     {/* Account */}
     <div className="slbl" style={{marginBottom:8}}>Account</div>
@@ -3668,7 +3791,7 @@ function SettingsTab({showToast,onExport,onImport,userId,onSignIn,onSignOut}){
           </div>
       }
     </div>
-    <div className="slbl">Profile</div>
+    <Collapsible question="Profile & appearance">
     <div className="sgroup">
       <div className="srow">
         <div style={{flex:1}}><div className="srow-label">Name</div></div>
@@ -3702,6 +3825,7 @@ function SettingsTab({showToast,onExport,onImport,userId,onSignIn,onSignOut}){
         <input className="sinput" value={draft.appName} placeholder="Auto" onChange={e=>setDraft(d=>({...d,appName:e.target.value}))}/>
       </div>
     </div>
+    </Collapsible>
     <div className="gap"/>
     <Collapsible question="Want to change the base theme and colors?">
       <div className="sgroup">
