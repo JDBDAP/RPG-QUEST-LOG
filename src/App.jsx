@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, createContext, useContext, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useRef, createContext, useContext, useMemo } from "react";
 import AuthScreen from "./AuthScreen";
 import { supabase, getSession, onAuthChange, signOut, loadUserData, saveField, migrateLocalStorage } from "./supabase";
 
@@ -1214,7 +1214,7 @@ export default function App(){
     const profileData={
       userId, code:genFriendCode(userId),
       name:s.profile.public?s.profile.name:"Anonymous",
-      level:Math.floor(xp/(settings.xp.globalPerLevel||600))+1,
+      level:Math.floor((skills||[]).reduce((a,s)=>a+(s.xp||0),0)/(settings.xp.globalPerLevel||6000))+1,
       xp, totalPractice:(meds||[]).length,
       journalCount:(journal||[]).length,
       streaks,
@@ -5019,7 +5019,7 @@ function CommunityTab({userId,settings,skills,quests,meds,journal,streaks,xp,fri
   const [filterFriends,setFilterFriends]=useState(false);
   const [profilePublic,setProfilePublic]=useState(settings.profile.public||false);
 
-  const level=Math.floor(xp/(settings.xp.globalPerLevel||600))+1;
+  const level=Math.floor(skills.reduce((a,s)=>a+(s.xp||0),0)/(settings.xp.globalPerLevel||6000))+1;
   const friendIds=new Set(friends.map(f=>f.userId));
 
   // compute badges for a profile
@@ -5625,7 +5625,7 @@ function ProfileModal({settings,xp,level,prog,skills,streaks,meds,quests,journal
   const [friendInput,setFriendInput]=useState("");
   const [loading,setLoading]=useState(false);
   const [profilePublic,setProfilePublic]=useState(settings.profile.public||false);
-  const perLv=settings.xp.globalPerLevel||600;
+  const perLv=settings.xp.globalPerLevel||6000;
 
   const getBadges=()=>{
     const badges=[];
@@ -5733,7 +5733,7 @@ function ProfileModal({settings,xp,level,prog,skills,streaks,meds,quests,journal
             <div key={p.userId} style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"10px 12px",marginBottom:6}}>
               <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
                 <div style={{fontSize:13}}>{p.name||"Adventurer"}</div>
-                <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--primary)"}}>Lv {Math.floor((p.xp||0)/(settings.xp.globalPerLevel||600))+1}</div>
+                <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--primary)"}}>Lv {Math.floor((p.xp||0)/(settings.xp.globalPerLevel||6000))+1}</div>
               </div>
               {p.skills?.slice(0,3).map(s=><span key={s.id} className="ctag" style={{marginRight:4}}>{s.icon} {s.name}</span>)}
             </div>
