@@ -129,7 +129,7 @@ const DEFAULT_SETTINGS = {
   },
   colors: { primary:"#c8a96e", secondary:"#5b9e9e", success:"#6a9e6a", danger:"#a06060" },
   theme:  { bg:"#0c0c0c", s1:"#141414", s2:"#1a1a1a", b1:"#252525", b2:"#333333", tx:"#dedede", tx2:"#999999", tx3:"#555555" },
-  xp: { globalPerLevel:600, skillPerLevel:6000, practicePerMin:1, aiScoring:true },
+  xp: { globalPerLevel:6000, skillPerLevel:6000, practicePerMin:1, aiScoring:true },
   fontSize: 14,
   contentWidth: 700,
   uiMode: "rpg",
@@ -385,23 +385,36 @@ body::after{content:'';position:fixed;inset:-200%;width:400%;height:400%;backgro
 .ui-mode-btn.on{background:var(--primaryf);border-color:var(--primaryb);color:var(--primary);box-shadow:0 0 8px var(--primaryb);}
 ` : MODE==="minimal" ? `
 /* ── MINIMAL MODE ── */
-.lv-badge{box-shadow:none;border-radius:3px;letter-spacing:.5px;}
-.side-lv{box-shadow:none;border-radius:3px;}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap');
+body{font-family:'Inter',sans-serif !important;}
+button,input,textarea,select{font-family:'Inter',sans-serif !important;}
+.hdr-title{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.3px;color:var(--tx3);}
+.side-title{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.3px;color:var(--tx3);}
+.lv-badge{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.3px;box-shadow:none;border-radius:4px;background:var(--s2);border-color:var(--b2);}
+.side-lv{font-family:'JetBrains Mono',monospace;letter-spacing:.3px;box-shadow:none;border-radius:4px;}
 .xp-fill{background:var(--primary);box-shadow:none;}
 .sk-bar{box-shadow:none;}
-.nbtn.on::before{box-shadow:none;}
-.slink.on{box-shadow:none;}
-.card.quest-main{box-shadow:none;}
-.card.quest-radiant{box-shadow:none;}
-.card{border-radius:3px;}
-.sk-streak{box-shadow:none;}
-.toast{box-shadow:0 2px 8px #0006;}
-:root{--r:3px;}
+.nbtn.on::before{box-shadow:none;height:1px;}
+.slink.on{box-shadow:none;border-left:2px solid var(--primary);}
+.card{border-radius:4px;border-color:var(--b1);}
+.card.quest-main{box-shadow:none;border-left:3px solid var(--primary);background:var(--bg);}
+.card.quest-radiant{box-shadow:none;border-left:3px solid var(--secondary);background:var(--bg);}
+.card.quest-side{box-shadow:none;border-left:3px solid var(--b3);background:var(--bg);}
+.sk-streak{box-shadow:none;border-radius:3px;}
+.toast{box-shadow:0 2px 8px #0006;border-radius:4px;}
+:root{--r:4px;}
+.slbl{font-family:'JetBrains Mono',monospace;letter-spacing:.5px;opacity:.6;font-size:8px;}
 .slbl::after{display:none;}
-.slbl{letter-spacing:1px;opacity:.7;}
-.ui-mode-btn{background:var(--bg);border:1px solid var(--b2);border-radius:3px;color:var(--tx3);font-family:'DM Mono',monospace;font-size:8px;letter-spacing:1.5px;text-transform:uppercase;padding:8px 12px;cursor:pointer;flex:1;transition:all .15s;}
+.ctag{font-family:'JetBrains Mono',monospace;letter-spacing:.3px;border-radius:3px;}
+.nlbl{font-family:'JetBrains Mono',monospace;font-size:7px;letter-spacing:.3px;}
+.ui-mode-btn{background:var(--bg);border:1px solid var(--b2);border-radius:4px;color:var(--tx3);font-family:'JetBrains Mono',monospace;font-size:8px;letter-spacing:.5px;text-transform:uppercase;padding:8px 12px;cursor:pointer;flex:1;transition:all .15s;}
 .ui-mode-btn:hover{border-color:var(--b3);color:var(--tx2);}
 .ui-mode-btn.on{background:var(--s2);border-color:var(--b3);color:var(--tx);}
+.stab{font-family:'JetBrains Mono',monospace;font-size:8px;letter-spacing:.3px;}
+.fwrap{border-radius:4px;}
+.fsbtn{border-radius:4px;font-size:11px;}
+.addbtn{border-radius:4px;font-size:11px;}
+.lv-milestone{display:none;}
 ` : `
 /* ── AI / CUSTOM MODE ── */
 .ui-mode-btn{background:var(--bg);border:1px solid var(--b2);border-radius:4px;color:var(--tx3);font-family:'DM Mono',monospace;font-size:8px;letter-spacing:1.5px;text-transform:uppercase;padding:8px 12px;cursor:pointer;flex:1;transition:all .15s;}
@@ -1364,20 +1377,39 @@ export default function App(){
     e.target.value="";
   };
 
-  const exportData=()=>{
-    const blob=new Blob([JSON.stringify({tasks,quests,skills,meds,xp,streaks,settings,exported:new Date().toISOString()},null,2)],{type:"application/json"});
-    const url=URL.createObjectURL(blob), a=document.createElement("a");
-    a.href=url; a.download=`rpg-log-${todayKey()}.json`; a.click(); URL.revokeObjectURL(url);
+  const exportData=(fmt="json")=>{
+    const payload={tasks,quests,skills,meds,xp,streaks,settings,exported:new Date().toISOString()};
+    if(fmt==="xml"){
+      const toXml=(obj,tag)=>{
+        if(Array.isArray(obj)) return obj.map(item=>toXml(item,"item")).join("");
+        if(obj===null||obj===undefined) return `<${tag}/>`;
+        if(typeof obj==="object"){
+          const inner=Object.entries(obj).map(([k,v])=>toXml(v,k)).join("");
+          return `<${tag}>${inner}</${tag}>`;
+        }
+        const str=String(obj).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+        return `<${tag}>${str}</${tag}>`;
+      };
+      const xml=`<?xml version="1.0" encoding="UTF-8"?>\n<codex>\n${Object.entries(payload).map(([k,v])=>toXml(v,k)).join("\n")}\n</codex>`;
+      const blob=new Blob([xml],{type:"application/xml"});
+      const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+      a.download=`codex-export-${new Date().toISOString().split("T")[0]}.xml`; a.click();
+    } else {
+      const blob=new Blob([JSON.stringify(payload,null,2)],{type:"application/json"});
+      const a=document.createElement("a"); a.href=URL.createObjectURL(blob);
+      a.download=`codex-export-${new Date().toISOString().split("T")[0]}.json`; a.click();
+    }
   };
-
   const completeSetup=async name=>{
     await saveSettings({...settings,profile:{name:name.trim(),setup:true}});
   };
 
-  const perLv=settings.xp.globalPerLevel||600;
+  const perLv=settings.xp.globalPerLevel||6000;
   const skPerLv=settings.xp.skillPerLevel||6000;
-  const level=Math.floor(xp/perLv)+1;
-  const prog=((xp%perLv)/perLv)*100;
+  // Char level = derived from sum of all skill XP so it stays coherent with skill levels
+  const totalSkillXp=skills.reduce((a,s)=>a+(s.xp||0),0);
+  const level=Math.floor(totalSkillXp/perLv)+1;
+  const prog=((totalSkillXp%perLv)/perLv)*100;
   // weekDays only changes at midnight — memoize so it doesn't rebuild every render
   const weekDays=useMemo(()=>getWeekDays(),[]);
   // periodTasks filters tasks array — memoize on actual deps
@@ -1469,7 +1501,7 @@ export default function App(){
             {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest} onReorder={q=>saveQ(q)} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>}
             {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill} onReorder={reorderSkills} onLink={linkSubskill} onStartFocus={startFocus} onAward={async(skillId,amt,reason)=>{const {leveledUp,milestone:ms}=await award(amt,skillId,xp,skills,streaks,`✦ ${reason}`);spawnFloat(amt);showToast(`+${amt} ${settings.labels.xpName}`);if(leveledUp&&!ms)setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);if(ms)setMilestone(ms);}}/>}
             {tab==="journal"  && <JournalTab entries={journal} skills={skills} quests={quests} meds={meds} practiceTypes={practiceTypes} streaks={streaks} pending={pendingPractice} subTab={journalSubTab} onSubTab={setJournalSubTab} onAdd={addJournalEntry} onDelete={deleteJournalEntry} onAwardXp={awardFromJournal} onEditQuest={editQuest} onLog={logMed} onDeleteMed={deleteMed} onEditMed={editMed} onAddType={addPracticeType} onDeleteType={deletePracticeType} onClearPending={()=>setPendingPractice(null)}/>}
-            {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} journal={journal} meds={meds} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest} aiMemory={aiMemory} onUpdateMemory={async(m)=>{setAiMemory(m);await dbSet("cx_aimem",m,userId);}} initialMsgs={advisorLog} onSaveMsgs={async(m)=>{setAdvisorLog(m);await dbSet("cx_advisor",m,userId);}}/>}
+            {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} journal={journal} meds={meds} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest} onDeleteQuest={deleteQuest} onDeleteTask={deleteTask} onAddSkill={addSkill} onDeleteSkill={id=>saveS(skills.filter(s=>s.id!==id))} onAdjustSkillXp={async(skillId,amt,reason)=>{const {leveledUp,milestone:ms}=await award(amt,skillId,xp,skills,streaks,`✦ ${reason}`);spawnFloat(Math.abs(amt));showToast(`${amt>0?"+":""}${amt} ${L.xpName} → ${skills.find(s=>s.id===skillId)?.name||"skill"}`);if(leveledUp&&!ms)setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);if(ms)setMilestone(ms);}} aiMemory={aiMemory} onUpdateMemory={async(m)=>{setAiMemory(m);await dbSet("cx_aimem",m,userId);}} initialMsgs={advisorLog} onSaveMsgs={async(m)=>{setAdvisorLog(m);await dbSet("cx_advisor",m,userId);}}/>}
             {tab==="settings" && <SettingsTab showToast={showToast} onExport={exportData} onImport={importData} userId={userId} onSignIn={()=>setShowAuth(true)} onSignOut={handleSignOut}/>}
           </main>
           </div>
@@ -1589,7 +1621,7 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
   const [showForm,setShowForm]=useState(false);
   const [qaMode,setQaMode]=useState("task");
   const [f,setF]=useState({title:"",skill:"",xpVal:20,questId:"",recurrenceDays:[],timeBlock:"",priority:"med"});
-  const [qf,setQf]=useState({title:"",type:"side",note:"",priority:"med",pinToday:true});
+  const [qf,setQf]=useState({title:"",type:"side",note:"",priority:"med",pinToday:true,skillIds:[]});
   const [nlInput,setNlInput]=useState("");
   const [nlLoading,setNlLoading]=useState(false);
   const [collapsed,setCollapsed]=useState({overdue:false,morning:false,afternoon:false,evening:false,flexible:false,coming:true});
@@ -1620,9 +1652,9 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
 
   const submitQuest=()=>{
     if(!qf.title.trim()) return;
-    window.dispatchEvent(new CustomEvent("cx:addquest",{detail:{title:qf.title.trim(),type:qf.type,note:qf.note,priority:qf.priority}}));
-    if(qf.pinToday) onAddTask({title:qf.title.trim(),period:"daily",skill:null,xpVal:20,questId:null,timeBlock:f.timeBlock||null,priority:qf.priority});
-    setQf({title:"",type:"side",note:"",priority:"med",pinToday:true}); setShowForm(false);
+    window.dispatchEvent(new CustomEvent("cx:addquest",{detail:{title:qf.title.trim(),type:qf.type,note:qf.note,priority:qf.priority,skills:qf.skillIds||[]}}));
+    if(qf.pinToday) onAddTask({title:qf.title.trim(),period:"daily",skill:qf.skillIds?.[0]||null,xpVal:20,questId:null,timeBlock:f.timeBlock||null,priority:qf.priority});
+    setQf({title:"",type:"side",note:"",priority:"med",pinToday:true,skillIds:[]}); setShowForm(false);
   };
 
   const nlParse=async()=>{
@@ -1760,6 +1792,20 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
               <option value="high">High</option><option value="med">Med</option><option value="low">Low</option>
             </select>
           </div>
+          {skills.filter(s=>s.type!=="subskill").length>0&&(
+            <div style={{marginBottom:8}}>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",marginBottom:4,letterSpacing:.8}}>LINKED SKILLS (multi-select)</div>
+              <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+                {skills.filter(s=>s.type!=="subskill").map(s=>{
+                  const on=(qf.skillIds||[]).includes(s.id);
+                  return <button key={s.id} onClick={()=>setQf(v=>({...v,skillIds:on?(v.skillIds||[]).filter(x=>x!==s.id):[...(v.skillIds||[]),s.id]}))}
+                    style={{padding:"2px 8px",borderRadius:4,border:`1px solid ${on?"var(--primary)":"var(--b2)"}`,background:on?"var(--primaryf)":"var(--bg)",color:on?"var(--primary)":"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,cursor:"pointer"}}>
+                    {s.icon||"◈"} {s.name}
+                  </button>;
+                })}
+              </div>
+            </div>
+          )}
           <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
             <input type="checkbox" checked={qf.pinToday} onChange={e=>setQf(v=>({...v,pinToday:e.target.checked}))} id="pin-today"/>
             <label htmlFor="pin-today" style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx2)",cursor:"pointer"}}>Add task for today</label>
@@ -1812,6 +1858,28 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
     </>}
 
     {period==="weekly"&&<>
+      {/* Weekly radiant + undated quests panel */}
+      {(()=>{
+        const radiantQ=(quests||[]).filter(q=>q.type==="radiant"&&!q.done);
+        const undatedQ=(quests||[]).filter(q=>!q.done&&q.type!=="radiant"&&!q.due);
+        if(!radiantQ.length&&!undatedQ.length) return null;
+        return(
+          <div style={{marginBottom:12}}>
+            {radiantQ.length>0&&<>
+              <div className="slbl" style={{marginBottom:6}}>◉ Repeatable this week</div>
+              <div className="clist" style={{marginBottom:8}}>
+                {radiantQ.slice(0,8).map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}
+              </div>
+            </>}
+            {undatedQ.length>0&&<>
+              <div className="slbl" style={{marginBottom:6}}>◇ Active quests (no date)</div>
+              <div className="clist" style={{marginBottom:8}}>
+                {undatedQ.slice(0,6).map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}
+              </div>
+            </>}
+          </div>
+        );
+      })()}
       {/* Weekly add form */}
       {showSubForm?(
         <div className="fwrap" style={{marginBottom:10}}>
@@ -3475,12 +3543,59 @@ function MedCard({med,ptype,mSkills,skills,onDelete,onEdit}){
 
 function buildAdvisorTools(skills,quests){
   const sn=skills.map(s=>`${s.id}=${s.name}`).join(",")||"none";
-  const qn=(quests||[]).filter(q=>!q.done).map(q=>`${q.id}="${q.title}"`).join(",")||"none";
+  const qn=(quests||[]).filter(q=>!q.done).map(q=>`${q.id}="${q.title}"[${q.type}]`).join(",")||"none";
+  const qnAll=(quests||[]).map(q=>`${q.id}="${q.title}"[${q.type}]`).join(",")||"none";
   return [
-    {name:"add_quest",description:"Add a new quest",input_schema:{type:"object",properties:{title:{type:"string"},type:{type:"string",enum:["main","radiant"]},skillId:{type:"string",description:`Optional skills: ${sn}`},note:{type:"string"},dueDate:{type:"string"},dueTime:{type:"string"}},required:["title","type"]}},
-    {name:"update_quest",description:`Update an existing quest — set due date, change title, add a note. Active quests: ${qn}`,input_schema:{type:"object",properties:{questId:{type:"string",description:"ID of quest to update"},dueDate:{type:"string",description:"YYYY-MM-DD"},dueTime:{type:"string",description:"HH:MM (optional)"},title:{type:"string"},note:{type:"string"}},required:["questId"]}},
-    {name:"add_task",description:"Add a task",input_schema:{type:"object",properties:{title:{type:"string"},period:{type:"string",enum:["daily","weekly","monthly"]},skillId:{type:"string",description:`Optional skills: ${sn}`},xpVal:{type:"number"}},required:["title","period"]}},
-    {name:"log_session",description:"Log a practice session",input_schema:{type:"object",properties:{type:{type:"string",enum:["mindfulness","presence","grounding","visualization","ritual","breathwork","contemplation","open"]},duration:{type:"number"},skillId:{type:"string",description:`Optional skills: ${sn}`},note:{type:"string"},backlogDate:{type:"string"}},required:["type","duration"]}},
+    {name:"add_quest",description:"Add a new quest. Use 'main' for multi-day goals, 'side' for contained tasks, 'radiant' for repeatable daily habits.",
+     input_schema:{type:"object",properties:{
+       title:{type:"string"},
+       type:{type:"string",enum:["main","side","radiant"]},
+       skillIds:{type:"array",items:{type:"string"},description:`Array of skill IDs to link. Available: ${sn}`},
+       note:{type:"string",description:"Intention or description"},
+       dueDate:{type:"string",description:"YYYY-MM-DD"},
+       priority:{type:"string",enum:["high","med","low"]}
+     },required:["title","type"]}},
+    {name:"update_quest",description:`Update an existing quest's title, note, due date, or skills. Active quests: ${qn}`,
+     input_schema:{type:"object",properties:{
+       questId:{type:"string",description:"ID of quest to update"},
+       title:{type:"string"},note:{type:"string"},
+       dueDate:{type:"string",description:"YYYY-MM-DD"},
+       type:{type:"string",enum:["main","side","radiant"]},
+       skillIds:{type:"array",items:{type:"string"}},
+       priority:{type:"string",enum:["high","med","low"]}
+     },required:["questId"]}},
+    {name:"delete_quest",description:`Delete/remove a quest permanently. All quests: ${qnAll}`,
+     input_schema:{type:"object",properties:{questId:{type:"string"}},required:["questId"]}},
+    {name:"add_task",description:"Add a recurring or one-time task to the planner.",
+     input_schema:{type:"object",properties:{
+       title:{type:"string"},
+       period:{type:"string",enum:["daily","weekly","monthly"]},
+       skillId:{type:"string",description:`Optional skill: ${sn}`},
+       xpVal:{type:"number",description:"XP for completion, typically 10-80 for tasks"}
+     },required:["title","period"]}},
+    {name:"delete_task",description:"Delete a task from the planner.",
+     input_schema:{type:"object",properties:{taskId:{type:"string"}},required:["taskId"]}},
+    {name:"add_skill",description:"Create a new skill for the user.",
+     input_schema:{type:"object",properties:{
+       name:{type:"string"},
+       icon:{type:"string",description:"Single emoji or symbol"},
+       category:{type:"string",enum:["body","mind","spirit","craft","social","other"]}
+     },required:["name"]}},
+    {name:"delete_skill",description:`Delete a skill and all its XP. Skills: ${sn}`,
+     input_schema:{type:"object",properties:{skillId:{type:"string"}},required:["skillId"]}},
+    {name:"adjust_skill_xp",description:`Manually set or adjust a skill's XP total. Use to correct mismatches. 1 level = 6000 XP. Skills: ${sn}`,
+     input_schema:{type:"object",properties:{
+       skillId:{type:"string"},
+       xpAmount:{type:"number",description:"Amount to ADD (can be negative to subtract)"},
+       reason:{type:"string"}
+     },required:["skillId","xpAmount"]}},
+    {name:"log_session",description:"Log a practice session.",
+     input_schema:{type:"object",properties:{
+       type:{type:"string",enum:["mindfulness","presence","grounding","visualization","ritual","breathwork","contemplation","open"]},
+       duration:{type:"number",description:"Minutes"},
+       skillId:{type:"string",description:`Optional skill: ${sn}`},
+       note:{type:"string"},backlogDate:{type:"string"}
+     },required:["type","duration"]}},
   ];
 }
 
@@ -3497,7 +3612,7 @@ function JarvisOverlay({tasks,quests,skills,onAddQuest,onAddTask,onClose,onLogMe
   const executeAction=async(action)=>{
     if(action.tool==="add_quest"){
       const due=action.input.dueDate?new Date(action.input.dueDate+"T09:00").getTime():null;
-      await onAddQuest({title:action.input.title,type:action.input.type||"main",note:action.input.note||"",due,skills:[]});
+      await onAddQuest({title:action.input.title,type:action.input.type||"side",note:action.input.note||"",due,skills:action.input.skillIds||[]});
     } else if(action.tool==="add_task"){
       await onAddTask({title:action.input.title,period:action.input.period||"daily",xpVal:action.input.xpVal||20,skill:null});
     } else if(action.tool==="log_session"&&onLogMed){
@@ -3585,7 +3700,7 @@ function JarvisOverlay({tasks,quests,skills,onAddQuest,onAddTask,onClose,onLogMe
 }
 
 
-function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,onLogMed,onEditQuest,aiMemory,onUpdateMemory,initialMsgs,onSaveMsgs}){
+function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,onLogMed,onEditQuest,onDeleteQuest,onDeleteTask,onAddSkill,onDeleteSkill,onAdjustSkillXp,aiMemory,onUpdateMemory,initialMsgs,onSaveMsgs}){
   const {settings}=useSettings(); const L=settings.labels;
   const [msgs,setMsgs]=useState(initialMsgs||[]);
   const [input,setInput]=useState("");
@@ -3609,21 +3724,51 @@ function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,o
     const basePersona=roleOverride
       ? `${roleOverride}. You are operating inside a gamified life tracker as this user's planning advisor.`
       : "You are a direct planning advisor inside the user's RPG quest log. You have persistent memory of this user.";
-    return `${basePersona}\nLEVEL: ${level} (${xp} XP)${topStr?"\nSTREAKS: "+topStr:""}\nTASKS (${at.length} active): ${at.map(t=>`"${t.title}" [${t.period}, ${skills.find(s=>s.id===t.skill)?.name||"no skill"}, ${t.xpVal}xp]`).join("; ")||"none"}\nQUESTS (${aq.length} active): ${aq.map(q=>`"${q.title}" [${q.type}${q.due?", due "+new Date(q.due).toLocaleDateString():""}]`).join("; ")||"none"}\nSKILLS: ${[...skills].sort((a,b)=>b.xp-a.xp).map(s=>`${s.name} Lv${Math.floor(s.xp/skPerLv)+1}`).join(", ")||"none"}\nMEMORY - known facts:\n${memFacts}\nObserved patterns: ${memPatterns}\nBe direct. Reference actual task names. 3-5 sentences unless breaking something down. If you learn new facts about this user, append MEMORY_UPDATE:{"facts":["fact"],"patterns":["pattern"]} as the very last line.`;
+    const xpScale=`XP SCALE (critical for add_quest/adjust_skill_xp):
+- 1 skill level = ${skPerLv} XP (~100 hrs genuine effort)
+- Radiant/daily habits: 20–200 XP each completion
+- Side quest (hours-days scope): 100–800 XP
+- Main quest (days-weeks): 600–4000 XP  
+- Impactful main quest (weeks-months): 4000–12000 XP
+- Life-defining quest (months-years): 12000–30000 XP (use sparingly)
+- Char level = total skill XP ÷ ${skPerLv} (so level reflects actual skill work)
+- adjust_skill_xp adds/subtracts from a skill directly`;
+    return `${basePersona}
+${xpScale}
+CHAR LEVEL: ${level} | TOTAL SKILL XP: ${xp}${topStr?"\nSTREAKS: "+topStr:""}
+TASKS (${at.length} active): ${at.map(t=>`"${t.title}" [${t.period}, ${skills.find(s=>s.id===t.skill)?.name||"no skill"}, ${t.xpVal}xp, id:${t.id}]`).join("; ")||"none"}
+QUESTS (${aq.length} active): ${aq.map(q=>`"${q.title}" [${q.type}${q.due?", due "+new Date(q.due).toLocaleDateString():""}, id:${q.id}]`).join("; ")||"none"}
+SKILLS: ${[...skills].sort((a,b)=>b.xp-a.xp).map(s=>`${s.name} Lv${Math.floor((s.xp||0)/skPerLv)+1} (${s.xp||0}xp, id:${s.id})`).join(", ")||"none"}
+TOOLS AVAILABLE: add_quest, update_quest, delete_quest, add_task, delete_task, add_skill, delete_skill, adjust_skill_xp, log_session
+MEMORY - known facts:\n${memFacts}\nObserved patterns: ${memPatterns}
+Be direct. Reference actual task/quest names and IDs. 3–5 sentences unless breaking something down. When user wants to create/edit/delete/adjust anything, use the tool — don't just describe. If you learn new facts about this user, append MEMORY_UPDATE:{"facts":["fact"],"patterns":["pattern"]} as the very last line.`;
   }
 
   const executeAction=async(action)=>{
     if(action.tool==="add_quest"){
-      const due=action.input.dueDate?new Date(`${action.input.dueDate}${action.input.dueTime?"T"+action.input.dueTime:"T09:00"}`).getTime():null;
-      await onAddQuest({title:action.input.title,type:action.input.type,skill:action.input.skillId||null,note:action.input.note||"",due});
+      const due=action.input.dueDate?new Date(`${action.input.dueDate}T09:00`).getTime():null;
+      await onAddQuest({title:action.input.title,type:action.input.type,skills:action.input.skillIds||[],note:action.input.note||"",due,priority:action.input.priority||"med"});
     } else if(action.tool==="update_quest"){
       const updates={};
-      if(action.input.dueDate) updates.due=new Date(`${action.input.dueDate}${action.input.dueTime?"T"+action.input.dueTime:"T09:00"}`).getTime();
+      if(action.input.dueDate) updates.due=new Date(`${action.input.dueDate}T09:00`).getTime();
       if(action.input.title) updates.title=action.input.title;
       if(action.input.note!==undefined) updates.note=action.input.note;
+      if(action.input.type) updates.type=action.input.type;
+      if(action.input.skillIds) updates.skills=action.input.skillIds;
+      if(action.input.priority) updates.priority=action.input.priority;
       await onEditQuest(action.input.questId,updates);
+    } else if(action.tool==="delete_quest"){
+      await onDeleteQuest(action.input.questId);
     } else if(action.tool==="add_task"){
       await onAddTask({title:action.input.title,period:action.input.period,skill:action.input.skillId||null,xpVal:action.input.xpVal||20});
+    } else if(action.tool==="delete_task"){
+      await onDeleteTask(action.input.taskId);
+    } else if(action.tool==="add_skill"){
+      await onAddSkill({name:action.input.name,icon:action.input.icon||"◈",category:action.input.category||"other"});
+    } else if(action.tool==="delete_skill"){
+      await onDeleteSkill(action.input.skillId);
+    } else if(action.tool==="adjust_skill_xp"){
+      await onAdjustSkillXp(action.input.skillId,action.input.xpAmount,action.input.reason||"Advisor adjustment");
     } else if(action.tool==="log_session"){
       const sessionDate=action.input.backlogDate?new Date(action.input.backlogDate+"T12:00").getTime():null;
       await onLogMed({type:action.input.type,dur:action.input.duration,skillId:action.input.skillId||null,note:action.input.note||"",baseXp:action.input.duration*(settings.xp.practicePerMin||1),aiReason:null,sessionDate});
@@ -3691,13 +3836,46 @@ function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,o
     {msgs.length===0&&<>
       <div className="ai-intro">
         <div className="ai-intro-title">✦ {L.advisorTab}</div>
-        <div className="ai-intro-body">Has full access to your quests, tasks, and skill data. Can add quests, log sessions, and schedule tasks — confirm before anything is written.</div>
-      </div>      {aiMemory?.facts?.length>0&&<div style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:6,padding:"8px 12px",marginBottom:8,fontSize:10,color:"var(--tx3)"}}>
+        <div className="ai-intro-body">Full access to your quests, tasks, and skills. Can add, edit, and delete — confirms before writing anything.</div>
+      </div>
+      {aiMemory?.facts?.length>0&&<div style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:6,padding:"8px 12px",marginBottom:8,fontSize:10,color:"var(--tx3)"}}>
         <div style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",fontSize:9,marginBottom:4}}>✦ ADVISOR MEMORY</div>
         {(aiMemory.facts||[]).slice(-3).map((f,i)=><div key={i}>· {f}</div>)}
         {(aiMemory.facts||[]).length>3&&<div style={{marginTop:2}}>+{aiMemory.facts.length-3} more facts stored</div>}
         <button onClick={()=>onUpdateMemory&&onUpdateMemory({facts:[],patterns:[],updated:0})} style={{marginTop:4,background:"none",border:"none",color:"var(--tx3)",fontSize:9,cursor:"pointer",padding:0}}>clear memory</button>
       </div>}
+
+      {/* AI Power Tools */}
+      <div style={{marginBottom:12}}>
+        <div className="slbl" style={{marginBottom:6}}>AI TOOLS</div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
+          {[
+            {icon:"⚔",label:"Break a quest",sub:"Splits into subquests + XP",
+             prompt:`I want to break down one of my active main quests into specific subquests with XP values. Look at my active main quests: ${quests.filter(q=>!q.done&&q.type==="main").map(q=>'"'+q.title+'"').join(", ")||"none yet"}. Pick the one that most needs structure and use add_quest or explain subquests I should create as individual items I can confirm.`},
+            {icon:"📅",label:"Plan my day",sub:"Optimal schedule from quests",
+             prompt:`Build me an optimal plan for today. I have these active tasks and quests. Suggest what I should do in what order for today given my skills and priorities. Use add_task to schedule specific actions if needed.`},
+            {icon:"⚡",label:"XP audit",sub:"Check if my levels feel right",
+             prompt:`Audit my skill XP levels. Skills: ${skills.map(s=>`${s.name} Lv${Math.floor((s.xp||0)/(settings.xp.skillPerLevel||6000))+1} (${s.xp||0} XP)`).join(", ")||"none"}. One level = ${settings.xp.skillPerLevel||6000} XP ≈ 100 hours. Do my levels feel calibrated to my real effort? If any are off, use adjust_skill_xp to propose corrections.`},
+            {icon:"🗺",label:"Suggest quests",sub:"New goals based on my gaps",
+             prompt:`Based on my current skills, active quests, and what I've been working on, suggest 3 new quests I should add that address my gaps or next logical growth areas. Use add_quest for each one you propose.`},
+            {icon:"🌿",label:"Skill tree check",sub:"Am I missing skills?",
+             prompt:`Review my skill list: ${skills.map(s=>s.name).join(", ")||"none"}. Are there obvious skills missing given my quests and goals? Suggest any I should add and use add_skill for ones that clearly fit. Also flag any that seem redundant or should be merged.`},
+            {icon:"🔍",label:"What's blocking me",sub:"Analyze stalled quests",
+             prompt:`I have ${quests.filter(q=>!q.done).length} active quests but things feel stuck. Analyze which quests are stalled or unclear and tell me the single highest-leverage action I could take right now. Be direct and specific — name the quest and the exact next step.`},
+          ].map(({icon,label,sub,prompt:p})=>(
+            <button key={label} onClick={()=>send(p)}
+              style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"10px 12px",cursor:"pointer",textAlign:"left",transition:"border-color .15s"}}
+              onMouseEnter={e=>e.currentTarget.style.borderColor="var(--b2)"}
+              onMouseLeave={e=>e.currentTarget.style.borderColor="var(--b1)"}>
+              <div style={{fontSize:14,marginBottom:3}}>{icon}</div>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:.8,color:"var(--tx)",marginBottom:2}}>{label}</div>
+              <div style={{fontSize:10,color:"var(--tx3)",lineHeight:1.3}}>{sub}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="slbl" style={{marginBottom:6}}>QUICK ASK</div>
       <div className="ai-chips">{QUICK.map((q,i)=><button key={i} className="ai-chip" onClick={()=>send(q)}>{q}</button>)}</div>
     </>}
     {msgs.length>0&&<div style={{display:"flex",justifyContent:"flex-end",marginBottom:8}}>
@@ -3765,7 +3943,7 @@ function ActionCard({action,skills,onAccept,onCancel}){
 }
 
 // ─── AI THEME DESIGNER ───────────────────────────────────────────────────────
-function AIThemeDesigner({draft,setDraft,showToast}){
+function AIThemeDesigner({draft,setDraft,showToast,onSave}){
   const [prompt,setPrompt]=useState("");
   const [loading,setLoading]=useState(false);
   const [preview,setPreview]=useState(null);
@@ -3781,37 +3959,49 @@ function AIThemeDesigner({draft,setDraft,showToast}){
         body:JSON.stringify({
           max_tokens:800,
           messages:[
-            {role:"system",content:"You are a UI theme designer. Return ONLY a valid JSON object — no markdown, no explanation. The user will describe a vibe and you generate matching hex colors."},
+            {role:"system",content:"You are a UI theme designer. Return ONLY a valid JSON object — no markdown, no explanation, no code fences. The user will describe a vibe and you generate matching hex colors."},
             {role:"user",content:`Generate a cohesive dark (or light if requested) color theme for a productivity RPG app based on this vibe: "${prompt}"
 
-Return ONLY this JSON shape:
-{
-  "name": "Theme Name (2-3 words)",
-  "theme": {"bg":"#hex","s1":"#hex","s2":"#hex","b1":"#hex","b2":"#hex","tx":"#hex","tx2":"#hex","tx3":"#hex"},
-  "colors": {"primary":"#hex","secondary":"#hex","success":"#hex","danger":"#hex"},
-  "description": "One sentence describing the vibe"
-}
-Rules: bg=darkest, s1 slightly lighter, s2 slightly lighter than s1. b1=border, b2=brighter border. tx=high contrast vs bg, tx2=secondary text, tx3=muted. primary=vivid+thematic, secondary=complement. All must be valid 6-digit hex.`}
+Return ONLY this exact JSON shape, nothing else:
+{"name":"Theme Name (2-3 words)","theme":{"bg":"#hex","s1":"#hex","s2":"#hex","b1":"#hex","b2":"#hex","tx":"#hex","tx2":"#hex","tx3":"#hex"},"colors":{"primary":"#hex","secondary":"#hex","success":"#hex","danger":"#hex"},"description":"One sentence describing the vibe"}
+
+Rules: bg=darkest background, s1 slightly lighter (cards), s2 slightly lighter than s1 (hover states). b1=subtle border, b2=slightly brighter border. tx=high contrast readable text, tx2=secondary text 60% opacity, tx3=muted text 40% opacity. primary=vivid accent color matching the vibe, secondary=complementary accent. success=#4caf50 or similar green. danger=#e05252 or similar red. All values must be valid 6-digit hex starting with #.`}
           ]
         })
       });
       const data=await res.json();
       if(data.error) throw new Error(data.error.message||"API error");
       const raw=(data.choices?.[0]?.message?.content||"").replace(/```json|```/g,"").trim();
-      let parsed; try{parsed=JSON.parse(raw);}catch{throw new Error("Couldn't parse AI response — try a different description");}
-      if(!parsed.theme||!parsed.colors) throw new Error("Incomplete theme data");
+      let parsed;
+      try{parsed=JSON.parse(raw);}
+      catch{
+        // Try to extract JSON if there's surrounding text
+        const match=raw.match(/\{[\s\S]*\}/);
+        if(match) try{parsed=JSON.parse(match[0]);}catch{}
+        if(!parsed) throw new Error("Couldn't parse theme — try a simpler description");
+      }
+      if(!parsed?.theme?.bg||!parsed?.colors?.primary) throw new Error("Incomplete theme — try again");
+      // Validate all hex values
+      const hexOk=v=>typeof v==="string"&&/^#[0-9a-fA-F]{6}$/.test(v.trim());
+      const fixHex=v=>{const t=(v||"").trim();return hexOk(t)?t:null;};
+      parsed.theme=Object.fromEntries(Object.entries(parsed.theme).map(([k,v])=>[k,fixHex(v)||"#111111"]));
+      parsed.colors=Object.fromEntries(Object.entries(parsed.colors).map(([k,v])=>[k,fixHex(v)||"#888888"]));
       setPreview(parsed);
-    }catch(e){setError(e.message||"Generation failed — check browser console");}
+    }catch(e){setError(e.message||"Generation failed");}
     setLoading(false);
   };
 
-  const apply=()=>{
+  const apply=async()=>{
     if(!preview) return;
-    setDraft(d=>({...d,
+    // Build the updated draft
+    const updated={
       theme:{bg:preview.theme.bg,s1:preview.theme.s1,s2:preview.theme.s2,b1:preview.theme.b1,b2:preview.theme.b2,tx:preview.theme.tx,tx2:preview.theme.tx2,tx3:preview.theme.tx3},
-      colors:{primary:preview.colors.primary,secondary:preview.colors.secondary,success:preview.colors.success,danger:preview.colors.danger}
-    }));
-    if(showToast) showToast(`Applied "${preview.name}"`);
+      colors:{primary:preview.colors.primary,secondary:preview.colors.secondary,success:preview.colors.success||"#4caf50",danger:preview.colors.danger||"#e05252"}
+    };
+    setDraft(d=>({...d,...updated}));
+    // Auto-save immediately so CSS re-renders — this is why "nothing happened" before
+    if(onSave) await onSave(updated);
+    if(showToast) showToast(`✦ Applied "${preview.name}" — theme live`);
     setPreview(null); setPrompt("");
   };
 
@@ -3834,21 +4024,32 @@ Rules: bg=darkest, s1 slightly lighter, s2 slightly lighter than s1. b1=border, 
       </div>
       {error&&<div style={{fontSize:11,color:"var(--danger)",marginBottom:8,fontFamily:"'DM Mono',monospace"}}>{error}</div>}
       {preview&&(
-        <div style={{background:"var(--bg)",border:"1px solid var(--b2)",borderRadius:"var(--r)",padding:12,marginBottom:8}}>
+        <div style={{background:preview.theme.bg,border:`1px solid ${preview.theme.b2}`,borderRadius:6,padding:12,marginBottom:8}}>
           <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
             <div>
               <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,letterSpacing:1.5,color:preview.colors.primary,textTransform:"uppercase",marginBottom:2}}>{preview.name}</div>
-              <div style={{fontSize:11,color:"var(--tx3)"}}>{preview.description}</div>
+              <div style={{fontSize:11,color:preview.theme.tx3}}>{preview.description}</div>
             </div>
             <div style={{display:"flex",gap:4,flexShrink:0}}>
-              {[preview.theme.bg,preview.theme.s1,preview.colors.primary,preview.colors.secondary].map((c,i)=>(
-                <div key={i} style={{width:16,height:16,borderRadius:"50%",background:c,border:"1px solid #ffffff18"}}/>
+              {[preview.theme.bg,preview.theme.s1,preview.theme.s2,preview.colors.primary,preview.colors.secondary].map((c,i)=>(
+                <div key={i} title={c} style={{width:14,height:14,borderRadius:"50%",background:c,border:"1px solid #ffffff18"}}/>
               ))}
             </div>
           </div>
+          {/* Mini live preview */}
+          <div style={{background:preview.theme.s1,border:`1px solid ${preview.theme.b1}`,borderRadius:4,padding:"8px 10px",marginBottom:8,display:"flex",alignItems:"center",gap:8}}>
+            <div style={{width:10,height:10,borderRadius:2,border:`1px solid ${preview.theme.b2}`,flexShrink:0}}/>
+            <div style={{flex:1}}>
+              <div style={{fontSize:11,color:preview.theme.tx,lineHeight:1.3}}>Sample quest title</div>
+              <div style={{display:"flex",gap:4,marginTop:3}}>
+                <span style={{fontFamily:"monospace",fontSize:8,padding:"1px 6px",borderRadius:10,border:`1px solid ${preview.theme.b1}`,color:preview.colors.primary}}>+80 XP</span>
+                <span style={{fontFamily:"monospace",fontSize:8,padding:"1px 6px",borderRadius:10,border:`1px solid ${preview.theme.b1}`,color:preview.theme.tx3}}>main</span>
+              </div>
+            </div>
+          </div>
           <div style={{display:"flex",gap:6}}>
-            <button className="fsbtn primary" style={{margin:0}} onClick={apply}>◆ Apply Theme</button>
-            <button className="fsbtn" style={{margin:0,width:"auto",padding:"8px 12px"}} onClick={()=>setPreview(null)}>Discard</button>
+            <button onClick={apply} style={{flex:1,padding:"8px 12px",background:preview.colors.primary,border:"none",borderRadius:4,color:"#fff",fontFamily:"'DM Mono',monospace",fontSize:10,letterSpacing:1,cursor:"pointer",fontWeight:500}}>◆ Apply Live</button>
+            <button onClick={()=>setPreview(null)} style={{padding:"8px 12px",background:"none",border:`1px solid ${preview.theme.b2}`,borderRadius:4,color:preview.theme.tx3,fontFamily:"'DM Mono',monospace",fontSize:10,cursor:"pointer"}}>✕</button>
           </div>
         </div>
       )}
@@ -3912,7 +4113,7 @@ function SettingsTab({showToast,onExport,onImport,userId,onSignIn,onSignOut}){
           </button>
         ))}
       </div>
-      {draft.uiMode==="ai"&&<AIThemeDesigner draft={draft} setDraft={setDraft} showToast={showToast}/>}
+      {draft.uiMode==="ai"&&<AIThemeDesigner draft={draft} setDraft={setDraft} showToast={showToast} onSave={async(themeUpdates)=>{const merged={...draft,...themeUpdates};setDraft(merged);await saveSettings(merged);}}/>}
       <div style={{borderTop:"1px solid var(--b1)",marginTop:10,paddingTop:10,display:"flex",alignItems:"center",justifyContent:"space-between"}}>
         <div>
           <div className="srow-label">Compact density</div>
@@ -4034,8 +4235,8 @@ function SettingsTab({showToast,onExport,onImport,userId,onSignIn,onSignOut}){
     </Collapsible>
     <Collapsible question="Want to adjust XP, leveling, or practice scoring?">
       <div className="sgroup">
-        <SRow label="Skill XP per level"  sub="6000 = Level 100 at 10,000 hrs" type="number" sm value={draft.xp.skillPerLevel}  onChange={v=>setXpCfg("skillPerLevel",v)}/>
-        <SRow label="Global XP per level" sub="Default 600"                     type="number" sm value={draft.xp.globalPerLevel} onChange={v=>setXpCfg("globalPerLevel",v)}/>
+        <SRow label="Skill XP per level"  sub="6000 = 1 level per ~100 hrs of work" type="number" sm value={draft.xp.skillPerLevel}  onChange={v=>setXpCfg("skillPerLevel",v)}/>
+        <SRow label="Global XP per level" sub="Char level = total skill XP ÷ this" type="number" sm value={draft.xp.globalPerLevel} onChange={v=>setXpCfg("globalPerLevel",v)}/>
         <SRow label="Practice XP per min" sub="Default 1"                       type="number" sm value={draft.xp.practicePerMin} onChange={v=>setXpCfg("practicePerMin",v)}/>
         <Tog label="AI session scoring" sub="Journal entries trigger AI XP scoring" val={draft.xp.aiScoring!==false} onChange={v=>setXpCfg("aiScoring",v)}/>
       </div>
@@ -4081,7 +4282,8 @@ function SettingsTab({showToast,onExport,onImport,userId,onSignIn,onSignOut}){
     </Collapsible>
     <div className="gap"/>
     <div className="slbl">data</div>
-    <button className="exp-btn" onClick={onExport}><span>↓</span> Export all data as JSON</button>
+    <button className="exp-btn" onClick={()=>onExport("json")}><span>↓</span> Export as JSON</button>
+    <button className="exp-btn" style={{marginTop:6}} onClick={()=>onExport("xml")}><span>↓</span> Export as XML</button>
     <button className="exp-btn" onClick={()=>importRef.current?.click()}><span>↑</span> Import data from JSON</button>
     <input ref={importRef} type="file" accept=".json" style={{display:"none"}} onChange={onImport}/>
     <div className="auth-note">
