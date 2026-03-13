@@ -134,6 +134,7 @@ const DEFAULT_SETTINGS = {
   contentWidth: 700,
   uiMode: "rpg",
   compact: false,
+  advisorRole: "",
 };
 
 const THEME_PRESETS = [
@@ -1593,11 +1594,23 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
   const [nlLoading,setNlLoading]=useState(false);
   const [collapsed,setCollapsed]=useState({overdue:false,morning:false,afternoon:false,evening:false,flexible:false,coming:true});
   const [dragId,setDragId]=useState(null);
+  const [showSubForm,setShowSubForm]=useState(false);
+  const [subF,setSubF]=useState({title:"",skill:"",xpVal:20,recurrenceDays:[],priority:"med"});
   const WDAY_LABELS=["Mo","Tu","We","Th","Fr","Sa","Su"];
   const TIME_BLOCKS=[{id:"morning",label:"Morning"},{id:"afternoon",label:"Afternoon"},{id:"evening",label:"Evening"}];
   const todayDk=dayKey(new Date());
   const toggleWday=i=>setF(v=>({...v,recurrenceDays:v.recurrenceDays.includes(i)?v.recurrenceDays.filter(x=>x!==i):[...v.recurrenceDays,i]}));
+  const toggleSubWday=i=>setSubF(v=>({...v,recurrenceDays:v.recurrenceDays.includes(i)?v.recurrenceDays.filter(x=>x!==i):[...v.recurrenceDays,i]}));
   useEffect(()=>{if(skills.length&&!f.skill)setF(v=>({...v,skill:skills[0]?.id||""}));},[skills]);
+
+  const submitSub=()=>{
+    if(!subF.title.trim()) return;
+    onAddTask({title:subF.title.trim(),period,skill:subF.skill||null,xpVal:Number(subF.xpVal)||20,questId:null,
+      recurrenceDays:period==="weekly"&&subF.recurrenceDays.length?subF.recurrenceDays:null,
+      timeBlock:null,priority:subF.priority||"med"});
+    setSubF({title:"",skill:"",xpVal:20,recurrenceDays:[],priority:"med"});
+    setShowSubForm(false);
+  };
 
   const submit=()=>{
     if(!f.title.trim()) return;
@@ -1616,13 +1629,15 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
     if(!nlInput.trim()) return;
     setNlLoading(true);
     try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
-        model:"claude-sonnet-4-20250514",max_tokens:200,
-        system:`Parse a natural language task into JSON only. Fields: title(string), timeBlock("morning"|"afternoon"|"evening"|null), skillName(string or null, from list: ${skills.map(s=>s.name).join(", ")||"none"}), dayOffset(int, 0=today). Reply only valid JSON.`,
-        messages:[{role:"user",content:nlInput}]
+      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+        max_tokens:200,
+        messages:[
+          {role:"system",content:`Parse a natural language task into JSON only. Fields: title(string), timeBlock("morning"|"afternoon"|"evening"|null), skillName(string or null, from list: ${skills.map(s=>s.name).join(", ")||"none"}), dayOffset(int, 0=today). Reply only valid JSON.`},
+          {role:"user",content:nlInput}
+        ]
       })});
       const data=await res.json();
-      const txt=(data.content?.[0]?.text||"{}").replace(/```json|```/g,"").trim();
+      const txt=(data.choices?.[0]?.message?.content||"{}").replace(/```json|```/g,"").trim();
       let parsed; try{parsed=JSON.parse(txt);}catch{parsed={};}
       const matchedSkill=skills.find(s=>s.name.toLowerCase()===(parsed.skillName||"").toLowerCase());
       const targetDate=new Date(); if((parsed.dayOffset||0)>0) targetDate.setDate(targetDate.getDate()+(parsed.dayOffset||0));
@@ -1796,41 +1811,153 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
       {tasks.length===0&&todayQuests.length===0&&overdueQuests.length===0&&(<div className="empty-state"><div className="es-icon">☐</div><div className="es-title">Day is clear</div><div className="es-desc">Type a task above or tap + to schedule. Try: "meditate 20min morning".</div></div>)}
     </>}
 
-    {period==="weekly"&&(weekDays.map((d,i)=>{
-      const dk=dayKey(d), isToday=dk===dayKey(new Date()), dayIdx=i;
-      const dt=[...new Map([...allTasks.filter(t=>t.dayKey===dk),...allTasks.filter(t=>t.period==="weekly"&&(t.recurrenceDays||[]).includes(dayIdx))].map(t=>[t.id,t])).values()];
-      const dq=questsForDay(dk);
-      return (
-        <div key={i} className="wk-day" onDragOver={e=>{e.preventDefault();e.currentTarget.style.outline="1px dashed var(--primaryb)";}} onDragLeave={e=>{e.currentTarget.style.outline="none";}} onDrop={e=>{e.currentTarget.style.outline="none";handleDrop(e,dk);}}>
-          <div className={`wk-day-lbl ${isToday?"today":""}`}>{["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][i]} {d.getDate()}{isToday?" · today":""}</div>
-          {dt.length===0&&dq.length===0?<div style={{fontSize:12,color:"var(--tx3)",paddingLeft:2}}>—</div>:<>
-            {dq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}
-            <div className="clist">{dt.map(t=><div key={t.id} draggable onDragStart={e=>handleDragStart(e,t.id)} style={{cursor:"grab"}}><TaskCard task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/></div>)}</div>
-          </>}
+    {period==="weekly"&&<>
+      {/* Weekly add form */}
+      {showSubForm?(
+        <div className="fwrap" style={{marginBottom:10}}>
+          <div className="frow"><input className="fi full" autoFocus placeholder="Weekly recurring task..." value={subF.title} onChange={e=>setSubF(v=>({...v,title:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submitSub()}/></div>
+          <div className="frow">
+            <select className="fsel" value={subF.skill} onChange={e=>setSubF(v=>({...v,skill:e.target.value}))}>
+              <option value="">No skill</option>
+              {skills.map(s=><option key={s.id} value={s.id}>{s.icon} {s.name}</option>)}
+            </select>
+            <select className="fsel" value={subF.priority} onChange={e=>setSubF(v=>({...v,priority:e.target.value}))}>
+              <option value="high">High</option><option value="med">Med</option><option value="low">Low</option>
+            </select>
+            <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0}} onClick={()=>setShowSubForm(false)}>✕</button>
+          </div>
+          <div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>
+            {WDAY_LABELS.map((d,i)=><button key={i} onClick={()=>toggleSubWday(i)}
+              style={{padding:"3px 8px",borderRadius:4,border:`1px solid ${subF.recurrenceDays.includes(i)?"var(--primary)":"var(--b2)"}`,background:subF.recurrenceDays.includes(i)?"var(--primaryf)":"var(--bg)",color:subF.recurrenceDays.includes(i)?"var(--primary)":"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,cursor:"pointer"}}>
+              {d}
+            </button>)}
+          </div>
+          <button className="fsbtn" onClick={submitSub}>Add recurring task</button>
         </div>
-      );
-    }))}
+      ):<button className="addbtn" style={{marginBottom:10}} onClick={()=>setShowSubForm(true)}><span>+</span> Add recurring task</button>}
+      {weekDays.map((d,i)=>{
+        const dk=dayKey(d), isToday=dk===dayKey(new Date()), dayIdx=i;
+        const dt=[...new Map([...allTasks.filter(t=>t.dayKey===dk),...allTasks.filter(t=>t.period==="weekly"&&(t.recurrenceDays||[]).includes(dayIdx))].map(t=>[t.id,t])).values()];
+        const dq=questsForDay(dk);
+        return (
+          <div key={i} className="wk-day" onDragOver={e=>{e.preventDefault();e.currentTarget.style.outline="1px dashed var(--primaryb)";}} onDragLeave={e=>{e.currentTarget.style.outline="none";}} onDrop={e=>{e.currentTarget.style.outline="none";handleDrop(e,dk);}}>
+            <div className={`wk-day-lbl ${isToday?"today":""}`}>{["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][i]} {d.getDate()}{isToday?" · today":""}</div>
+            {dt.length===0&&dq.length===0?<div style={{fontSize:12,color:"var(--tx3)",paddingLeft:2}}>—</div>:<>
+              {dq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}
+              <div className="clist">{dt.map(t=><div key={t.id} draggable onDragStart={e=>handleDragStart(e,t.id)} style={{cursor:"grab"}}><TaskCard task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/></div>)}</div>
+            </>}
+          </div>
+        );
+      })}
+    </>}
 
-    {period==="monthly"&&(()=>{const now2=new Date();const mq=questsForMonth(now2.getFullYear(),now2.getMonth());return mq.length>0?<><div className="slbl" style={{marginBottom:6}}>◆ Quests this month</div>{mq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}</>:null;})()}
-
-    {period==="monthly"&&tasks.length>0&&<>
-      <div className="slbl" style={{marginBottom:8,marginTop:12}}>◎ Monthly Tasks</div>
-      {tasks.map(t=>(
-        <div key={t.id} className={`card${t.done?" done":""}`} style={{marginBottom:4,opacity:t.done?.5:1}}>
-          <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <input type="checkbox" checked={!!t.done} onChange={()=>onToggle(t.id)} style={{accentColor:"var(--primary)",width:14,height:14,flexShrink:0}}/>
-            <span style={{flex:1,fontSize:13,color:t.done?"var(--tx3)":"var(--tx)",textDecoration:t.done?"line-through":"none"}}>{t.title}</span>
-            <button className="delbtn" onClick={()=>onDelete(t.id)}>✕</button>
+    {period==="monthly"&&(()=>{
+      const now2=new Date();
+      const yr=now2.getFullYear(), mo=now2.getMonth();
+      const mq=questsForMonth(yr,mo);
+      // Build calendar grid
+      const firstDay=new Date(yr,mo,1);
+      const lastDay=new Date(yr,mo+1,0);
+      const startDow=(firstDay.getDay()+6)%7; // Mon=0
+      const totalDays=lastDay.getDate();
+      const calCells=[];
+      for(let i=0;i<startDow;i++) calCells.push(null);
+      for(let d=1;d<=totalDays;d++) calCells.push(d);
+      while(calCells.length%7!==0) calCells.push(null);
+      const today2=now2.getDate();
+      const questsByDay={};
+      mq.forEach(q=>{const d=new Date(q.due).getDate();(questsByDay[d]=questsByDay[d]||[]).push(q);});
+      const tasksByDay={};
+      allTasks.filter(t=>t.period==="monthly"||t.period==="daily").forEach(t=>{if(t.dayKey){const td=new Date(t.dayKey+"T12:00");if(td.getFullYear()===yr&&td.getMonth()===mo){const d=td.getDate();(tasksByDay[d]=tasksByDay[d]||[]).push(t);}}});
+      return(<>
+        {/* Calendar */}
+        <div style={{marginBottom:12}}>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2,marginBottom:4}}>
+            {["Mo","Tu","We","Th","Fr","Sa","Su"].map(d=><div key={d} style={{textAlign:"center",fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",padding:"2px 0"}}>{d}</div>)}
+          </div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:2}}>
+            {calCells.map((day,i)=>{
+              const hasQ=day&&questsByDay[day]?.length>0;
+              const hasT=day&&tasksByDay[day]?.length>0;
+              const isToday2=day===today2;
+              return <div key={i} style={{minHeight:32,borderRadius:4,background:day?"var(--s1)":"transparent",border:isToday2?"1px solid var(--primary)":"1px solid "+(day?"var(--b1)":"transparent"),display:"flex",flexDirection:"column",alignItems:"center",padding:"3px 2px",position:"relative"}}>
+                {day&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:isToday2?"var(--primary)":"var(--tx3)",fontWeight:isToday2?"bold":"normal"}}>{day}</span>}
+                {hasQ&&<span style={{width:5,height:5,borderRadius:"50%",background:"var(--primary)",marginTop:2}}/>}
+                {hasT&&<span style={{width:4,height:4,borderRadius:"50%",background:"var(--secondary)",marginTop:1}}/>}
+              </div>;
+            })}
           </div>
         </div>
-      ))}
-    </>}
-    {period==="monthly"&&tasks.length===0&&<div style={{fontSize:12,color:"var(--tx3)",fontStyle:"italic",padding:"16px 0",textAlign:"center"}}>No monthly tasks yet — add one above.</div>}
+        {/* Add task */}
+        {showSubForm?(
+          <div className="fwrap" style={{marginBottom:10}}>
+            <div className="frow"><input className="fi full" autoFocus placeholder="Monthly goal or task..." value={subF.title} onChange={e=>setSubF(v=>({...v,title:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submitSub()}/></div>
+            <div className="frow">
+              <select className="fsel" value={subF.skill} onChange={e=>setSubF(v=>({...v,skill:e.target.value}))}>
+                <option value="">No skill</option>
+                {skills.map(s=><option key={s.id} value={s.id}>{s.icon} {s.name}</option>)}
+              </select>
+              <select className="fsel" value={subF.priority} onChange={e=>setSubF(v=>({...v,priority:e.target.value}))}>
+                <option value="high">High</option><option value="med">Med</option><option value="low">Low</option>
+              </select>
+              <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0}} onClick={()=>setShowSubForm(false)}>✕</button>
+            </div>
+            <button className="fsbtn" onClick={submitSub}>Add monthly task</button>
+          </div>
+        ):<button className="addbtn" style={{marginBottom:10}} onClick={()=>setShowSubForm(true)}><span>+</span> Add monthly task</button>}
+        {mq.length>0&&<><div className="slbl" style={{marginBottom:6}}>◆ Quests this month</div>{mq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}</>}
+        {tasks.length>0&&<>
+          <div className="slbl" style={{marginBottom:8,marginTop:12}}>◎ Monthly Tasks</div>
+          {tasks.map(t=>(
+            <div key={t.id} className={`card${t.done?" done":""}`} style={{marginBottom:4,opacity:t.done?.5:1}}>
+              <div style={{display:"flex",alignItems:"center",gap:8}}>
+                <input type="checkbox" checked={!!t.done} onChange={()=>onToggle(t.id)} style={{accentColor:"var(--primary)",width:14,height:14,flexShrink:0}}/>
+                <span style={{flex:1,fontSize:13,color:t.done?"var(--tx3)":"var(--tx)",textDecoration:t.done?"line-through":"none"}}>{t.title}</span>
+                <button className="delbtn" onClick={()=>onDelete(t.id)}>✕</button>
+              </div>
+            </div>
+          ))}
+        </>}
+        {tasks.length===0&&mq.length===0&&<div style={{fontSize:12,color:"var(--tx3)",fontStyle:"italic",padding:"8px 0",textAlign:"center"}}>No monthly tasks — add one above.</div>}
+      </>);
+    })()}
 
     {period==="yearly"&&(()=>{
       const yr=new Date().getFullYear();
       const yearQuests=(quests||[]).filter(q=>{if(!q.due)return false;const d=new Date(q.due);return d.getFullYear()===yr;});
+      const months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+      const questsByMonth={};
+      yearQuests.forEach(q=>{const m=new Date(q.due).getMonth();(questsByMonth[m]=questsByMonth[m]||[]).push(q);});
+      const curMo=new Date().getMonth();
       return(<>
+        {/* Year calendar - month strip */}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:4,marginBottom:14}}>
+          {months.map((m,i)=>{
+            const cnt=(questsByMonth[i]||[]).length;
+            const isPast=i<curMo, isCur=i===curMo;
+            return <div key={i} style={{borderRadius:4,border:`1px solid ${isCur?"var(--primary)":cnt>0?"var(--b2)":"var(--b1)"}`,background:isCur?"var(--primaryf)":"var(--s1)",padding:"5px 4px",textAlign:"center"}}>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:isCur?"var(--primary)":isPast?"var(--tx3)":"var(--tx2)",fontWeight:isCur?"bold":"normal"}}>{m}</div>
+              {cnt>0&&<div style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"var(--primary)",marginTop:2}}>◆{cnt}</div>}
+            </div>;
+          })}
+        </div>
+        {/* Add task */}
+        {showSubForm?(
+          <div className="fwrap" style={{marginBottom:10}}>
+            <div className="frow"><input className="fi full" autoFocus placeholder="Annual goal..." value={subF.title} onChange={e=>setSubF(v=>({...v,title:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submitSub()}/></div>
+            <div className="frow">
+              <select className="fsel" value={subF.skill} onChange={e=>setSubF(v=>({...v,skill:e.target.value}))}>
+                <option value="">No skill</option>
+                {skills.map(s=><option key={s.id} value={s.id}>{s.icon} {s.name}</option>)}
+              </select>
+              <select className="fsel" value={subF.priority} onChange={e=>setSubF(v=>({...v,priority:e.target.value}))}>
+                <option value="high">High</option><option value="med">Med</option><option value="low">Low</option>
+              </select>
+              <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0}} onClick={()=>setShowSubForm(false)}>✕</button>
+            </div>
+            <button className="fsbtn" onClick={submitSub}>Add annual goal</button>
+          </div>
+        ):<button className="addbtn" style={{marginBottom:10}} onClick={()=>setShowSubForm(true)}><span>+</span> Add annual goal</button>}
         {yearQuests.length>0&&<>
           <div className="slbl" style={{marginBottom:6}}>◆ Quests due this year</div>
           {yearQuests.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}
@@ -1851,7 +1978,7 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
             </div>
           ))}
         </>}
-        {tasks.length===0&&yearQuests.length===0&&<div style={{fontSize:12,color:"var(--tx3)",fontStyle:"italic",padding:"16px 0",textAlign:"center"}}>No annual goals yet — add one above.</div>}
+        {tasks.length===0&&yearQuests.length===0&&<div style={{fontSize:12,color:"var(--tx3)",fontStyle:"italic",padding:"8px 0",textAlign:"center"}}>No annual goals — add one above.</div>}
       </>);
     })()}
   </>);
@@ -1915,6 +2042,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
     if(sortBy==="due") return [...arr].sort((a,b)=>(a.due||Infinity)-(b.due||Infinity));
     return arr;
   };
+  const [questTab, setQuestTab]=useState("main"); // "main"|"side"|"radiant"
   const mainA=sortQ(quests.filter(q=>q.type==="main"&&!q.done&&filterQ(q)));
   const mainD=sortQ(quests.filter(q=>q.type==="main"&&q.done&&filterQ(q)));
   const side=sortQ(quests.filter(q=>q.type==="side"&&filterQ(q)));
@@ -1943,7 +2071,21 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
       </button>
     </div>
     {viewMode==="roadmap"&&<QuestRoadmap quests={quests} skills={skills}/>}
-    {viewMode==="list"&&<><div className="slbl">{L.mainQuest}s</div>
+    {viewMode==="list"&&<>
+    {/* Quest type sub-tabs */}
+    <div className="stabs" style={{marginBottom:12}}>
+      {[
+        {id:"main",    label:`◆ ${L.mainQuest}s`, count:mainA.length+mainD.length},
+        {id:"side",    label:`◇ Side`, count:side.length},
+        {id:"radiant", label:`◉ Radiant`, count:radiant.length},
+      ].map(({id,label,count})=>(
+        <button key={id} className={`stab ${questTab===id?"on":""}`}
+          onClick={()=>{setQuestTab(id);setForm(null);}}>
+          {label}{count>0?<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,opacity:.7,marginLeft:4}}>{count}</span>:null}
+        </button>
+      ))}
+    </div>
+    {questTab==="main"&&<><div className="slbl">{L.mainQuest}s</div>
     {form==="main"?(<div className="fwrap">
       <div className="frow"><input className="fi full" autoFocus placeholder="Quest title..." value={f.title} onChange={e=>setF(v=>({...v,title:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
       {skills.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
@@ -2017,7 +2159,8 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
         <button className="fsbtn" style={{width:"auto",padding:"8px 16px",margin:"8px auto 0"}} onClick={()=>openForm("main")}>+ Add Quest</button>
       </div>
     )}
-    <div className="gap"/>
+    </>}
+    {questTab==="side"&&<>
     <div className="slbl">{L.sideQuest}s</div>
     <p style={{fontSize:12,color:"var(--tx2)",fontStyle:"italic",marginBottom:12,lineHeight:1.5}}>Optional objectives. Complete for bonus XP, no pressure.</p>
     {form==="side"?(<div className="fwrap">
@@ -2088,7 +2231,8 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
         <button className="fsbtn" style={{width:"auto",padding:"8px 16px",margin:"8px auto 0"}} onClick={()=>openForm("side")}>+ Add Side Quest</button>
       </div>
     )}
-    <div className="gap"/>
+    </>}
+    {questTab==="radiant"&&<>
     <div className="slbl">{L.radiantQuest}s</div>
     <p style={{fontSize:12,color:"var(--tx2)",fontStyle:"italic",marginBottom:12,lineHeight:1.5}}>{L.radiantDesc}</p>
     {form==="radiant"?(<div className="fwrap">
@@ -2165,6 +2309,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
         <button className="fsbtn" style={{width:"auto",padding:"8px 16px",margin:"8px auto 0"}} onClick={()=>openForm("radiant")}>+ Add Radiant Quest</button>
       </div>
     )}
+    </>}
   </>}
 </>);
 }
@@ -2496,6 +2641,7 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
   const [ef,setEf]=useState({name:"",icon:"◈",color:SKILL_COLORS[0],customImg:null,cardBg:null,intention:"",category:"other",published:false,notesPublic:false});
 
   // add form state (shared, type toggled)
+  const [skillTab,setSkillTab]=useState("skills"); // "skills"|"subskills"
   const [showForm,setShowForm]=useState(false);
   const [formType,setFormType]=useState("skill");
   const [showPresets,setShowPresets]=useState(false);
@@ -2857,15 +3003,24 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
   return (<>
     {discussSkillId&&discussSkill&&<SkillDiscussPanel skill={discussSkill} skPerLv={skPerLv} streaks={streaks} meds={meds} onGrant={async(amt,reason)=>{await onAward(discussSkillId,amt,reason);}} onClose={()=>setDiscussSkillId(null)}/>}
     <div className="slbl">{L.skillsTab}</div>
+    {/* skill sub-tabs */}
+    <div className="stabs" style={{marginBottom:10}}>
+      <button className={`stab ${skillTab==="skills"?"on":""}`} onClick={()=>{setSkillTab("skills");setShowForm(false);}}>
+        ◈ Skills{mainSkills.length>0?<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,opacity:.7,marginLeft:4}}>{mainSkills.length}</span>:null}
+      </button>
+      <button className={`stab ${skillTab==="subskills"?"on":""}`} onClick={()=>{setSkillTab("subskills");setShowForm(false);}}>
+        ◇ Subskills{subSkills.length>0?<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,opacity:.7,marginLeft:4}}>{subSkills.length}</span>:null}
+      </button>
+    </div>
     <div className="sk-quote">
       <div className="sk-quote-text">"Every shortcut you take, every session you skip, every number you inflate — you're not fooling the system. You're just lying to the only person whose opinion of you actually matters."</div>
       <div className="sk-quote-attr">— The only opponent on this stat sheet is you</div>
     </div>
     {/* toolbar */}
     <div style={{display:"flex",gap:6,marginBottom:10,alignItems:"center"}}>
-      {!showForm&&<><button className="addbtn" style={{flex:1,margin:0}} onClick={()=>{setFormType("skill");setShowForm(true);}}><span>+</span> Skill</button>
-      <button className="addbtn" style={{flex:1,margin:0,borderColor:"var(--b2)",color:"var(--tx3)"}} onClick={()=>{setFormType("subskill");setShowForm(true);}}><span>+</span> Subskill</button>
+      {!showForm&&skillTab==="skills"&&<><button className="addbtn" style={{flex:1,margin:0}} onClick={()=>{setFormType("skill");setShowForm(true);}}><span>+</span> Skill</button>
       <button className="addbtn" style={{flex:"none",margin:0,padding:"0 10px",borderColor:"var(--b2)",color:"var(--tx3)"}} onClick={()=>setShowPresets(v=>!v)}>presets</button></>}
+      {!showForm&&skillTab==="subskills"&&<button className="addbtn" style={{flex:1,margin:0}} onClick={()=>{setFormType("subskill");setShowForm(true);}}><span>+</span> Subskill</button>}
       <button onClick={()=>setViewMode(v=>v==="grid"?"list":"grid")}
         style={{background:"none",border:"1px solid var(--b2)",borderRadius:3,padding:"5px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)",flexShrink:0}}>
         {viewMode==="grid"?"≡ list":"▦ grid"}
@@ -2892,6 +3047,7 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
 
 
     {/* ── SKILLS section ───────────────────────────────────────────── */}
+    {skillTab==="skills"&&<>
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
       <div className="label9">Skills</div>
       <div style={{fontSize:9,color:"var(--tx3)"}}>{mainSkills.length} total</div>
@@ -2932,15 +3088,17 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
     })()}
 
     {/* ── SUBSKILLS section ─────────────────────────────────────────── */}
+    </>}
+    {skillTab==="subskills"&&<>
     <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6,marginTop:4}}>
       <div className="label9">Subskills</div>
       <div style={{fontSize:9,color:"var(--tx3)"}}>{subSkills.length} total · drag onto a skill to link</div>
     </div>
-    {subSkills.length===0&&<div style={{background:"var(--s1)",border:"1px dashed var(--b1)",borderRadius:"var(--r)",padding:12,textAlign:"center",marginBottom:10,fontSize:11,color:"var(--tx3)"}}>Subskills are cross-disciplinary practices — create one then drag it onto any skill to link XP</div>}
+    {subSkills.length===0&&!showForm&&<div style={{background:"var(--s1)",border:"1px dashed var(--b1)",borderRadius:"var(--r)",padding:12,textAlign:"center",marginBottom:10,fontSize:11,color:"var(--tx3)"}}>Subskills are cross-disciplinary practices — create one then drag it onto any skill to link XP</div>}
     <div style={viewMode==="grid"?{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,marginBottom:12}:{marginBottom:12}}>
       {subSkills.map((s,i)=>renderSkillCard(s,i,"subskill"))}
     </div>
-
+    </>}
 
   </>);
 }
@@ -3447,7 +3605,11 @@ function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,o
       .map(([id,s])=>`${skills.find(sk=>sk.id===id)?.name||id}: ${s.count}d`).join(", ");
     const memFacts=(aiMemory?.facts||[]).slice(-8).join("\n")||"none yet";
     const memPatterns=(aiMemory?.patterns||[]).slice(-5).join(", ")||"unknown";
-    return `You are a direct planning advisor inside the user's RPG quest log. You have persistent memory of this user.\nLEVEL: ${level} (${xp} XP)${topStr?"\nSTREAKS: "+topStr:""}\nTASKS (${at.length} active): ${at.map(t=>`"${t.title}" [${t.period}, ${skills.find(s=>s.id===t.skill)?.name||"no skill"}, ${t.xpVal}xp]`).join("; ")||"none"}\nQUESTS (${aq.length} active): ${aq.map(q=>`"${q.title}" [${q.type}${q.due?", due "+new Date(q.due).toLocaleDateString():""}]`).join("; ")||"none"}\nSKILLS: ${[...skills].sort((a,b)=>b.xp-a.xp).map(s=>`${s.name} Lv${Math.floor(s.xp/skPerLv)+1}`).join(", ")||"none"}\nMEMORY - known facts:\n${memFacts}\nObserved patterns: ${memPatterns}\nBe direct. Reference actual task names. 3-5 sentences unless breaking something down. If you learn new facts about this user, append MEMORY_UPDATE:{"facts":["fact"],"patterns":["pattern"]} as the very last line.`;
+    const roleOverride=settings.advisorRole?.trim();
+    const basePersona=roleOverride
+      ? `${roleOverride}. You are operating inside a gamified life tracker as this user's planning advisor.`
+      : "You are a direct planning advisor inside the user's RPG quest log. You have persistent memory of this user.";
+    return `${basePersona}\nLEVEL: ${level} (${xp} XP)${topStr?"\nSTREAKS: "+topStr:""}\nTASKS (${at.length} active): ${at.map(t=>`"${t.title}" [${t.period}, ${skills.find(s=>s.id===t.skill)?.name||"no skill"}, ${t.xpVal}xp]`).join("; ")||"none"}\nQUESTS (${aq.length} active): ${aq.map(q=>`"${q.title}" [${q.type}${q.due?", due "+new Date(q.due).toLocaleDateString():""}]`).join("; ")||"none"}\nSKILLS: ${[...skills].sort((a,b)=>b.xp-a.xp).map(s=>`${s.name} Lv${Math.floor(s.xp/skPerLv)+1}`).join(", ")||"none"}\nMEMORY - known facts:\n${memFacts}\nObserved patterns: ${memPatterns}\nBe direct. Reference actual task names. 3-5 sentences unless breaking something down. If you learn new facts about this user, append MEMORY_UPDATE:{"facts":["fact"],"patterns":["pattern"]} as the very last line.`;
   }
 
   const executeAction=async(action)=>{
@@ -3613,51 +3775,33 @@ function AIThemeDesigner({draft,setDraft,showToast}){
     if(!prompt.trim()) return;
     setLoading(true); setError(""); setPreview(null);
     try{
-      const res=await fetch("https://api.anthropic.com/v1/messages",{
+      const res=await fetch("/api/chat",{
         method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
-          model:"claude-sonnet-4-20250514",
           max_tokens:800,
-          messages:[{role:"user",content:`You are a UI theme designer. Generate a cohesive dark (or light if requested) color theme for a productivity app based on this vibe: "${prompt}"
+          messages:[
+            {role:"system",content:"You are a UI theme designer. Return ONLY a valid JSON object — no markdown, no explanation. The user will describe a vibe and you generate matching hex colors."},
+            {role:"user",content:`Generate a cohesive dark (or light if requested) color theme for a productivity RPG app based on this vibe: "${prompt}"
 
-Return ONLY a valid JSON object with this exact structure, no markdown, no explanation:
+Return ONLY this JSON shape:
 {
   "name": "Theme Name (2-3 words)",
-  "theme": {
-    "bg": "#hex",
-    "s1": "#hex",
-    "s2": "#hex",
-    "b1": "#hex",
-    "b2": "#hex",
-    "tx": "#hex",
-    "tx2": "#hex",
-    "tx3": "#hex"
-  },
-  "colors": {
-    "primary": "#hex",
-    "secondary": "#hex",
-    "success": "#hex",
-    "danger": "#hex"
-  },
+  "theme": {"bg":"#hex","s1":"#hex","s2":"#hex","b1":"#hex","b2":"#hex","tx":"#hex","tx2":"#hex","tx3":"#hex"},
+  "colors": {"primary":"#hex","secondary":"#hex","success":"#hex","danger":"#hex"},
   "description": "One sentence describing the vibe"
 }
-
-Rules:
-- bg should be the darkest surface (unless light theme requested)
-- s1 slightly lighter than bg, s2 slightly lighter than s1
-- b1 is border color, b2 slightly brighter border
-- tx is primary text (high contrast vs bg), tx2 is secondary, tx3 is muted/disabled
-- primary should be vivid and thematic, secondary should complement
-- All values must be valid 6-digit hex colors`}]
+Rules: bg=darkest, s1 slightly lighter, s2 slightly lighter than s1. b1=border, b2=brighter border. tx=high contrast vs bg, tx2=secondary text, tx3=muted. primary=vivid+thematic, secondary=complement. All must be valid 6-digit hex.`}
+          ]
         })
       });
       const data=await res.json();
-      const raw=(data.content?.[0]?.text||"").replace(/```json|```/g,"").trim();
-      let parsed; try{parsed=JSON.parse(raw);}catch{throw new Error("Couldn't parse AI response");}
+      if(data.error) throw new Error(data.error.message||"API error");
+      const raw=(data.choices?.[0]?.message?.content||"").replace(/```json|```/g,"").trim();
+      let parsed; try{parsed=JSON.parse(raw);}catch{throw new Error("Couldn't parse AI response — try a different description");}
       if(!parsed.theme||!parsed.colors) throw new Error("Incomplete theme data");
       setPreview(parsed);
-    }catch(e){setError(e.message||"Generation failed");}
+    }catch(e){setError(e.message||"Generation failed — check browser console");}
     setLoading(false);
   };
 
@@ -3907,6 +4051,33 @@ function SettingsTab({showToast,onExport,onImport,userId,onSignIn,onSignOut}){
       <CustomImageUploader label="Header Banner / Logo" aspectHint="wide ~800x120px"
         value={draft.images?.banner||null}
         onChange={v=>setDraft(d=>({...d,images:{...(d.images||{}),banner:v}}))}/>
+    </Collapsible>
+    <div className="gap"/>
+    <Collapsible question="Want to set the Advisor's personality or role?">
+      <div className="sgroup">
+        <div className="srow-sub" style={{marginBottom:10,lineHeight:1.6}}>Give the Advisor a base persona — e.g. "tough but encouraging coach", "Stoic philosopher", "drill sergeant", "wise mentor". Leave blank for default behavior.</div>
+        <div className="srow-label" style={{marginBottom:6}}>Advisor Role / Persona</div>
+        <textarea
+          className="fi full"
+          rows={3}
+          placeholder='e.g. "You are Marcus Aurelius — respond with Stoic wisdom, keep it brief and direct" or "Act as a tough but caring athletic coach"'
+          value={draft.advisorRole||""}
+          onChange={e=>setDraft(d=>({...d,advisorRole:e.target.value}))}
+          style={{resize:"vertical",lineHeight:1.5,marginBottom:8,width:"100%",boxSizing:"border-box",fontFamily:"inherit",fontSize:12}}
+        />
+        <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
+          {["Stoic philosopher","Tough love coach","Wise mentor","Drill sergeant","Zen master","Hype man","Brutally honest friend"].map(r=>(
+            <button key={r} onClick={()=>setDraft(d=>({...d,advisorRole:r}))}
+              style={{padding:"3px 8px",borderRadius:20,border:`1px solid ${(draft.advisorRole||"")===r?"var(--primary)":"var(--b2)"}`,background:(draft.advisorRole||"")===r?"var(--primaryf)":"var(--s2)",color:(draft.advisorRole||"")===r?"var(--primary)":"var(--tx2)",fontSize:10,cursor:"pointer",fontFamily:"'DM Mono',monospace"}}>
+              {r}
+            </button>
+          ))}
+          {draft.advisorRole&&<button onClick={()=>setDraft(d=>({...d,advisorRole:""}))}
+            style={{padding:"3px 8px",borderRadius:20,border:"1px solid var(--b1)",background:"none",color:"var(--tx3)",fontSize:10,cursor:"pointer",fontFamily:"'DM Mono',monospace"}}>
+            ✕ clear
+          </button>}
+        </div>
+      </div>
     </Collapsible>
     <div className="gap"/>
     <div className="slbl">data</div>
@@ -5053,10 +5224,12 @@ function WeeklyReview({tasks,quests,skills,meds,xpLog,journal,settings,onClose,o
         dayActivity,
         journalEntriesThisWeek:journal.filter(j=>j.created>weekAgo).length,
       };
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},
+      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
-          model:"claude-sonnet-4-20250514",max_tokens:600,
-          messages:[{role:"user",content:`You are a grounded, direct life coach doing a weekly rewind for ${summary.playerName}. Be specific, personal, and honest — not just cheerleading. Acknowledge real struggles and patterns.
+          max_tokens:600,
+          messages:[
+            {role:"system",content:"You are a grounded, direct life coach. Be specific, personal, and honest — not just cheerleading. Acknowledge real struggles and patterns."},
+            {role:"user",content:`Weekly rewind for ${summary.playerName}.
 
 Week data:
 ${JSON.stringify(summary,null,2)}
@@ -5071,11 +5244,12 @@ Write a weekly rewind in exactly this structure:
 **◆ ONE FOCUS FOR NEXT WEEK**
 [One specific, concrete thing. Based on their intentions and where they fell short or can build momentum.]
 
-Keep it under 300 words. Be like a coach who read the actual notes, not a bot reciting stats.`}]
+Keep it under 300 words. Be like a coach who read the actual notes, not a bot reciting stats.`}
+          ]
         })
       });
       const data=await res.json();
-      const msg=(data.content?.[0]?.text||"Couldn't generate review. Try again.");
+      const msg=(data.choices?.[0]?.message?.content||"Couldn't generate review. Try again.");
       setAnalysis(msg);
     }catch(e){ setAnalysis("Couldn't connect to advisor. Try again."); }
     finally{ setLoading(false); }
@@ -5085,20 +5259,22 @@ Keep it under 300 words. Be like a coach who read the actual notes, not a bot re
     setPlanLoading(true);
     try{
       const activeQ=quests.filter(q=>!q.done).map(q=>({id:q.id,title:q.title,type:q.type,skills:(q.skills||[]).map(id=>skills.find(s=>s.id===id)?.name).filter(Boolean)}));
-      const res=await fetch("https://api.anthropic.com/v1/messages",{method:"POST",headers:{"Content-Type":"application/json"},
+      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({
-          model:"claude-sonnet-4-20250514",max_tokens:400,
-          system:"You are a planning assistant. Reply ONLY with valid JSON array, no markdown, no explanation.",
-          messages:[{role:"user",content:`Based on this player's active quests, pick 3 to focus on next week. Prioritize momentum and skill variety.
+          max_tokens:400,
+          messages:[
+            {role:"system",content:"You are a planning assistant. Reply ONLY with valid JSON array, no markdown, no explanation."},
+            {role:"user",content:`Based on this player's active quests, pick 3 to focus on next week. Prioritize momentum and skill variety.
 
 Active quests: ${JSON.stringify(activeQ)}
 Weekly review: ${analysis.slice(0,300)}
 
-Reply with JSON only: [{"questId":"id","title":"title","reason":"one sentence, 10 words max"}]`}]
+Reply with JSON only: [{"questId":"id","title":"title","reason":"one sentence, 10 words max"}]`}
+          ]
         })
       });
       const data=await res.json();
-      const txt=(data.content?.[0]?.text||"[]").replace(/```json|```/g,"").trim();
+      const txt=(data.choices?.[0]?.message?.content||"[]").replace(/```json|```/g,"").trim();
       let parsed; try{parsed=JSON.parse(txt);}catch{parsed=[];}
       setPlanSuggestions(parsed.slice(0,3));
     }catch(e){setPlanSuggestions([]);}
