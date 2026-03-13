@@ -120,7 +120,7 @@ const DEFAULT_SETTINGS = {
     plannerTab:"Planner", questsTab:"Quests", skillsTab:"Skills",
     practiceTab:"Practice", advisorTab:"Advisor", settingsTab:"Settings", journalTab:"Journal",
     mainQuest:"Main Quest", sideQuest:"Side Quest", radiantQuest:"Radiant Quest",
-    mainXp:"80", sideXp:"50", radiantXp:"30",
+    mainXp:"2000", sideXp:"500", radiantXp:"80",
     daily:"Daily", weekly:"Weekly", monthly:"Monthly", yearly:"Yearly",
     xpName:"XP", levelName:"LVL", done:"Done", completed:"Completed",
     radiantDesc:"Recurring practices. Embodied, not completed.",
@@ -1777,8 +1777,9 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
               {skills.map(s=><option key={s.id} value={s.id}>{skillLabel(s)}</option>)}
             </select>
             <select className="fsel" value={f.xpVal} onChange={e=>setF(v=>({...v,xpVal:Number(e.target.value)}))}>
-              {[5,10,20,30,50,80].map(v=><option key={v} value={v}>{v} {L.xpName}</option>)}
+              {[5,10,20,30,50,80,150,300,500].map(v=><option key={v} value={v}>{v} {L.xpName}</option>)}
             </select>
+            <input type="number" className="fsel" style={{width:64}} min={1} max={30000} value={f.xpVal} onChange={e=>setF(v=>({...v,xpVal:Math.max(1,Number(e.target.value)||20)}))}/>
           </div>
           {activeQuests.length>0&&(<div className="frow"><select className="fsel" style={{flex:1}} value={f.questId} onChange={e=>setF(v=>({...v,questId:e.target.value}))}><option value="">No quest link</option>{activeQuests.map(q=><option key={q.id} value={q.id}>◆ {q.title}</option>)}</select></div>)}
           <button className="fsbtn" onClick={submit}>Add Task</button>
@@ -1892,6 +1893,7 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
             <select className="fsel" value={subF.priority} onChange={e=>setSubF(v=>({...v,priority:e.target.value}))}>
               <option value="high">High</option><option value="med">Med</option><option value="low">Low</option>
             </select>
+            <input type="number" className="fsel" style={{width:64}} min={1} max={30000} placeholder="XP" value={subF.xpVal} onChange={e=>setSubF(v=>({...v,xpVal:Math.max(1,Number(e.target.value)||20)}))}/>
             <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0}} onClick={()=>setShowSubForm(false)}>✕</button>
           </div>
           <div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>
@@ -2086,7 +2088,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
     setQXpLoad(true); setQXpSug(null);
     const typeLabel=form==="main"?"main quest":form==="side"?"side quest":"radiant/repeatable quest";
     try{
-      const _qp='Quest in a gamified life tracker: "'+f.title+'"'+(f.note?'. Intention: "'+f.note+'"':'')+'. Type: '+typeLabel+'. Priority: '+(f.priority||'med')+'. XP scale: 6000 XP = 1 level. Judge SCOPE: radiant/daily=20-60, side/hours-days=100-800, main/weeks-months=600-8000, impactful main=8000-20000, life-defining quest=20000-30000 (hard cap). Use high end sparingly — most mains should be 600-4000. Reply ONLY with JSON: {"xp":number,"reason":"one sentence"}.';
+      const _qp='Quest in a gamified life tracker: "'+f.title+'"'+(f.note?'. Intention: "'+f.note+'"':'')+'. Type: '+typeLabel+'. Priority: '+(f.priority||'med')+'. XP SCALE: 6000 XP = 1 level ≈ 100 hours real effort. SCOPE GUIDE — radiant (daily habit): 20–150 XP per run (NEVER exceed 300); side quest (hours-days): 200–1500 XP; main quest (days-weeks): 800–6000 XP; main quest worth a full level (weeks-months of real work): 6000–18000 XP; life-defining main (months-years, multiple levels): 18000–60000 XP. For main quests, if completing this quest represents genuine mastery or a major life chapter, awarding a full level or more is correct and encouraged. Reply ONLY with JSON: {"xp":number,"reason":"one sentence"}.';
       const res=await fetch("/api/chat",{method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({max_tokens:120,
@@ -3726,11 +3728,11 @@ function AdvisorTab({tasks,quests,skills,xp,level,streaks,onAddQuest,onAddTask,o
       : "You are a direct planning advisor inside the user's RPG quest log. You have persistent memory of this user.";
     const xpScale=`XP SCALE (critical for add_quest/adjust_skill_xp):
 - 1 skill level = ${skPerLv} XP (~100 hrs genuine effort)
-- Radiant/daily habits: 20–200 XP each completion
-- Side quest (hours-days scope): 100–800 XP
-- Main quest (days-weeks): 600–4000 XP  
-- Impactful main quest (weeks-months): 4000–12000 XP
-- Life-defining quest (months-years): 12000–30000 XP (use sparingly)
+- Radiant/daily habits: 20–150 XP per run (5min=20, 30min=80, 1hr=150 — HARD CAP 300 for any radiant)
+- Side quest (hours-days scope): 200–1500 XP total
+- Main quest (days-weeks): 800–6000 XP
+- Main quest worth a full level (weeks-months of real work): 6000–18000 XP — encouraged if scope warrants it
+- Life-defining quest (months-years, multiple levels): 18000–60000 XP
 - Char level = total skill XP ÷ ${skPerLv} (so level reflects actual skill work)
 - adjust_skill_xp adds/subtracts from a skill directly`;
     return `${basePersona}
@@ -4239,6 +4241,28 @@ function SettingsTab({showToast,onExport,onImport,userId,onSignIn,onSignOut}){
         <SRow label="Global XP per level" sub="Char level = total skill XP ÷ this" type="number" sm value={draft.xp.globalPerLevel} onChange={v=>setXpCfg("globalPerLevel",v)}/>
         <SRow label="Practice XP per min" sub="Default 1"                       type="number" sm value={draft.xp.practicePerMin} onChange={v=>setXpCfg("practicePerMin",v)}/>
         <Tog label="AI session scoring" sub="Journal entries trigger AI XP scoring" val={draft.xp.aiScoring!==false} onChange={v=>setXpCfg("aiScoring",v)}/>
+        <div style={{background:"var(--bg)",border:"1px solid var(--b1)",borderRadius:4,padding:"10px 12px",marginTop:8}}>
+          <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:1.5,color:"var(--tx3)",marginBottom:8,textTransform:"uppercase"}}>XP reference</div>
+          {[
+            ["Radiant (daily habit, 5 min)","20 XP"],
+            ["Radiant (daily habit, 30 min)","80 XP"],
+            ["Radiant (daily habit, 1 hr)","150 XP — max ~300"],
+            ["Task (quick action)","10–80 XP"],
+            ["Task (significant work)","80–500 XP"],
+            ["Side quest (hours–days)","200–1,500 XP"],
+            ["Main quest (days–weeks)","800–6,000 XP"],
+            ["Main quest (weeks–months, full level)","6,000–18,000 XP"],
+            ["Life-defining quest (multiple levels)","18,000–60,000 XP"],
+            ["Streak bonus","1.25× (3d) → 2.0× (30d)"],
+            ["Practice: focused session","1.5–3× baseline"],
+            ["Practice: breakthrough","3–10× baseline"],
+          ].map(([label,val])=>(
+            <div key={label} style={{display:"flex",justifyContent:"space-between",alignItems:"baseline",paddingBottom:4,borderBottom:"1px solid var(--b1)",marginBottom:4}}>
+              <span style={{fontSize:10,color:"var(--tx2)"}}>{label}</span>
+              <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--primary)",whiteSpace:"nowrap",marginLeft:8}}>{val}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </Collapsible>
     <div className="gap"/>
@@ -4316,9 +4340,10 @@ function TaskCard({task,skills,quests,onToggle,onDelete,onEdit}){
           <option value="">No skill</option>
           {skills.map(s=><option key={s.id} value={s.id}>{skillLabel(s)}</option>)}
         </select>
-        <select className="fsel" value={f.xpVal} onChange={e=>setF(v=>({...v,xpVal:e.target.value}))}>
-          {[5,10,20,30,50,80].map(v=><option key={v} value={v}>{v} {L.xpName}</option>)}
+        <select className="fsel" value={f.xpVal} onChange={e=>setF(v=>({...v,xpVal:Number(e.target.value)}))}>
+          {[5,10,20,30,50,80,150,300,500].map(v=><option key={v} value={v}>{v} {L.xpName}</option>)}
         </select>
+        <input type="number" className="fsel" style={{width:64}} min={1} max={30000} value={f.xpVal} onChange={e=>setF(v=>({...v,xpVal:Math.max(1,Number(e.target.value)||20)}))}/>
         <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0}} onClick={()=>setEditing(false)}>✕</button>
       </div>
       <button className="fsbtn" onClick={save}>Save</button>
@@ -4385,7 +4410,7 @@ function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,o
     if(!ef.title.trim()) return;
     setXpLoading(true); setXpSuggestion(null);
     try{
-      const _eqp='Quest in a gamified life tracker: "'+ef.title+'"'+(ef.note?'. Intention: "'+ef.note+'"':'')+'. Type: '+quest.type+', Priority: '+(ef.priority||'med')+'. XP scale: 6000 XP = 1 level. Judge SCOPE: radiant/daily=20-60, side/hours-days=100-800, main/weeks-months=600-8000, impactful main=8000-20000, life-defining=20000-30000 (5 level max, use rarely). Most mains should be 600-4000. Reply ONLY with JSON: {"xp":number,"reason":"one sentence"}.';
+      const _eqp='Quest in a gamified life tracker: "'+ef.title+'"'+(ef.note?'. Intention: "'+ef.note+'"':'')+'. Type: '+quest.type+', Priority: '+(ef.priority||'med')+'. XP SCALE: 6000 XP = 1 level ≈ 100 hours real effort. SCOPE GUIDE — radiant (daily): 20–150 per run (NEVER exceed 300); side (hours-days): 200–1500 total; main (days-weeks): 800–6000; main worth a full level (weeks-months): 6000–18000; life-defining (months-years, multiple levels): 18000–60000. For main quests, if this represents genuine mastery or a major life chapter, a full level or more is correct. Reply ONLY with JSON: {"xp":number,"reason":"one sentence"}.';
       const res=await fetch("/api/chat",{method:"POST",
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({max_tokens:120,
