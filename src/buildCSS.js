@@ -144,20 +144,24 @@ button,input,textarea,select{font-family:'DM Sans',sans-serif;}
 .xp-float{position:fixed;top:44px;left:50%;transform:translateX(calc(-50% + var(--fx)));font-family:'DM Mono',monospace;font-size:14px;color:var(--primary);font-weight:bold;pointer-events:none;z-index:9999;animation:floatUp .9s ease forwards;}
 @keyframes floatUp{0%{opacity:1;transform:translateX(calc(-50% + var(--fx))) translateY(0);}100%{opacity:0;transform:translateX(calc(-50% + var(--fx))) translateY(-32px);}}
 /* ── SKILL CARDS ── */
-.sk-card{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);overflow:hidden;transition:border-color .15s;}
-.sk-card:hover{border-color:var(--b2);}
-.sk-hdr{display:flex;align-items:center;gap:10px;padding:10px 12px 8px;cursor:pointer;}
+.sk-card,.skill-card{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);overflow:hidden;transition:border-color .15s;margin-bottom:6px;}
+.sk-card:hover,.skill-card:hover{border-color:var(--b2);}
+.sk-hdr{display:flex;align-items:center;gap:8px;padding:10px 12px 6px;}
 .sk-icon{font-size:18px;line-height:1;flex-shrink:0;}
 .sk-info{flex:1;min-width:0;}
-.sk-name{font-size:${f}px;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.sk-lv{font-family:'DM Mono',monospace;font-size:9px;color:var(--tx3);}
-.sk-bar-wrap{height:3px;background:var(--b1);border-radius:2px;overflow:hidden;margin:3px 0 6px;}
+.sk-name{display:flex;align-items:center;gap:6px;font-size:${f}px;font-weight:400;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;min-width:0;}
+.sk-meta{display:flex;align-items:center;gap:6px;flex-shrink:0;}
+.sk-lv{font-family:'DM Mono',monospace;font-size:9px;color:var(--primary);background:var(--primaryf);border:1px solid var(--primaryb);border-radius:10px;padding:1px 7px;white-space:nowrap;}
+.sk-bar-wrap{height:3px;background:var(--b1);border-radius:2px;overflow:hidden;margin:3px 12px 0;}
 .sk-bar{height:100%;border-radius:2px;transition:width .6s ease;}
+.sk-xprow{display:flex;justify-content:space-between;padding:3px 12px 8px;}
+.sk-xplbl{font-family:'DM Mono',monospace;font-size:8px;color:var(--tx3);letter-spacing:.3px;}
 .sk-streak{font-family:'DM Mono',monospace;font-size:8px;padding:2px 7px;border-radius:10px;border:1px solid;white-space:nowrap;flex-shrink:0;}
+.stale-label{font-family:'DM Mono',monospace;font-size:8px;color:var(--danger);opacity:.7;white-space:nowrap;}
 .sk-body{padding:0 12px 10px;}
 .sk-detail{font-size:${f2}px;color:var(--tx2);line-height:1.5;}
 .sk-actions{display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;}
-.sk-delbtn{background:none;border:none;cursor:pointer;color:var(--tx3);font-size:10px;padding:2px 4px;transition:color .15s;}
+.sk-delbtn{background:none;border:none;cursor:pointer;color:var(--tx3);font-size:10px;padding:2px 4px;transition:color .15s;flex-shrink:0;}
 .sk-delbtn:hover{color:var(--danger);}
 /* ── PRACTICE/LOG FORM ── */
 .type-grid{display:flex;flex-direction:column;gap:4px;margin-bottom:10px;}
