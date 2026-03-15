@@ -1,855 +1,35 @@
-import React, { useState, useEffect, useCallback, useRef, createContext, useContext, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import AuthScreen from "./AuthScreen";
 import { supabase, getSession, onAuthChange, signOut, loadUserData, saveField, migrateLocalStorage } from "./supabase";
 
-const GFONTS = `@import url('https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;1,300&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');`;
-const GFONTS_RPG = `@import url('https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600&family=Cinzel+Decorative:wght@400;700&family=DM+Mono:ital,wght@0,300;0,400;1,300&family=DM+Sans:ital,wght@0,300;0,400;0,500;1,300&display=swap');`;
-const SettingsCtx = createContext(null);
-const COOLDOWN_OPTIONS=[
-  {label:"Instant",ms:0},
-  {label:"15 min",ms:15*60*1000},
-  {label:"30 min",ms:30*60*1000},
-  {label:"1 hr",ms:60*60*1000},
-  {label:"2 hr",ms:2*60*60*1000},
-  {label:"4 hr",ms:4*60*60*1000},
-  {label:"6 hr",ms:6*60*60*1000},
-  {label:"8 hr",ms:8*60*60*1000},
-  {label:"12 hr",ms:12*60*60*1000},
-  {label:"24 hr",ms:24*60*60*1000},
-];
+// ── MODULE IMPORTS (replaces ~850 lines of inline constants/utils/CSS) ────────
+import {
+  SettingsCtx, useSettings,
+  DEFAULT_SETTINGS, DEFAULT_SKILLS, DEFAULT_PRACTICE_TYPES,
+  THEME_PRESETS, PALETTES, SKILL_ICONS, SKILL_ICONS_EXTRA,
+  SKILL_CATEGORIES, SKILL_COLORS, SKILL_PRESETS, SKILL_MILESTONES,
+  TAB_EXPLAINERS, PERIODS, WDAY_LABELS, TIME_BLOCKS, COOLDOWN_OPTIONS, KEY_MAP,
+} from "./constants";
 
-// ── Drag-to-reorder hook (HTML5 drag API — desktop + Android Chrome) ──────────
-function useDrag({items, onReorder, idKey="id"}){
-  const [activeId,setActiveId]=useState(null);
-  const [overId,setOverId]=useState(null);
-  const dragId=useRef(null);
+import {
+  uid, skillLv, skillProg, fmtDate, todayLabel, monthLabel,
+  dayKey, todayKey, getWeekDays,
+  radiantAvailable, radiantCooldownLabel,
+  getMultiplier, updateStreak, computedTabTitle, deepMerge,
+  genFriendCode, communitySet, communityGet, communityList, communityDelete,
+  sget, sset, dbSet,
+  compressImage, compressBanner,
+  useDrag,
+} from "./utils";
 
-  const getProps=(id)=>({
-    draggable:true,
-    onDragStart:(e)=>{
-      dragId.current=id; setActiveId(id);
-      e.dataTransfer.effectAllowed="move";
-      e.dataTransfer.setData("text/plain",String(id));
-    },
-    onDragOver:(e)=>{
-      e.preventDefault();
-      e.dataTransfer.dropEffect="move";
-      if(dragId.current&&dragId.current!==id) setOverId(id);
-    },
-    onDragLeave:(e)=>{ if(!e.currentTarget.contains(e.relatedTarget)) setOverId(v=>v===id?null:v); },
-    onDrop:(e)=>{
-      e.preventDefault();
-      const from=items.findIndex(x=>x[idKey]===dragId.current);
-      const to=items.findIndex(x=>x[idKey]===id);
-      if(from!==-1&&to!==-1&&from!==to){
-        const arr=[...items];
-        const[m]=arr.splice(from,1); arr.splice(to,0,m);
-        onReorder(arr);
-      }
-      dragId.current=null; setActiveId(null); setOverId(null);
-    },
-    onDragEnd:()=>{ dragId.current=null; setActiveId(null); setOverId(null); },
-    style:{
-      opacity:activeId===id?0.4:1,
-      outline:overId===id&&activeId!==id?"2px dashed var(--primary)":"none",
-      outlineOffset:2,
-      cursor:"grab",
-      transition:"opacity .1s",
-    }
-  });
-  return {getProps, activeId, overId};
-}
-
-// Renders skill icon — image if customImg, otherwise text icon
-// sz = pixel size, For text-only contexts use s.customImg ? "◈" : s.icon
-function SkIcon({s, sz=14, style={}}){
-  if(!s) return null;
-  if(s.customImg) return <img src={s.customImg} style={{width:sz,height:sz,borderRadius:2,objectFit:"cover",flexShrink:0,...style}}/>;
-  return <span style={{color:s.color,fontSize:sz,lineHeight:1,flexShrink:0,...style}}>{s.icon}</span>;
-}
-// For contexts that can't render JSX (option text etc) — just show name without broken icon
-function skillLabel(s){ return s.customImg ? s.name : `${s.icon} ${s.name}`; }
-
-// Compress an image file to a small base64 JPEG for storage
-function compressImage(file, maxPx=200, quality=0.82){
-  return new Promise((resolve,reject)=>{
-    const reader=new FileReader();
-    reader.onload=ev=>{
-      const img=new Image();
-      img.onload=()=>{
-        const scale=Math.min(1,maxPx/Math.max(img.width,img.height));
-        const w=Math.round(img.width*scale), h=Math.round(img.height*scale);
-        const c=document.createElement("canvas"); c.width=w; c.height=h;
-        c.getContext("2d").drawImage(img,0,0,w,h);
-        resolve(c.toDataURL("image/jpeg",quality));
-      };
-      img.onerror=reject;
-      img.src=ev.target.result;
-    };
-    reader.onerror=reject;
-    reader.readAsDataURL(file);
-  });
-}
-// Compress to a wider banner size
-function compressBanner(file, maxW=800, maxH=240, quality=0.80){
-  return new Promise((resolve,reject)=>{
-    const reader=new FileReader();
-    reader.onload=ev=>{
-      const img=new Image();
-      img.onload=()=>{
-        const scale=Math.min(1,maxW/img.width,maxH/img.height);
-        const w=Math.round(img.width*scale), h=Math.round(img.height*scale);
-        const c=document.createElement("canvas"); c.width=w; c.height=h;
-        c.getContext("2d").drawImage(img,0,0,w,h);
-        resolve(c.toDataURL("image/jpeg",quality));
-      };
-      img.onerror=reject;
-      img.src=ev.target.result;
-    };
-    reader.onerror=reject;
-    reader.readAsDataURL(file);
-  });
-}
-
-const useSettings = () => useContext(SettingsCtx);
-
-const DEFAULT_SETTINGS = {
-  appName: "",
-  profile: { name: "", setup: false, public: false, friendCode: "", digestEnabled: false },
-  labels: {
-    plannerTab:"Planner", questsTab:"Quests", skillsTab:"Skills",
-    practiceTab:"Practice", advisorTab:"Advisor", settingsTab:"Settings", journalTab:"Journal",
-    mainQuest:"Main Quest", sideQuest:"Side Quest", radiantQuest:"Radiant Quest",
-    mainXp:"2000", sideXp:"500", radiantXp:"80",
-    daily:"Daily", weekly:"Weekly", monthly:"Monthly", yearly:"Yearly",
-    xpName:"XP", levelName:"LVL", done:"Done", completed:"Completed",
-    radiantDesc:"Recurring practices. Embodied, not completed.",
-    skillsDesc:"Skills level up as you complete tagged tasks and quests.",
-    comboName:"Combo",
-  },
-  colors: { primary:"#c8a96e", secondary:"#5b9e9e", success:"#6a9e6a", danger:"#a06060" },
-  theme:  { bg:"#0c0c0c", s1:"#141414", s2:"#1a1a1a", b1:"#252525", b2:"#333333", tx:"#dedede", tx2:"#999999", tx3:"#555555" },
-  xp: { globalPerLevel:6000, skillPerLevel:6000, practicePerMin:1, aiScoring:true },
-  fontSize: 14,
-  contentWidth: 700,
-  uiMode: "rpg",
-  compact: false,
-  advisorRole: "",
-};
-
-const THEME_PRESETS = [
-  { name:"Dark",     bg:"#0c0c0c", s1:"#141414", s2:"#1a1a1a", b1:"#252525", b2:"#333333", tx:"#dedede", tx2:"#999999", tx3:"#555555" },
-  { name:"Midnight", bg:"#070b14", s1:"#0d1220", s2:"#131929", b1:"#1e2640", b2:"#2d3a58", tx:"#d8e0f0", tx2:"#8896b8", tx3:"#4a5470" },
-  { name:"Warm",     bg:"#0f0d0b", s1:"#181410", s2:"#201c16", b1:"#2a2420", b2:"#3d3530", tx:"#e8ddd0", tx2:"#a89888", tx3:"#605548" },
-  { name:"Sepia",    bg:"#1a1510", s1:"#221c14", s2:"#2a2318", b1:"#352b20", b2:"#4a3f32", tx:"#f0e8d8", tx2:"#b0a090", tx3:"#706050" },
-  { name:"Dim",      bg:"#1a1a1a", s1:"#222222", s2:"#2a2a2a", b1:"#333333", b2:"#444444", tx:"#cccccc", tx2:"#888888", tx3:"#555555" },
-  { name:"Forest",   bg:"#0a0f0a", s1:"#111811", s2:"#162016", b1:"#1f2e1f", b2:"#2e402e", tx:"#d8e8d0", tx2:"#88a888", tx3:"#486048" },
-  { name:"Light",    bg:"#f5f5f0", s1:"#eeeeea", s2:"#e5e5e0", b1:"#d8d8d3", b2:"#c5c5c0", tx:"#1a1a1a", tx2:"#555555", tx3:"#aaaaaa" },
-  { name:"Paper",    bg:"#f8f5ee", s1:"#f0ece2", s2:"#e8e3d6", b1:"#d8d2c2", b2:"#c2bba8", tx:"#2a2520", tx2:"#6a6058", tx3:"#b0a898" },
-];
-
-const PALETTES = [
-  { name:"Amber",   primary:"#c8a96e", secondary:"#5b9e9e" },
-  { name:"Crimson", primary:"#c86e7a", secondary:"#6e8bc8" },
-  { name:"Violet",  primary:"#a06ec8", secondary:"#6ec8a0" },
-  { name:"Sage",    primary:"#7aaa7a", secondary:"#aa9a5a" },
-  { name:"Steel",   primary:"#7a9ec8", secondary:"#c8a06e" },
-  { name:"Rose",    primary:"#c87aaa", secondary:"#7ac8b0" },
-  { name:"Copper",  primary:"#c8824e", secondary:"#4ea0c8" },
-  { name:"Slate",   primary:"#8898b8", secondary:"#b8a888" },
-];
-
-const SKILL_ICONS  = ["◈","◉","◎","◆","◬","✦","◌","◊","△","○","□","◇","❋","⊕","◐","◑","⬡","✧","⟡","◿"];
-const SKILL_CATEGORIES = [
-  {id:"fitness",    label:"Fitness",      icon:"💪"},
-  {id:"creativity", label:"Creativity",   icon:"✦"},
-  {id:"spirituality",label:"Spirituality",icon:"◉"},
-  {id:"learning",   label:"Learning",     icon:"◎"},
-  {id:"finance",    label:"Finance",      icon:"◆"},
-  {id:"social",     label:"Social",       icon:"◈"},
-  {id:"productivity",label:"Productivity",icon:"□"},
-  {id:"other",      label:"Other",        icon:"◇"},
-];
-const SKILL_COLORS = [
-  // Muted (original palette)
-  "#6a8fb5","#6a9e6a","#9e6ab5","#c8a96e","#5b9e9e","#b5906a",
-  "#9e6a6a","#7a9e6a","#8b6a9e","#9e8b5b","#5b7a9e","#9e7a5b",
-  "#7a9e9e","#9e9e5b","#8b5b8b","#b58b6a","#6ab58b","#8b8b5b",
-  // Vivid
-  "#e05555","#e07a30","#e0c030","#55c255","#30b8e0","#7055e0",
-  "#e055b8","#e05580","#55e0a0","#55a0e0","#c255e0","#e09030",
-  // Bright / neon-ish
-  "#ff6b6b","#ffa94d","#ffe066","#69db7c","#4dabf7","#cc5de8",
-  "#f783ac","#74c0fc","#63e6be","#a9e34b","#ff8cc6","#f9ca24",
-];
-const DEFAULT_PRACTICE_TYPES = [];
-const DEFAULT_SKILLS = [];
-const SKILL_PRESETS = [
-  { name:"Fallout S.P.E.C.I.A.L.", skills:[
-    {name:"Strength",    icon:"◆", color:"#c86e6e"},
-    {name:"Perception",  icon:"◎", color:"#c8a96e"},
-    {name:"Endurance",   icon:"◬", color:"#6a9e6a"},
-    {name:"Charisma",    icon:"◉", color:"#9e6ab5"},
-    {name:"Intelligence",icon:"◈", color:"#6a8fb5"},
-    {name:"Agility",     icon:"◌", color:"#5b9e9e"},
-    {name:"Luck",        icon:"✦", color:"#b5906a"},
-  ]},
-  { name:"Disco Elysium", skills:[
-    {name:"Intellect",   icon:"◈", color:"#6a8fb5"},
-    {name:"Psyche",      icon:"◉", color:"#9e6ab5"},
-    {name:"Physique",    icon:"◬", color:"#6a9e6a"},
-    {name:"Motorics",    icon:"◎", color:"#5b9e9e"},
-  ]},
-  { name:"Classic RPG", skills:[
-    {name:"Mind",        icon:"◈", color:"#6a8fb5"},
-    {name:"Body",        icon:"◬", color:"#6a9e6a"},
-    {name:"Spirit",      icon:"✦", color:"#9e6ab5"},
-    {name:"Social",      icon:"◎", color:"#5b9e9e"},
-    {name:"Craft",       icon:"◆", color:"#c8a96e"},
-  ]},
-  { name:"Magick · Elements", skills:[
-    {name:"Fire",        icon:"◆", color:"#d4603a"},
-    {name:"Water",       icon:"◎", color:"#4a90c8"},
-    {name:"Air",         icon:"◌", color:"#a0c8d4"},
-    {name:"Earth",       icon:"◬", color:"#7a9e5a"},
-    {name:"Spirit",      icon:"✦", color:"#9e6ab5"},
-  ]},
-  { name:"Magick · Practice", skills:[
-    {name:"Meditation",  icon:"◉", color:"#9e6ab5"},
-    {name:"Ritual",      icon:"✦", color:"#c8a96e"},
-    {name:"Divination",  icon:"◎", color:"#5b9e9e"},
-    {name:"Astral",      icon:"◈", color:"#6a8fb5"},
-    {name:"Alchemy",     icon:"◆", color:"#9e7a4a"},
-    {name:"Chaos",       icon:"◬", color:"#c86e6e"},
-  ]},
-  { name:"Magick · Sephiroth (Kabbalah)", skills:[
-    {name:"Kether",      icon:"✦", color:"#ffffff"},
-    {name:"Chesed",      icon:"◈", color:"#6a8fb5"},
-    {name:"Geburah",     icon:"◆", color:"#c86e6e"},
-    {name:"Tiphareth",   icon:"◉", color:"#c8a96e"},
-    {name:"Netzach",     icon:"◬", color:"#6a9e6a"},
-    {name:"Hod",         icon:"◎", color:"#c8b05a"},
-    {name:"Yesod",       icon:"◌", color:"#9e6ab5"},
-    {name:"Malkuth",     icon:"◬", color:"#8a7a6a"},
-  ]},
-];
-const TAB_EXPLAINERS = {
-  planner:  {icon:"◎",title:"Planner",  body:"Daily, weekly, and monthly tasks. Tag them to a skill and they feed XP when completed. Switch periods at the top to plan across different time horizons.",tip:"Start small. One or two tasks per period builds a rhythm faster than a full list."},
-  quests:   {icon:"◆",title:"Quests",   body:"Main Quests complete once — goals, milestones. Radiant Quests are recurring practices to embody. Completing a Radiant Quest prompts a practice session log.",tip:"If it has an end, it's Main. If it's a way of being, it's Radiant."},
-  skills:   {icon:"◈",title:"Skills",   body:"The dimensions you're developing — define them yourself. XP flows in from tagged tasks, quests, and sessions. Every 6000 XP is one level, roughly 100 hours at 1 XP/min.",tip:"Use the presets for inspiration, or build from scratch."},
-  practice: {icon:"◉",title:"Practice", body:"Log actual sessions. Create your own practice types to match your real vocabulary. Tag skills for XP. Journal entries trigger AI scoring beyond raw time.",tip:"Consecutive daily sessions build a streak multiplier up to 2×. Honest logging compounds."},
-  advisor:  {icon:"✦",title:"Advisor",  body:"An AI that knows your full system — skills, quests, tasks, streaks, history. Ask anything or think out loud. It can create quests and tasks directly from conversation.",tip:"The more you've built in other tabs, the more useful it becomes."},
-  settings: {icon:"⚙",title:"Settings", body:"Customize name, font size, theme, colors, XP rates, and tab labels. Changes save immediately. Export full data as JSON for backup.",tip:"Font size S/M/L/XL is at the top of the Profile section."},
-};
-const PERIODS = ["daily","weekly","monthly","yearly"];
-
-
-function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
-function skillLv(xp,pl){ return Math.floor(xp/pl)+1; }
-function skillProg(xp,pl){ return ((xp%pl)/pl)*100; }
-function fmtDate(ts){ return new Date(ts).toLocaleDateString("en-US",{month:"short",day:"numeric"}); }
-function todayLabel(){ return new Date().toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric"}); }
-function monthLabel(){ return new Date().toLocaleDateString("en-US",{month:"long",year:"numeric"}); }
-function dayKey(d){ return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`; }
-function todayKey(){ return dayKey(new Date()); }
-function getWeekDays(){
-  const t=new Date(), mon=new Date(t);
-  mon.setDate(t.getDate()-((t.getDay()+6)%7));
-  return Array.from({length:7},(_,i)=>{ const d=new Date(mon); d.setDate(mon.getDate()+i); return d; });
-}
-function radiantAvailable(q){
-  if(q.type!=="radiant") return true;
-  const cd=q.cooldown??60*60*1000;
-  if(cd===0||!q.lastDone) return true;
-  return Date.now()-q.lastDone >= cd;
-}
-function radiantCooldownLabel(q){
-  if(!q.lastDone||radiantAvailable(q)) return null;
-  const cd=q.cooldown??60*60*1000;
-  const ms=cd-(Date.now()-q.lastDone);
-  const mins=Math.ceil(ms/60000);
-  return mins>=60?`${Math.ceil(mins/60)}h`:`${mins}m`;
-}
-function getMultiplier(count){
-  if(count>=30) return 2.0; if(count>=14) return 1.75;
-  if(count>=7)  return 1.5; if(count>=3)  return 1.25;
-  return 1.0;
-}
-function updateStreak(cur, skillId){
-  if(!skillId) return cur;
-  const today=todayKey(), yest=new Date();
-  yest.setDate(yest.getDate()-1);
-  const yKey=dayKey(yest);
-  const twoDaysAgo=new Date(); twoDaysAgo.setDate(twoDaysAgo.getDate()-2);
-  const t2Key=dayKey(twoDaysAgo);
-  const s=cur[skillId]||{count:0,lastDay:"",graceUsed:0};
-  let count, graceUsed=s.graceUsed||0;
-  if(s.lastDay===today){ count=s.count; }
-  else if(s.lastDay===yKey){ count=s.count+1; }
-  else if(s.lastDay===t2Key && graceUsed<(Date.now()-14*86400000)){
-    // missed one day, use grace if not used in last 14 days
-    count=s.count+1; graceUsed=Date.now();
-  } else { count=1; }
-  return {...cur,[skillId]:{count,lastDay:today,graceUsed}};
-}
-function computedTabTitle(tab,s){
-  if(s.appName) return s.appName;
-  const pre=s.profile.name?`${s.profile.name}'s`:"Your";
-  if(tab==="planner"||tab==="quests") return `${pre} Quests`;
-  if(tab==="skills") return `${pre} Skills`;
-  if(tab==="journal") return `${pre} Log`;
-  if(tab==="advisor") return `${pre} Advisor`;
-  if(tab==="settings") return `${pre} Settings`;
-  return pre;
-}
-
-function deepMerge(def,saved){
-  const out={...def};
-  for(const k in saved){
-    if(k in def && saved[k] && typeof def[k]==="object" && !Array.isArray(def[k]))
-      out[k]={...def[k],...saved[k]};
-    else out[k]=saved[k];
-  }
-  return out;
-}
-
-async function sget(k){ try{ const v=localStorage.getItem(k); return v?JSON.parse(v):null; }catch{ return null; } }
-async function sset(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch{} }
-
-// ── COMMUNITY / MULTIPLAYER STORAGE ────────────────────────────────────────
-function genFriendCode(userId){
-  // deterministic short code from userId
-  let h=0;
-  for(let i=0;i<userId.length;i++) h=(Math.imul(31,h)+userId.charCodeAt(i))|0;
-  return (Math.abs(h)%1000000).toString().padStart(6,"0");
-}
-
-async function communitySet(userId,data){
-  try{ await window.storage.set("profile:"+userId,JSON.stringify(data),true); }catch(e){console.warn("community write",e);}
-}
-async function communityGet(userId){
-  try{ const r=await window.storage.get("profile:"+userId,true); return r?JSON.parse(r.value):null; }catch{ return null; }
-}
-async function communityList(){
-  try{
-    const r=await window.storage.list("profile:",true);
-    if(!r?.keys) return [];
-    const results=await Promise.all(r.keys.map(async k=>{
-      try{ const v=await window.storage.get(k,true); return v?JSON.parse(v.value):null; }catch{ return null; }
-    }));
-    return results.filter(Boolean);
-  }catch(e){ console.warn("community list",e); return []; }
-}
-async function communityDelete(userId){
-  try{ await window.storage.delete("profile:"+userId,true); }catch{}
-}
-
-// Map cx_ keys to Supabase column names
-const KEY_MAP={
-  cx_settings:"settings", cx_tasks:"tasks", cx_quests:"quests",
-  cx_skills:"skills", cx_meds:"meds", cx_ptypes:"practice_types",
-  cx_xp:"xp", cx_streaks:"streaks", cx_seen:"seen_tabs",
-  cx_journal:"journal", cx_xplog:"xp_log",
-};
-// Save to both localStorage (offline cache) and Supabase (if logged in)
-async function dbSet(k,v,userId){
-  await sset(k,v);
-  if(userId&&supabase){ const col=KEY_MAP[k]; if(col) await saveField(userId,col,v); }
-}
-
-function buildCSS(C,T,FS=14,MODE="rpg"){
-  const t={...THEME_PRESETS[0],...T};
-  const hb=t.bg.length===7?t.bg+"f5":t.bg;
-  const f=FS||14; const f2=Math.round(f*0.857); const f3=Math.round(f*0.785);
-  const fonts = MODE==="rpg" ? GFONTS_RPG : GFONTS;
-
-  const rpgExtras = MODE==="rpg" ? `
-/* ── RPG MODE ── */
-@keyframes grain{0%,100%{transform:translate(0,0)}10%{transform:translate(-2%,-3%)}30%{transform:translate(3%,-1%)}50%{transform:translate(-1%,2%)}70%{transform:translate(2%,3%)}90%{transform:translate(-3%,1%)}}
-body::after{content:'';position:fixed;inset:-200%;width:400%;height:400%;background-image:url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");animation:grain 8s steps(1) infinite;pointer-events:none;z-index:999;opacity:.4;}
-.hdr-title{font-family:'Cinzel',serif;font-size:10px;letter-spacing:2px;color:var(--tx2);}
-.side-title{font-family:'Cinzel',serif;font-size:9px;letter-spacing:2px;color:var(--tx2);}
-.lv-badge{font-family:'Cinzel',serif !important;letter-spacing:2px;box-shadow:0 0 14px var(--primaryb),0 0 4px var(--primaryb);}
-.side-lv{font-family:'Cinzel',serif !important;letter-spacing:2px;box-shadow:0 0 10px var(--primaryb);}
-.xp-fill{box-shadow:0 0 6px var(--primaryb);}
-.sk-bar{box-shadow:0 0 4px currentColor;}
-.nbtn.on::before{box-shadow:0 0 10px var(--primary),0 0 4px var(--primary);}
-.slink.on{box-shadow:inset 2px 0 8px var(--primaryb);}
-.card.quest-main{box-shadow:inset 2px 0 12px var(--primaryb);}
-.card.quest-radiant{box-shadow:inset 2px 0 12px var(--secondaryb);}
-.slbl{font-family:'DM Mono',monospace;letter-spacing:2.5px;}
-.sk-streak{box-shadow:0 0 8px var(--primaryb);}
-.toast{box-shadow:0 0 16px var(--primaryb),0 4px 20px #0008;}
-.ui-mode-btn{background:var(--bg);border:1px solid var(--b2);border-radius:4px;color:var(--tx3);font-family:'DM Mono',monospace;font-size:8px;letter-spacing:1.5px;text-transform:uppercase;padding:8px 12px;cursor:pointer;flex:1;transition:all .15s;}
-.ui-mode-btn:hover{border-color:var(--b3);color:var(--tx2);}
-.ui-mode-btn.on{background:var(--primaryf);border-color:var(--primaryb);color:var(--primary);box-shadow:0 0 8px var(--primaryb);}
-` : MODE==="minimal" ? `
-/* ── MINIMAL MODE ── */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500&family=JetBrains+Mono:wght@400;500&display=swap');
-body{font-family:'Inter',sans-serif !important;}
-button,input,textarea,select{font-family:'Inter',sans-serif !important;}
-.hdr-title{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.3px;color:var(--tx3);}
-.side-title{font-family:'JetBrains Mono',monospace;font-size:9px;letter-spacing:.3px;color:var(--tx3);}
-.lv-badge{font-family:'JetBrains Mono',monospace;font-size:10px;letter-spacing:.3px;box-shadow:none;border-radius:4px;background:var(--s2);border-color:var(--b2);}
-.side-lv{font-family:'JetBrains Mono',monospace;letter-spacing:.3px;box-shadow:none;border-radius:4px;}
-.xp-fill{background:var(--primary);box-shadow:none;}
-.sk-bar{box-shadow:none;}
-.nbtn.on::before{box-shadow:none;height:1px;}
-.slink.on{box-shadow:none;border-left:2px solid var(--primary);}
-.card{border-radius:4px;border-color:var(--b1);}
-.card.quest-main{box-shadow:none;border-left:3px solid var(--primary);background:var(--bg);}
-.card.quest-radiant{box-shadow:none;border-left:3px solid var(--secondary);background:var(--bg);}
-.card.quest-side{box-shadow:none;border-left:3px solid var(--b3);background:var(--bg);}
-.sk-streak{box-shadow:none;border-radius:3px;}
-.toast{box-shadow:0 2px 8px #0006;border-radius:4px;}
-:root{--r:4px;}
-.slbl{font-family:'JetBrains Mono',monospace;letter-spacing:.5px;opacity:.6;font-size:8px;}
-.slbl::after{display:none;}
-.ctag{font-family:'JetBrains Mono',monospace;letter-spacing:.3px;border-radius:3px;}
-.nlbl{font-family:'JetBrains Mono',monospace;font-size:7px;letter-spacing:.3px;}
-.ui-mode-btn{background:var(--bg);border:1px solid var(--b2);border-radius:4px;color:var(--tx3);font-family:'JetBrains Mono',monospace;font-size:8px;letter-spacing:.5px;text-transform:uppercase;padding:8px 12px;cursor:pointer;flex:1;transition:all .15s;}
-.ui-mode-btn:hover{border-color:var(--b3);color:var(--tx2);}
-.ui-mode-btn.on{background:var(--s2);border-color:var(--b3);color:var(--tx);}
-.stab{font-family:'JetBrains Mono',monospace;font-size:8px;letter-spacing:.3px;}
-.fwrap{border-radius:4px;}
-.fsbtn{border-radius:4px;font-size:11px;}
-.addbtn{border-radius:4px;font-size:11px;}
-.lv-milestone{display:none;}
-` : `
-/* ── AI / CUSTOM MODE ── */
-.ui-mode-btn{background:var(--bg);border:1px solid var(--b2);border-radius:4px;color:var(--tx3);font-family:'DM Mono',monospace;font-size:8px;letter-spacing:1.5px;text-transform:uppercase;padding:8px 12px;cursor:pointer;flex:1;transition:all .15s;}
-.ui-mode-btn:hover{border-color:var(--b3);color:var(--tx2);}
-.ui-mode-btn.on{background:var(--primaryf);border-color:var(--primaryb);color:var(--primary);}
-`;
-  return `${fonts}
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}
-:root{--bg:${t.bg};--s1:${t.s1};--s2:${t.s2};--b1:${t.b1};--b2:${t.b2};--b3:${t.tx3};--tx:${t.tx};--tx2:${t.tx2};--tx3:${t.tx3};--primary:${C.primary};--primaryf:${C.primary}22;--primaryb:${C.primary}40;--secondary:${C.secondary};--secondaryf:${C.secondary}18;--secondaryb:${C.secondary}38;--success:${C.success};--successf:${C.success}18;--danger:${C.danger};--dangerf:${C.danger}20;--r:5px;}
-body{font-family:'DM Sans',sans-serif;background:var(--bg);color:var(--tx);min-height:100vh;font-weight:300;-webkit-font-smoothing:antialiased;font-size:${f}px;}
-button,input,textarea,select{font-family:\'DM Sans\',sans-serif;}
-.app{max-width:460px;margin:0 auto;min-height:100vh;display:flex;flex-direction:column;}
-@media(min-width:768px){.app{max-width:100%;margin:0;}}
-.hdr{padding:12px 18px 0;border-bottom:1px solid var(--b1);background:${hb};position:sticky;top:0;z-index:40;backdrop-filter:blur(14px);}
-.hdr-row{display:flex;align-items:center;justify-content:space-between;margin-bottom:9px;gap:10px;}
-.hdr-title{font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:.8px;color:var(--tx2);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.lv-badge{font-family:\'DM Mono\',monospace;font-size:10px;color:var(--primary);background:var(--primaryf);border:1px solid var(--primaryb);border-radius:20px;padding:2px 10px;letter-spacing:1px;white-space:nowrap;flex-shrink:0;box-shadow:0 0 8px var(--primaryb);}
-.xp-row{display:flex;align-items:center;gap:8px;margin-bottom:12px;}
-.xp-track{flex:1;height:3px;background:var(--b1);border-radius:2px;overflow:hidden;}
-.xp-fill{height:100%;background:linear-gradient(90deg,var(--secondary),var(--primary));border-radius:2px;transition:width .5s ease;}
-.xp-lbl{font-family:\'DM Mono\',monospace;font-size:10px;color:var(--tx3);white-space:nowrap;}
-.bnav{position:fixed;bottom:0;left:50%;transform:translateX(-50%);width:100%;max-width:460px;display:flex;background:${hb};border-top:1px solid var(--b1);backdrop-filter:blur(14px);z-index:40;padding-bottom:env(safe-area-inset-bottom);}
-.nbtn{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;padding:10px 2px 12px;background:none;border:none;cursor:pointer;color:var(--tx3);transition:color .2s,transform .15s;position:relative;overflow:hidden;}
-.nbtn.on{color:var(--tx);}.nbtn:hover:not(.on){color:var(--tx2);}
-.nbtn.on::before{content:'';position:absolute;top:0;left:25%;right:25%;height:2px;background:var(--primary);border-radius:0 0 3px 3px;box-shadow:0 0 8px var(--primary);}
-.nicon{font-size:17px;line-height:1;transition:transform .2s,color .2s;}.nbtn.on .nicon{color:var(--primary);transform:scale(1.1);}
-.nlbl{font-family:\'DM Mono\',monospace;font-size:7.5px;letter-spacing:.8px;text-transform:uppercase;transition:color .2s;}
-.pg{padding:18px 18px 88px;flex:1;}
-.stabs{display:flex;gap:3px;margin-bottom:18px;background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:3px;}
-.stab{flex:1;padding:6px 4px;border:none;border-radius:4px;background:none;cursor:pointer;font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:var(--tx3);transition:all .15s;}
-.stab.on{background:var(--s2);color:var(--tx);}
-.slbl{font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--tx3);margin-bottom:10px;display:flex;align-items:center;gap:8px;}
-.slbl::after{content:\'\';flex:1;height:1px;background:var(--b1);}
-.gap{height:18px;}
-.clist{display:flex;flex-direction:column;gap:2px;margin-bottom:4px;}
-.card{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:10px 12px;display:flex;align-items:flex-start;gap:10px;transition:border-color .15s,opacity .3s;}
-.card:hover{border-color:var(--b2);}.card.done{opacity:.35;}
-.card.quest-main{border-left:2px solid var(--primary);}.card.quest-radiant{border-left:2px solid var(--secondary);}
-.chk{width:16px;height:16px;border-radius:3px;border:1px solid var(--b2);flex-shrink:0;cursor:pointer;background:none;display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--success);transition:all .15s;margin-top:1px;}
-.chk.on{background:var(--successf);border-color:var(--success);}
-.cbody{flex:1;min-width:0;}
-.ctitle{font-size:${f}px;font-weight:400;line-height:1.4;word-break:break-word;}.ctitle.done{text-decoration:line-through;}
-.cmeta{display:flex;align-items:center;gap:5px;margin-top:5px;flex-wrap:wrap;}
-.ctag{font-family:'DM Mono',monospace;font-size:8px;letter-spacing:.8px;padding:2px 7px;border-radius:20px;border:1px solid var(--b1);color:var(--tx3);}
-.cnote{font-size:${f2}px;color:var(--tx2);margin-top:3px;font-style:italic;line-height:1.4;}
-.delbtn{background:none;border:none;cursor:pointer;color:var(--tx3);font-size:11px;padding:2px 4px;transition:color .15s;flex-shrink:0;margin-top:1px;border-radius:3px;}
-.delbtn:hover{color:var(--danger);}
-.addbtn{display:flex;align-items:center;gap:6px;background:none;border:1px dashed var(--b1);border-radius:var(--r);width:100%;padding:8px 12px;color:var(--tx3);font-size:13px;font-weight:300;cursor:pointer;transition:all .15s;margin-bottom:2px;}
-.addbtn:hover{border-color:var(--b2);color:var(--tx2);}
-.fwrap{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:13px;margin-bottom:10px;}
-.frow{display:flex;gap:6px;margin-bottom:6px;flex-wrap:wrap;}
-.fi{background:var(--bg);border:1px solid var(--b1);border-radius:4px;color:var(--tx);font-size:${f2}px;font-weight:300;padding:7px 9px;outline:none;transition:border-color .15s;flex:1;min-width:80px;}
-.fi:focus{border-color:var(--b3);}.fi::placeholder{color:var(--tx3);}.fi.full{min-width:100%;flex:none;width:100%;}
-.fsel{background:var(--bg);border:1px solid var(--b1);border-radius:4px;color:var(--tx2);font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:1px;padding:7px 8px;outline:none;cursor:pointer;}
-.fsbtn{background:var(--s2);border:1px solid var(--b2);border-radius:4px;color:var(--tx);font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;padding:8px 14px;cursor:pointer;transition:all .15s;width:100%;margin-top:2px;}
-.fsbtn:hover{background:var(--b1);border-color:var(--b3);}.fsbtn.primary{color:var(--primary);border-color:var(--primaryb);}.fsbtn.secondary{color:var(--secondary);border-color:var(--secondaryb);}.fsbtn:disabled{opacity:.4;cursor:default;}
-.exp-tog{background:none;border:none;cursor:pointer;display:flex;align-items:center;gap:6px;color:var(--tx3);font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;padding:6px 0;transition:color .15s;width:100%;}
-.exp-tog:hover{color:var(--tx2);}.exp-arr{font-size:8px;transition:transform .15s;}.exp-arr.open{transform:rotate(180deg);}
-.skill-card{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:13px;margin-bottom:6px;transition:transform .15s,box-shadow .15s,border-color .15s;}
-.skill-card:hover{transform:translateY(-2px);box-shadow:0 6px 20px rgba(0,0,0,.35);border-color:var(--b2);}
-@keyframes xpPulse{0%{filter:brightness(1)}45%{filter:brightness(2) saturate(1.3)}100%{filter:brightness(1)}}
-.xp-fill.pulse{animation:xpPulse .5s ease;}
-@keyframes dotPulse{0%,60%,100%{opacity:.2;transform:scale(.85)}30%{opacity:1;transform:scale(1.15)}}
-.tdot{display:inline-block;color:var(--secondary);font-size:13px;line-height:1;animation:dotPulse 1.2s infinite ease-in-out;}
-.tdot:nth-child(3){animation-delay:.2s;}.tdot:nth-child(4){animation-delay:.4s;}
-.compact .card{padding:6px 10px;}.compact .skill-card{padding:9px;}.compact .skill-card:hover{transform:translateY(-1px);}
-.compact .pg{padding:12px 14px 80px;}.compact .clist{gap:1px;}.compact .gap{height:10px;}
-.compact .fwrap{padding:10px;}.compact .sbox{padding:8px;}.compact .med-card{padding:7px 10px;}
-.sk-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;}
-.sk-name{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:400;}
-.sk-meta{display:flex;align-items:center;gap:6px;}
-.sk-lv{font-family:\'DM Mono\',monospace;font-size:10px;color:var(--tx3);}.sk-lv span{color:var(--primary);}
-.sk-streak{font-family:\'DM Mono\',monospace;font-size:9px;color:var(--primary);background:var(--primaryf);border:1px solid var(--primaryb);border-radius:20px;padding:2px 8px;}
-.sk-bar-wrap{height:2px;background:var(--b1);border-radius:1px;overflow:hidden;margin-bottom:5px;}
-.sk-bar{height:100%;border-radius:1px;transition:width .5s ease;}
-.sk-xprow{display:flex;align-items:center;justify-content:space-between;}
-.sk-xplbl{font-family:\'DM Mono\',monospace;font-size:9px;color:var(--tx3);}
-.sk-delbtn{background:none;border:none;cursor:pointer;color:var(--tx3);font-size:10px;padding:2px 5px;transition:color .15s;border-radius:3px;}
-.sk-delbtn:hover{color:var(--danger);}
-.icon-grid{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:8px;}
-.icon-opt{width:32px;height:32px;background:var(--bg);border:1px solid var(--b1);border-radius:4px;cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;transition:all .15s;}
-.icon-opt.on{background:var(--s2);border-color:var(--b3);}
-.color-grid{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:10px;}
-.color-opt{width:22px;height:22px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:all .15s;}
-.color-opt.on{border-color:var(--tx);}
-.sk-quote{border-left:2px solid var(--primaryb);padding:11px 14px;margin-bottom:16px;background:var(--s1);border-radius:0 var(--r) var(--r) 0;}
-.sk-quote-text{font-size:12px;color:var(--tx2);line-height:1.65;font-style:italic;}
-.sk-quote-attr{font-family:\'DM Mono\',monospace;font-size:9px;color:var(--tx3);margin-top:6px;letter-spacing:.8px;}
-.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-bottom:18px;}
-.sbox{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:11px;text-align:center;}
-.snum{font-family:\'DM Mono\',monospace;font-size:20px;color:var(--primary);line-height:1;margin-bottom:3px;}
-.slb2{font-family:\'DM Mono\',monospace;font-size:8px;letter-spacing:1px;color:var(--tx3);text-transform:uppercase;}
-.med-card{background:var(--s1);border:1px solid var(--b1);border-left:2px solid var(--secondary);border-radius:var(--r);padding:10px 12px;display:flex;gap:10px;margin-bottom:2px;}
-.med-icon{font-size:15px;width:22px;text-align:center;flex-shrink:0;padding-top:1px;}
-.med-body{flex:1;min-width:0;}
-.med-name{font-size:${f2}px;font-weight:400;}
-.med-sub{font-family:\'DM Mono\',monospace;font-size:9px;color:var(--tx3);margin-top:2px;}
-.med-reason{font-family:\'DM Mono\',monospace;font-size:9px;color:var(--secondary);margin-top:3px;}
-.med-journal{font-size:12px;color:var(--tx2);font-style:italic;line-height:1.5;margin-top:5px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
-.med-journal.exp{display:block;}
-.jrnl-btn{font-family:\'DM Mono\',monospace;font-size:9px;color:var(--tx3);background:none;border:none;cursor:pointer;padding:3px 0;transition:color .15s;}
-.jrnl-btn:hover{color:var(--tx2);}
-.type-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px;margin-bottom:10px;}
-.topt{background:var(--bg);border:1px solid var(--b1);border-radius:4px;color:var(--tx3);font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:.8px;text-transform:uppercase;padding:8px 6px;cursor:pointer;display:flex;align-items:center;gap:6px;transition:all .15s;}
-.topt.on{border-color:var(--secondaryb);color:var(--secondary);background:var(--secondaryf);}
-.topt:hover:not(.on){border-color:var(--b2);color:var(--tx2);}
-.dur-hdr{font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--tx3);margin-bottom:7px;display:flex;justify-content:space-between;}
-.dur-val{color:var(--secondary);}
-input[type=range]{-webkit-appearance:none;width:100%;height:2px;background:var(--b1);border-radius:1px;outline:none;margin-bottom:10px;}
-input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:12px;height:12px;border-radius:50%;background:var(--secondary);cursor:pointer;border:2px solid var(--bg);}
-.ai-lbl{font-family:\'DM Mono\',monospace;font-size:9px;color:var(--secondary);letter-spacing:1px;margin-bottom:6px;display:flex;align-items:center;gap:6px;}
-.date-hdr{font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--tx3);margin-bottom:16px;}
-.wk-day{margin-bottom:14px;}
-.wk-day-lbl{font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--tx3);margin-bottom:5px;}
-.wk-day-lbl.today{color:var(--primary);}
-.ai-intro{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:14px;margin-bottom:14px;}
-.ai-intro-title{font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--secondary);margin-bottom:5px;}
-.ai-intro-body{font-size:12px;color:var(--tx2);line-height:1.6;}
-.ai-chips{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:14px;}
-.ai-chip{background:var(--bg);border:1px solid var(--b1);border-radius:20px;font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:.5px;color:var(--tx3);padding:4px 10px;cursor:pointer;transition:all .15s;}
-.ai-chip:hover{border-color:var(--b2);color:var(--tx2);}
-.ai-msgs{display:flex;flex-direction:column;gap:10px;margin-bottom:14px;}
-.ai-msg{padding:12px;border-radius:var(--r);font-size:${f2}px;line-height:1.65;}
-.ai-msg.user{background:var(--s2);border:1px solid var(--b2);color:var(--tx);margin-left:20px;border-bottom-right-radius:2px;}
-.ai-msg.assistant{background:var(--s1);border:1px solid var(--b1);color:var(--tx2);margin-right:20px;border-bottom-left-radius:2px;}
-.ai-msg.loading{color:var(--tx3);font-style:italic;font-family:\'DM Mono\',monospace;font-size:10px;letter-spacing:1px;background:var(--s1);border:1px solid var(--b1);margin-right:20px;}
-.ai-actions{display:flex;flex-direction:column;gap:6px;margin-top:10px;}
-.act-card{background:var(--bg);border:1px solid var(--primaryb);border-radius:var(--r);padding:10px 12px;}
-.act-tool{font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--primary);margin-bottom:4px;}
-.act-sum{font-size:13px;line-height:1.4;margin-bottom:2px;}
-.act-detail{font-size:11px;color:var(--tx2);font-style:italic;}
-.act-btns{display:flex;gap:5px;margin-top:8px;}
-.abtn{flex:1;padding:6px;border-radius:4px;border:1px solid var(--b2);background:none;cursor:pointer;font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--tx2);transition:all .15s;}
-.abtn.ok{color:var(--success);border-color:var(--successf);}.abtn.ok:hover{background:var(--successf);}
-.abtn.no:hover{background:var(--dangerf);color:var(--danger);border-color:var(--dangerf);}
-.act-done{font-family:\'DM Mono\',monospace;font-size:9px;padding:6px 0;text-align:center;}
-.ai-input-row{display:flex;gap:6px;}
-.ai-input{flex:1;background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);color:var(--tx);font-size:13px;padding:10px 12px;outline:none;resize:none;transition:border-color .15s;line-height:1.4;min-height:42px;max-height:100px;}
-.ai-input:focus{border-color:var(--b3);}
-.ai-send{background:var(--s2);border:1px solid var(--secondaryb);border-radius:var(--r);color:var(--secondary);font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;padding:0 14px;cursor:pointer;transition:all .15s;flex-shrink:0;}
-.ai-send:hover:not(:disabled){background:var(--secondaryf);}.ai-send:disabled{opacity:.35;cursor:default;}
-.notif-btn{background:none;border:1px solid var(--secondaryb);border-radius:4px;color:var(--secondary);font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;padding:6px 10px;cursor:pointer;transition:all .15s;width:100%;margin-bottom:6px;text-align:left;}
-.notif-btn:hover{background:var(--secondaryf);}
-.notif-ok{font-family:\'DM Mono\',monospace;font-size:9px;color:var(--success);margin-bottom:6px;padding:6px 0;}
-.sgroup{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);overflow:hidden;margin-bottom:6px;}
-.sgroup-title{font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--tx3);padding:10px 13px;border-bottom:1px solid var(--b1);}
-.srow{display:flex;align-items:center;justify-content:space-between;padding:10px 13px;border-bottom:1px solid var(--b1);}
-.srow:last-child{border-bottom:none;}
-.srow-label{font-size:${f2}px;font-weight:300;color:var(--tx);}
-.srow-sub{font-size:${f3}px;color:var(--tx3);margin-top:2px;line-height:1.4;}
-.sinput{background:var(--bg);border:1px solid var(--b1);border-radius:4px;color:var(--tx);font-size:12px;font-weight:300;padding:5px 8px;outline:none;transition:border-color .15s;width:140px;text-align:right;}
-.sinput:focus{border-color:var(--b3);}.sinput.sm{width:70px;}
-.palette-grid{display:flex;flex-wrap:wrap;gap:6px;padding:12px 13px;}
-.pal-opt{display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;padding:6px 8px;border-radius:4px;border:1px solid transparent;transition:all .15s;}
-.pal-opt.on{border-color:var(--b3);background:var(--s2);}.pal-opt:hover:not(.on){border-color:var(--b2);}
-.pal-dots{display:flex;gap:3px;}.pal-dot{width:10px;height:10px;border-radius:50%;}
-.pal-name{font-family:\'DM Mono\',monospace;font-size:8px;letter-spacing:1px;color:var(--tx3);}
-.theme-grid{display:flex;flex-wrap:wrap;gap:5px;padding:12px 13px;}
-.theme-opt{display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;padding:6px 8px;border-radius:4px;border:1px solid transparent;transition:all .15s;}
-.theme-opt.on{border-color:var(--b3);background:var(--s2);}.theme-opt:hover:not(.on){border-color:var(--b2);}
-.theme-swatch{width:32px;height:20px;border-radius:3px;border:1px solid rgba(128,128,128,.15);display:flex;overflow:hidden;}
-.theme-name{font-family:\'DM Mono\',monospace;font-size:8px;letter-spacing:.8px;color:var(--tx3);}
-.cpick{width:40px;height:28px;background:none;border:1px solid var(--b2);border-radius:4px;cursor:pointer;padding:2px;flex-shrink:0;}
-.coll-btn{width:100%;background:none;border:none;cursor:pointer;display:flex;align-items:center;justify-content:space-between;padding:11px 2px;color:var(--tx2);font-size:13px;font-weight:300;text-align:left;transition:color .15s;border-bottom:1px solid var(--b1);}
-.coll-btn:hover{color:var(--tx);}.coll-arr{font-family:\'DM Mono\',monospace;font-size:10px;color:var(--tx3);}
-.tog-row{display:flex;align-items:center;justify-content:space-between;padding:10px 13px;border-bottom:1px solid var(--b1);}
-.tog-row:last-child{border-bottom:none;}
-.tog{width:38px;height:20px;border-radius:10px;background:var(--b2);border:none;cursor:pointer;position:relative;transition:background .2s;flex-shrink:0;}
-.tog.on{background:var(--secondary);}.tog-knob{position:absolute;top:3px;left:3px;width:14px;height:14px;border-radius:50%;background:var(--tx);transition:transform .2s;}
-.tog.on .tog-knob{transform:translateX(18px);}
-.exp-btn{display:flex;align-items:center;gap:8px;background:none;border:1px solid var(--b1);border-radius:var(--r);width:100%;padding:10px 13px;color:var(--tx2);font-size:13px;font-weight:300;cursor:pointer;transition:all .15s;margin-bottom:6px;}
-.exp-btn:hover{border-color:var(--b2);color:var(--tx);}
-.save-btn{background:var(--s2);border:1px solid var(--b2);border-radius:4px;color:var(--tx);font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;padding:10px 14px;cursor:pointer;transition:all .15s;flex:1;}
-.save-btn:hover{background:var(--b1);}
-.reset-btn{background:none;border:1px solid var(--b1);border-radius:4px;color:var(--tx3);font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;padding:10px 14px;cursor:pointer;transition:all .15s;}
-.reset-btn:hover{border-color:var(--danger);color:var(--danger);}
-.auth-note{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:13px;margin-bottom:12px;}
-.auth-note-title{font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--secondary);margin-bottom:6px;}
-.auth-note-body{font-size:12px;color:var(--tx2);line-height:1.6;}
-.auth-note-code{font-family:\'DM Mono\',monospace;font-size:10px;color:var(--tx3);background:var(--bg);border:1px solid var(--b1);border-radius:3px;padding:2px 6px;margin:0 2px;}
-.profile-setup{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;text-align:center;padding:20px;background:var(--bg);}
-.ps-title{font-family:\'DM Mono\',monospace;font-size:11px;letter-spacing:3px;text-transform:uppercase;color:var(--primary);margin-bottom:8px;}
-.ps-sub{font-size:13px;color:var(--tx2);margin-bottom:28px;line-height:1.6;max-width:280px;}
-.ps-input{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);color:var(--tx);font-size:16px;font-weight:300;padding:12px 16px;outline:none;width:100%;max-width:280px;text-align:center;margin-bottom:10px;transition:border-color .15s;}
-.ps-input:focus{border-color:var(--b3);}
-.ps-btn{background:var(--s2);border:1px solid var(--b2);border-radius:var(--r);color:var(--tx);font-family:\'DM Mono\',monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;padding:10px 24px;cursor:pointer;transition:all .15s;width:100%;max-width:280px;}
-.ps-btn:hover{background:var(--b1);}
-.ps-skip{background:none;border:none;color:var(--tx3);font-size:12px;cursor:pointer;margin-top:12px;transition:color .15s;}
-.ps-skip:hover{color:var(--tx2);}
-.toast{position:fixed;bottom:66px;left:50%;transform:translateX(-50%) translateY(6px);background:var(--s2);border:1px solid var(--b2);border-radius:20px;padding:6px 16px;font-family:\'DM Mono\',monospace;font-size:10px;letter-spacing:1px;color:var(--tx);opacity:0;transition:all .22s;pointer-events:none;white-space:nowrap;z-index:200;}
-.toast.on{opacity:1;transform:translateX(-50%) translateY(0);}
-.empty{text-align:center;padding:32px 0;font-family:\'DM Mono\',monospace;font-size:9px;letter-spacing:2px;color:var(--tx3);text-transform:uppercase;}
-.empty-state{text-align:center;padding:24px 16px;border:1px dashed var(--b2);border-radius:var(--r);margin-bottom:8px;}
-.es-icon{font-size:22px;margin-bottom:8px;opacity:.4;}
-.es-title{font-family:\'DM Mono\',monospace;font-size:11px;color:var(--tx2);margin-bottom:6px;letter-spacing:.5px;}
-.es-desc{font-size:11px;color:var(--tx3);line-height:1.6;max-width:280px;margin:0 auto;}
-.overlay{position:fixed;inset:0;background:rgba(0,0,0,.78);z-index:100;display:flex;align-items:center;justify-content:center;}
-.modal{background:var(--s1);border:1px solid var(--b2);border-radius:8px;padding:20px;max-width:300px;width:90%;}
-.modal-title{font-size:14px;margin-bottom:8px;}.modal-sub{font-size:12px;color:var(--tx2);margin-bottom:16px;line-height:1.5;}
-.modal-btns{display:flex;gap:8px;}
-.mbtn{flex:1;padding:8px;border-radius:4px;border:1px solid var(--b2);background:none;cursor:pointer;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--tx2);transition:all .15s;}
-.mbtn:hover{background:var(--b1);}.mbtn.danger{color:var(--danger);border-color:var(--dangerf);}.mbtn.danger:hover{background:var(--dangerf);}
-@keyframes floatUp{0%{opacity:1;transform:translateX(var(--fx,0)) translateY(0);}100%{opacity:0;transform:translateX(var(--fx,0)) translateY(-38px);}}
-.xp-float{position:fixed;bottom:74px;left:50%;transform:translateX(-50%);font-family:'DM Mono',monospace;font-size:11px;letter-spacing:1px;color:var(--primary);pointer-events:none;z-index:300;animation:floatUp 1.1s ease-out forwards;}
-.milestone-modal{background:var(--s1);border:1px solid var(--b2);border-radius:10px;padding:20px 22px;max-width:320px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,.5);}
-.milestone-modal.big{max-width:360px;text-align:center;padding:32px 28px;border-color:var(--primaryb);box-shadow:0 0 40px var(--primaryb),0 8px 32px rgba(0,0,0,.6);}
-.ms-row{display:flex;align-items:center;gap:14px;margin-bottom:10px;}
-.ms-glyph{font-size:26px;line-height:1;flex-shrink:0;}.ms-glyph.big{font-size:48px;display:block;margin-bottom:12px;}
-.ms-level{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:2px;color:var(--tx3);text-transform:uppercase;margin-bottom:6px;}
-.ms-skill{font-size:14px;font-weight:600;letter-spacing:.3px;margin-bottom:2px;}
-.ms-title{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--tx3);}.ms-title.big{font-size:16px;color:var(--primary);letter-spacing:3px;margin-bottom:10px;}
-.ms-sub{font-size:12px;color:var(--tx2);line-height:1.65;margin-top:8px;}.ms-sub.big{font-size:13px;color:var(--tx2);line-height:1.7;margin-bottom:18px;}
-@keyframes msBarFill{from{width:0%}to{width:100%}}
-.ms-bar{height:2px;background:var(--b2);border-radius:2px;overflow:hidden;margin-bottom:4px;}
-.ms-bar-fill{height:100%;animation:msBarFill 1.4s ease-out forwards;border-radius:2px;}
-/* ── RESPONSIVE DESKTOP ── */
-.sidenav{display:none;}
-@media(min-width:768px){
-  .app{max-width:100%;flex-direction:row;min-height:100vh;}
-  .hdr{display:none;}
-  .bnav{display:none;}
-  .sidenav{display:flex;flex-direction:column;width:220px;min-height:100vh;background:${hb};border-right:1px solid var(--b1);position:sticky;top:0;height:100vh;flex-shrink:0;padding:20px 0;}
-  .side-top{padding:0 18px 20px;border-bottom:1px solid var(--b1);margin-bottom:10px;}
-  .side-title{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.8px;color:var(--tx2);margin-bottom:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-  .side-lv{font-family:'DM Mono',monospace;font-size:10px;color:var(--primary);background:var(--primaryf);border:1px solid var(--primaryb);border-radius:20px;padding:2px 10px;letter-spacing:1px;display:inline-block;}
-  .side-links{display:flex;flex-direction:column;gap:2px;padding:0 8px;}
-  .slink{display:flex;align-items:center;gap:10px;background:none;border:none;cursor:pointer;color:var(--tx3);padding:9px 10px;border-radius:var(--r);transition:all .15s;width:100%;text-align:left;position:relative;}
-  .slink:hover:not(.on){background:var(--s1);color:var(--tx2);}
-  .slink.on{background:var(--s2);color:var(--tx);border-left:2px solid var(--primary);padding-left:8px;}
-  .slink-icon{font-size:15px;flex-shrink:0;}
-  .slink-lbl{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1.2px;text-transform:uppercase;}
-  .main-wrap{flex:1;display:flex;justify-content:center;overflow-y:auto;}
-  .pg{padding:28px 32px 40px;width:100%;max-width:var(--content-width,700px);}
-}
-@media(min-width:1100px){
-  .pg{max-width:var(--content-width,780px);}
-}
-
-.prio-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;display:inline-block;margin-right:2px;}
-.prio-high{background:#c85858;}.prio-med{background:#c8a96e;}.prio-low{background:#5b9e9e;}
-/* ── PROFILE MODAL ── */
-.profile-modal{position:fixed;inset:0;z-index:200;display:flex;align-items:flex-end;justify-content:center;}
-.profile-modal-bg{position:absolute;inset:0;background:rgba(0,0,0,.7);backdrop-filter:blur(4px);}
-.profile-sheet{position:relative;background:var(--s1);border:1px solid var(--b1);border-radius:12px 12px 0 0;width:100%;max-width:460px;max-height:88vh;overflow-y:auto;padding:20px 18px 40px;z-index:1;}
-@media(min-width:768px){.profile-sheet{max-width:420px;border-radius:12px;margin-bottom:40px;}}
-.profile-pill{width:36px;height:3px;background:var(--b2);border-radius:2px;margin:0 auto 18px;}
-.profile-avatar{width:52px;height:52px;border-radius:50%;background:var(--primaryf);border:2px solid var(--primaryb);display:flex;align-items:center;justify-content:center;font-size:20px;margin-bottom:10px;}
-.profile-name{font-size:18px;font-weight:400;margin-bottom:2px;}
-.profile-xp-bar{height:4px;background:var(--b1);border-radius:2px;overflow:hidden;margin:10px 0 4px;}
-.profile-xp-fill{height:100%;background:linear-gradient(90deg,var(--secondary),var(--primary));border-radius:2px;transition:width .5s ease;}
-.badge-row{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;}
-.badge{display:flex;align-items:center;gap:4px;background:var(--s2);border:1px solid var(--b2);border-radius:20px;padding:3px 10px;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.8px;color:var(--tx2);}
-/* ── PLANNER TIME BLOCKS ── */
-.block-hdr{display:flex;align-items:center;gap:8px;margin-bottom:6px;cursor:pointer;user-select:none;}
-.block-hdr-lbl{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--tx3);}
-.block-hdr-lbl.overdue{color:var(--danger);}
-.block-count{font-family:'DM Mono',monospace;font-size:8px;color:var(--tx3);background:var(--s2);border:1px solid var(--b1);border-radius:10px;padding:1px 6px;}
-.block-wrap{margin-bottom:14px;}
-.block-body{display:flex;flex-direction:column;gap:2px;}
-/* ── PLANNER QUICK-ADD TOGGLE ── */
-.qa-toggle{display:flex;gap:3px;background:var(--s2);border:1px solid var(--b1);border-radius:var(--r);padding:3px;margin-bottom:10px;}
-.qa-opt{flex:1;padding:5px 8px;border:none;border-radius:3px;background:none;cursor:pointer;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;color:var(--tx3);transition:all .15s;}
-.qa-opt.on{background:var(--s1);color:var(--tx);border:1px solid var(--b2);}
-/* ── POST-COMPLETION NUDGE ── */
-.practice-nudge{display:flex;align-items:center;gap:8px;background:var(--secondaryf);border:1px solid var(--secondaryb);border-radius:var(--r);padding:7px 10px;margin-top:3px;animation:fadeIn .2s ease;}
-@keyframes fadeIn{from{opacity:0;transform:translateY(-4px);}to{opacity:1;transform:translateY(0);}}
-.nudge-text{flex:1;font-family:'DM Mono',monospace;font-size:9px;color:var(--secondary);letter-spacing:.5px;}
-.nudge-btn{font-family:'DM Mono',monospace;font-size:8px;letter-spacing:1px;padding:3px 8px;border-radius:3px;border:1px solid var(--secondaryb);background:none;cursor:pointer;transition:all .15s;}
-.nudge-yes{color:var(--secondary);}.nudge-yes:hover{background:var(--secondary);color:var(--bg);}
-.nudge-no{color:var(--tx3);}.nudge-no:hover{color:var(--tx2);}
-/* ── NL QUICK-ADD ── */
-.nl-row{display:flex;gap:6px;margin-bottom:10px;}
-.nl-input{flex:1;background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);color:var(--tx);font-size:13px;padding:8px 12px;outline:none;transition:border-color .15s;}
-.nl-input:focus{border-color:var(--primaryb);}
-.nl-input::placeholder{color:var(--tx3);font-size:12px;}
-.nl-btn{background:var(--s2);border:1px solid var(--primaryb);border-radius:var(--r);color:var(--primary);font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1px;padding:0 12px;cursor:pointer;transition:all .15s;white-space:nowrap;}
-.nl-btn:hover:not(:disabled){background:var(--primaryf);}.nl-btn:disabled{opacity:.35;cursor:default;}
-/* ── FOCUS TIMER ── */
-.timer-overlay{position:fixed;inset:0;background:var(--bg);z-index:300;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:32px;}
-.timer-face{font-family:'DM Mono',monospace;font-size:72px;letter-spacing:-2px;color:var(--tx);line-height:1;margin-bottom:8px;font-weight:300;}
-.timer-skill{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--tx3);margin-bottom:40px;}
-.timer-btn{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;padding:12px 28px;border-radius:var(--r);cursor:pointer;transition:all .15s;border:1px solid var(--b2);}
-.timer-start{background:var(--secondary);border-color:var(--secondary);color:var(--bg);}
-.timer-stop{background:var(--dangerf);border-color:var(--danger);color:var(--danger);}
-.timer-cancel{background:none;color:var(--tx3);margin-top:10px;}
-.timer-ring{width:200px;height:200px;position:relative;margin-bottom:16px;}
-.timer-ring svg{transform:rotate(-90deg);}
-.timer-bar{position:fixed;bottom:72px;left:50%;transform:translateX(-50%);background:var(--s2);border:1px solid var(--secondaryb);border-radius:20px;padding:6px 16px;display:flex;align-items:center;gap:10px;z-index:60;cursor:pointer;transition:all .15s;}
-.timer-bar:hover{background:var(--secondaryf);}
-.timer-bar-time{font-family:'DM Mono',monospace;font-size:12px;color:var(--secondary);letter-spacing:1px;}
-.timer-bar-lbl{font-family:'DM Mono',monospace;font-size:9px;color:var(--tx3);}
-@media(min-width:768px){.timer-bar{bottom:20px;right:auto;}}
-/* ── SKILL STALENESS ── */
-.stale-dot{width:6px;height:6px;border-radius:50%;background:var(--tx3);opacity:.4;flex-shrink:0;}
-.stale-label{font-family:'DM Mono',monospace;font-size:8px;color:var(--tx3);letter-spacing:.5px;}
-/* ── QUEST ROADMAP ── */
-.roadmap-node{position:relative;padding-left:20px;margin-bottom:4px;}
-.roadmap-line{position:absolute;left:6px;top:18px;width:1px;background:var(--b2);bottom:-4px;}
-.roadmap-dot{position:absolute;left:2px;top:8px;width:9px;height:9px;border-radius:50%;border:1px solid var(--b2);background:var(--bg);}
-.roadmap-dot.done{background:var(--primary);border-color:var(--primaryb);}
-.roadmap-dot.locked{background:var(--b1);border-color:var(--b1);}
-.roadmap-card{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:8px 11px;cursor:default;}
-.roadmap-card.done{opacity:.5;}
-.roadmap-title{font-size:13px;font-weight:400;margin-bottom:3px;}
-.roadmap-meta{display:flex;gap:5px;flex-wrap:wrap;}
-/* ── SHARE CARD ── */
-.share-card{background:var(--s2);border:1px solid var(--b1);border-radius:8px;padding:20px;text-align:center;margin-bottom:12px;}
-.share-level{font-family:'DM Mono',monospace;font-size:32px;color:var(--primary);line-height:1;}
-.share-name{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--tx3);margin-top:4px;margin-bottom:16px;}
-.share-stats{display:flex;justify-content:center;gap:20px;margin-bottom:16px;}
-.share-stat{text-align:center;}.share-stat-num{font-family:'DM Mono',monospace;font-size:18px;color:var(--tx);}.share-stat-lbl{font-family:'DM Mono',monospace;font-size:8px;letter-spacing:1px;color:var(--tx3);}
-/* ── COMING UP STRIP ── */
-.coming-up-card{display:flex;align-items:center;gap:8px;background:var(--s1);border:1px solid var(--b1);border-left:2px solid var(--primaryb);border-radius:var(--r);padding:7px 10px;margin-bottom:3px;opacity:.75;}
-.coming-up-title{flex:1;font-size:12px;color:var(--tx2);}
-.coming-up-due{font-family:'DM Mono',monospace;font-size:8px;color:var(--tx3);}
-/* ── JOURNAL MERGED SUB-TABS ── */
-.jtab-row{display:flex;gap:3px;background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:3px;margin-bottom:16px;}
-.jtab{flex:1;padding:6px 4px;border:none;border-radius:4px;background:none;cursor:pointer;font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1.2px;text-transform:uppercase;color:var(--tx3);transition:all .15s;}
-.jtab.on{background:var(--s2);color:var(--tx);}
-.sub-progress{height:2px;background:var(--b1);border-radius:1px;margin-top:5px;overflow:hidden;}
-.sub-progress-fill{height:100%;background:var(--primary);border-radius:1px;transition:width .3s;}
-.card.quest-side{border-color:var(--secondaryb);}
-.review-btn{position:fixed;bottom:72px;right:16px;background:var(--s2);border:1px solid var(--b2);color:var(--tx2);font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1px;padding:7px 12px;border-radius:20px;cursor:pointer;z-index:50;transition:all .15s;box-shadow:0 2px 12px #0008;}
-.review-btn:hover{background:var(--primary);color:var(--bg);border-color:var(--primary);}
-@media(min-width:768px){.review-btn{bottom:20px;right:24px;}}
-.journal-entry{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:14px 16px;margin-bottom:8px;}.journal-entry.practice-entry{border-color:var(--secondaryb);background:var(--s2);}.journal-entry.ai-journal-entry{border-color:var(--secondaryb);background:linear-gradient(135deg,var(--s2),var(--bg));}
-.journal-date{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1px;color:var(--tx3);margin-bottom:6px;}
-.journal-text{font-size:13px;color:var(--tx);line-height:1.7;white-space:pre-wrap;}
-.journal-img{max-width:100%;border-radius:4px;margin-bottom:8px;border:1px solid var(--b1);}
-.xp-log-row{display:flex;align-items:center;gap:10px;padding:6px 0;border-bottom:1px solid var(--b1);font-size:12px;}
-.xp-log-amt{font-family:'DM Mono',monospace;font-size:11px;color:var(--success);min-width:50px;}
-.xp-log-label{flex:1;color:var(--tx2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
-.xp-log-time{font-family:'DM Mono',monospace;font-size:9px;color:var(--tx3);}
-.search-row{display:flex;gap:8px;margin-bottom:14px;}
-.search-input{flex:1;background:var(--s1);border:1px solid var(--b1);color:var(--tx);border-radius:var(--r);padding:7px 12px;font-size:12px;outline:none;}
-.search-input:focus{border-color:var(--primaryb);}
-.review-modal{background:var(--s1);border:1px solid var(--b1);border-radius:8px;padding:24px;max-width:560px;width:100%;max-height:80vh;overflow-y:auto;}
-/* ── Utility classes to replace repeated inline styles ── */
-.row{display:flex;align-items:center;}
-.row-gap4{display:flex;align-items:center;gap:4px;}
-.row-gap6{display:flex;align-items:center;gap:6px;}
-.row-gap8{display:flex;align-items:center;gap:8px;}
-.row-gap10{display:flex;align-items:center;gap:10px;}
-.row-sb{display:flex;align-items:center;justify-content:space-between;}
-.col{display:flex;flex-direction:column;}
-.col-gap4{display:flex;flex-direction:column;gap:4px;}
-.col-gap8{display:flex;flex-direction:column;gap:8px;}
-.mono{font-family:'DM Mono',monospace;}
-.mono9{font-family:'DM Mono',monospace;font-size:9px;}
-.mono10{font-family:'DM Mono',monospace;font-size:10px;}
-.mono11{font-family:'DM Mono',monospace;font-size:11px;}
-.label9{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1.5px;text-transform:uppercase;color:var(--tx3);}
-.label10{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--tx3);}
-.tx3{color:var(--tx3);}
-.tx2{color:var(--tx2);}
-.card-row{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:8px 12px;margin-bottom:4px;}
-${rpgExtras}`;}
-
-
-function NotifPrompt({dueDate,dueTime,title}){
-  const [perm,setPerm]=useState(()=>typeof Notification!=="undefined"?Notification.permission:"unsupported");
-  const req=async()=>{
-    if(typeof Notification==="undefined") return;
-    const r=await Notification.requestPermission(); setPerm(r);
-    if(r==="granted"&&dueDate){
-      const due=new Date(`${dueDate}${dueTime?"T"+dueTime:"T09:00"}`).getTime(), now=Date.now();
-      if(due-3600000>now) setTimeout(()=>{try{new Notification("Quest due in 1 hour",{body:title});}catch{}},due-3600000-now);
-      if(due>now) setTimeout(()=>{try{new Notification("Quest due now",{body:title});}catch{}},due-now);
-    }
-  };
-  if(perm==="unsupported") return null;
-  if(perm==="granted") return <div className="notif-ok">◎ Reminder scheduled</div>;
-  return <button className="notif-btn" type="button" onClick={req}>◷ Enable due-date reminder</button>;
-}
-
-function Collapsible({question,children}){
-  const [open,setOpen]=useState(false);
-  return (
-    <div style={{marginBottom:10}}>
-      <button className="coll-btn" onClick={()=>setOpen(o=>!o)}>
-        <span>{question}</span>
-        <span className="coll-arr">{open?"▲":"▼"}</span>
-      </button>
-      {open&&<div style={{paddingTop:8}}>{children}</div>}
-    </div>
-  );
-}
-
-const SKILL_MILESTONES = {
-  25:  {title:"Dedicated",   sub:"You show up. That's rarer than it sounds.",        glyph:"◈", big:false},
-  50:  {title:"Invested",    sub:"This is becoming part of who you are.",             glyph:"◉", big:false},
-  75:  {title:"Experienced", sub:"You know what this practice actually demands.",     glyph:"◆", big:false},
-  100: {title:"Master",      sub:"10,000 hours is a metaphor. You understand it now. Most people never get here.", glyph:"✦", big:true},
-};
-
-function FloatXP({floats}){
-  if(!floats.length) return null;
-  return <>{floats.map(f=>(
-    <div key={f.id} className="xp-float" style={{"--fx":`${f.xOff}px`}}>+{f.amt}</div>
-  ))}</>;
-}
-
-function MilestoneOverlay({milestone,onClose}){
-  const {settings}=useSettings();
-  if(!milestone) return null;
-  const m=SKILL_MILESTONES[milestone.level]||{title:`Level ${milestone.level}`,sub:"",glyph:"◆",big:false};
-  if(m.big) return (
-    <div className="overlay" onClick={onClose}>
-      <div className="milestone-modal big" onClick={e=>e.stopPropagation()}>
-        <div className="ms-glyph big" style={{color:milestone.color||"var(--primary)"}}>{m.glyph}</div>
-        <div className="ms-level">Level {milestone.level}</div>
-        <div className="ms-skill" style={{color:milestone.color||"var(--primary)"}}>{milestone.name}</div>
-        <div className="ms-title big">{m.title}</div>
-        <div className="ms-sub big">{m.sub}</div>
-        <div className="ms-bar"><div className="ms-bar-fill" style={{background:milestone.color||"var(--primary)"}}/></div>
-        <button className="fsbtn primary" style={{margin:"8px 0 0",width:"auto",padding:"10px 28px"}} onClick={onClose}>Continue</button>
-      </div>
-    </div>
-  );
-  return (
-    <div className="overlay" onClick={onClose}>
-      <div className="milestone-modal" onClick={e=>e.stopPropagation()}>
-        <div className="ms-row">
-          <div className="ms-glyph" style={{color:milestone.color||"var(--primary)"}}>{m.glyph}</div>
-          <div>
-            <div className="ms-skill">{milestone.name} · <span style={{color:milestone.color||"var(--primary)"}}>Level {milestone.level}</span></div>
-            <div className="ms-title">{m.title}</div>
-          </div>
-        </div>
-        <div className="ms-sub">{m.sub}</div>
-        <button className="fsbtn" style={{margin:"10px 0 0"}} onClick={onClose}>✓ Nice</button>
-      </div>
-    </div>
-  );
-}
+import { buildCSS } from "./buildCSS";
+import { toGroqTools, buildAdvisorTools } from "./aiHelpers";
+import { FloatXP, MilestoneOverlay, Collapsible, NotifPrompt, SkIcon, skillLabel } from "./SharedComponents";
+import {
+  WeeklyReview, CommunityTab, CommunityCard,
+  StreakRescueBanner, QuestBreakdownModal, SkillGapModal,
+  FocusTimer, ProfileModal, ShareCard, CustomImageUploader,
+} from "./Modals";
 
 export default function App(){
   const [session,setSession]=useState(null);
@@ -888,6 +68,10 @@ export default function App(){
   const [floats,setFloats]=useState([]);
   const [milestone,setMilestone]=useState(null);
   const [advisorLog,setAdvisorLog]=useState([]);
+  const [dailyBriefing,setDailyBriefing]=useState(null); // {text, date, loading}
+  const [streakRescue,setStreakRescue]=useState(null); // {skillId, skillName, streak, suggestion}
+  const [showBreakdown,setShowBreakdown]=useState(null); // questId to break down
+  const [showSkillGap,setShowSkillGap]=useState(false);
   const toastRef=useRef(null);
 
   // Load data from Supabase if logged in, otherwise localStorage
@@ -949,8 +133,12 @@ export default function App(){
     setLoaded(true);
   };
 
+  // Trigger AI features after data is loaded
   useEffect(()=>{
-    // Check for existing session on mount
+    if(!loaded||!skills.length) return;
+    generateBriefing(tasks,quests,skills,streaks,settings);
+    checkStreakRescue(skills,streaks,tasks);
+  },[loaded]); // only on initial load
     (async()=>{
       const s=await getSession();
       if(s){ setSession(s); setUserId(s.user.id); await loadData(s.user.id); }
@@ -991,6 +179,70 @@ export default function App(){
     setTab("journal"); setJournalSubTab("log");
   };
   const cancelFocus=()=>{ setFocusTimer(null); setFocusElapsed(0); };
+
+  // ── DAILY BRIEFING ────────────────────────────────────────────────────────
+  const generateBriefing=useCallback(async(tasksSnap,questsSnap,skillsSnap,streaksSnap,settingsSnap)=>{
+    const todayStr=new Date().toDateString();
+    const stored=localStorage.getItem("cx_briefing");
+    if(stored){const p=JSON.parse(stored); if(p.date===todayStr&&p.text){setDailyBriefing(p);return;}}
+    setDailyBriefing({text:"",date:todayStr,loading:true});
+    try{
+      const skPerLv=settingsSnap?.xp?.skillPerLevel||6000;
+      const overdue=questsSnap.filter(q=>!q.done&&q.due&&q.due<Date.now());
+      const dueToday=questsSnap.filter(q=>!q.done&&q.due&&new Date(q.due).toDateString()===todayStr);
+      const atRisk=Object.entries(streaksSnap||{})
+        .filter(([id,s])=>s.count>2&&s.lastDate&&new Date(s.lastDate).toDateString()!==todayStr)
+        .map(([id,s])=>({name:skillsSnap.find(sk=>sk.id===id)?.name||id,count:s.count}));
+      const topSkills=[...skillsSnap].filter(s=>s.type!=="subskill").sort((a,b)=>(b.xp||0)-(a.xp||0)).slice(0,4)
+        .map(s=>`${s.name} Lv${Math.floor((s.xp||0)/skPerLv)+1}`);
+      const activeTasks=tasksSnap.filter(t=>!t.done&&t.period==="daily").slice(0,6).map(t=>t.title);
+      const activeQuests=questsSnap.filter(q=>!q.done).slice(0,5).map(q=>`${q.title} [${q.type}]`);
+      const prompt=`Daily briefing for ${settingsSnap?.profile?.name||"the player"}.
+Today: ${new Date().toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}
+Skills: ${topSkills.join(", ")||"none"}
+Active tasks today: ${activeTasks.join(", ")||"none"}
+Active quests: ${activeQuests.join(", ")||"none"}
+Overdue quests: ${overdue.map(q=>q.title).join(", ")||"none"}
+Due today: ${dueToday.map(q=>q.title).join(", ")||"none"}
+Streaks at risk (not done today): ${atRisk.map(s=>`${s.name} (${s.count}d)`).join(", ")||"none"}
+
+Write a sharp, useful morning briefing in exactly this format (under 120 words total):
+**TODAY'S FOCUS:** [1 sentence — the single most important thing]
+**WATCH OUT:** [1 thing at risk — overdue quest, streak, or blocked task. Skip if nothing critical]
+**WIN AVAILABLE:** [1 specific quick win from their tasks or radiant quests]`;
+      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({max_tokens:250,messages:[{role:"user",content:prompt}]})});
+      const data=await res.json();
+      const text=data.choices?.[0]?.message?.content||"Could not generate briefing.";
+      const result={text,date:todayStr,loading:false};
+      setDailyBriefing(result);
+      localStorage.setItem("cx_briefing",JSON.stringify(result));
+    }catch{
+      setDailyBriefing({text:"Could not connect.",date:todayStr,loading:false});
+    }
+  },[]);
+
+  // ── STREAK RESCUE ────────────────────────────────────────────────────────
+  const checkStreakRescue=useCallback(async(skillsSnap,streaksSnap,tasksSnap)=>{
+    const hour=new Date().getHours();
+    if(hour<18) return; // only after 6pm
+    const todayStr=new Date().toDateString();
+    const endangered=Object.entries(streaksSnap||{})
+      .filter(([id,s])=>s.count>=3&&s.lastDate&&new Date(s.lastDate).toDateString()!==todayStr)
+      .map(([id,s])=>({id,name:skillsSnap.find(sk=>sk.id===id)?.name||id,count:s.count}));
+    if(!endangered.length) return;
+    const target=endangered.sort((a,b)=>b.count-a.count)[0];
+    const alreadyRescued=localStorage.getItem(`cx_rescue_${todayStr}_${target.id}`);
+    if(alreadyRescued) return;
+    try{
+      const relatedTasks=tasksSnap.filter(t=>t.skill===target.id).map(t=>t.title).slice(0,3);
+      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({max_tokens:80,messages:[{role:"user",content:`A ${target.count}-day streak for "${target.name}" is about to break. Suggest ONE minimal action (2-5 min) to keep it alive. Related tasks: ${relatedTasks.join(", ")||"none"}. Reply in one short sentence, no intro.`}]})});
+      const data=await res.json();
+      const suggestion=data.choices?.[0]?.message?.content||`Do one small ${target.name} action to protect your streak.`;
+      setStreakRescue({skillId:target.id,skillName:target.name,count:target.count,suggestion});
+    }catch{}
+  },[]);
 
   const handleTabChange=async id=>{
     // Redirect old "practice" and "community" tab ids
@@ -1058,15 +310,17 @@ export default function App(){
   const reorderSkills=useCallback(async newOrder=>{setSkills(newOrder);await dbSet("cx_skills",newOrder,userId);},[userId]);
   const saveStr=useCallback(async s=>{setStreaks(s);await dbSet("cx_streaks",s,userId);},[userId]);
 
-  // Wire up quick-add quest event from PlannerTab
+  // Wire up quick-add quest event from PlannerTab — use ref to avoid stale closure
+  const addQuestRef=useRef(null);
   useEffect(()=>{
-    const handler=(e)=>addQuest(e.detail);
+    const handler=(e)=>{ if(addQuestRef.current) addQuestRef.current(e.detail); };
     window.addEventListener("cx:addquest",handler);
     return ()=>window.removeEventListener("cx:addquest",handler);
   },[]);
 
   const addTask=async d=>{
-    await saveT([{id:uid(),...d,done:false,dayKey:d.period==="daily"?todayKey():null,created:Date.now()},...tasks]);
+    const newTask={id:uid(),...d,done:false,dayKey:d.period==="daily"?todayKey():null,created:Date.now()};
+    setTasks(prev=>{const next=[newTask,...prev];dbSet("cx_tasks",next,userId);return next;});
     showToast("Task added");
   };
   const toggleTask=async id=>{
@@ -1085,9 +339,17 @@ export default function App(){
   const addQuest=async d=>{
     const xpVal=d.xpVal||( d.type==="main"?Number(L.mainXp)||80:d.type==="side"?Number(L.sideXp)||50:Number(L.radiantXp)||30 );
     const qSkills=d.skills||(d.skill?[d.skill]:[]);
-    await saveQ([{id:uid(),...d,skills:qSkills,xpVal,done:false,priority:d.priority||"med",cooldown:d.type==="radiant"?(d.cooldown??60*60*1000):undefined,created:Date.now()},...quests]);
+    const newQuest={id:uid(),...d,skills:qSkills,xpVal,done:false,priority:d.priority||"med",cooldown:d.type==="radiant"?(d.cooldown??60*60*1000):undefined,created:Date.now()};
+    // Use functional update to always get latest quests state, never stale closure
+    setQuests(prev=>{
+      const next=[newQuest,...prev];
+      dbSet("cx_quests",next,userId);
+      return next;
+    });
     showToast("Quest accepted");
   };
+  // Keep ref current so event listener always calls latest version
+  addQuestRef.current=addQuest;
   const toggleQuest=async id=>{
     const q=quests.find(q=>q.id===id); if(!q) return;
     // Chain lock: can't complete if prerequisite quest isn't done
@@ -1266,12 +528,13 @@ export default function App(){
   };
 
   const addSkill=async d=>{
-    await saveS([...skills,{id:uid(),name:d.name,icon:d.icon,color:d.color,xp:d.startXp||0,type:d.type||"skill",parentIds:d.parentIds||[]}]);
+    const newSkill={id:uid(),name:d.name,icon:d.icon,color:d.color,xp:d.startXp||0,type:d.type||"skill",parentIds:d.parentIds||[]};
+    setSkills(prev=>{const next=[...prev,newSkill];dbSet("cx_skills",next,userId);return next;});
     showToast(d.type==="subskill"?"Subskill created":"Skill created");
   };
   const addSkillBatch=async arr=>{
     const newSkills=arr.map(d=>({id:uid(),name:d.name,icon:d.icon,color:d.color,xp:d.startXp||0,customImg:d.customImg||null,type:"skill",parentIds:[]}));
-    await saveS([...skills,...newSkills]);
+    setSkills(prev=>{const next=[...prev,...newSkills];dbSet("cx_skills",next,userId);return next;});
     showToast(`Added ${newSkills.length} skills`);
   };
   // Link/unlink a subskill to a parent skill
@@ -1497,9 +760,9 @@ export default function App(){
                 const sk=skills.find(s=>s.id===t.skill);
                 if(sk) setNudge({taskId:id,skillId:t.skill,skillName:sk.name});
               }
-            }} onDelete={deleteTask} onEdit={editTask} onToggleQuest={toggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} nudge={nudge} onDismissNudge={()=>setNudge(null)} onAcceptNudge={()=>{if(nudge){setPendingPractice({skillId:nudge.skillId});setNudge(null);setTab("journal");setJournalSubTab("log");}}}/>}
-            {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest} onReorder={q=>saveQ(q)} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>}
-            {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill} onReorder={reorderSkills} onLink={linkSubskill} onStartFocus={startFocus} onAward={async(skillId,amt,reason)=>{const {leveledUp,milestone:ms}=await award(amt,skillId,xp,skills,streaks,`✦ ${reason}`);spawnFloat(amt);showToast(`+${amt} ${settings.labels.xpName}`);if(leveledUp&&!ms)setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);if(ms)setMilestone(ms);}}/>}
+            }} onDelete={deleteTask} onEdit={editTask} onToggleQuest={toggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} nudge={nudge} onDismissNudge={()=>setNudge(null)} onAcceptNudge={()=>{if(nudge){setPendingPractice({skillId:nudge.skillId});setNudge(null);setTab("journal");setJournalSubTab("log");}}} dailyBriefing={dailyBriefing} onRefreshBriefing={()=>{localStorage.removeItem("cx_briefing");generateBriefing(tasks,quests,skills,streaks,settings);}} onOpenBreakdown={qid=>setShowBreakdown(qid)} onOpenSkillGap={()=>setShowSkillGap(true)}/>}
+            {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest} onReorder={q=>saveQ(q)} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={qid=>setShowBreakdown(qid)}/>}
+            {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill} onReorder={reorderSkills} onLink={linkSubskill} onStartFocus={startFocus} onAward={async(skillId,amt,reason)=>{const {leveledUp,milestone:ms}=await award(amt,skillId,xp,skills,streaks,`✦ ${reason}`);spawnFloat(amt);showToast(`+${amt} ${settings.labels.xpName}`);if(leveledUp&&!ms)setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);if(ms)setMilestone(ms);}} onOpenSkillGap={()=>setShowSkillGap(true)}/>}
             {tab==="journal"  && <JournalTab entries={journal} skills={skills} quests={quests} meds={meds} practiceTypes={practiceTypes} streaks={streaks} pending={pendingPractice} subTab={journalSubTab} onSubTab={setJournalSubTab} onAdd={addJournalEntry} onDelete={deleteJournalEntry} onAwardXp={awardFromJournal} onEditQuest={editQuest} onLog={logMed} onDeleteMed={deleteMed} onEditMed={editMed} onAddType={addPracticeType} onDeleteType={deletePracticeType} onClearPending={()=>setPendingPractice(null)}/>}
             {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} journal={journal} meds={meds} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest} onDeleteQuest={deleteQuest} onDeleteTask={deleteTask} onAddSkill={addSkill} onDeleteSkill={id=>saveS(skills.filter(s=>s.id!==id))} onAdjustSkillXp={async(skillId,amt,reason)=>{const {leveledUp,milestone:ms}=await award(amt,skillId,xp,skills,streaks,`✦ ${reason}`);spawnFloat(Math.abs(amt));showToast(`${amt>0?"+":""}${amt} ${L.xpName} → ${skills.find(s=>s.id===skillId)?.name||"skill"}`);if(leveledUp&&!ms)setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);if(ms)setMilestone(ms);}} aiMemory={aiMemory} onUpdateMemory={async(m)=>{setAiMemory(m);await dbSet("cx_aimem",m,userId);}} initialMsgs={advisorLog} onSaveMsgs={async(m)=>{setAdvisorLog(m);await dbSet("cx_advisor",m,userId);}}/>}
             {tab==="settings" && <SettingsTab showToast={showToast} onExport={exportData} onImport={importData} userId={userId} onSignIn={()=>setShowAuth(true)} onSignOut={handleSignOut}/>}
@@ -1508,6 +771,12 @@ export default function App(){
           {/* Weekly Review floating button */}
           <button className="review-btn" onClick={()=>setShowReview(true)} title="Weekly Review">◈ Review</button>
           {showReview&&<WeeklyReview tasks={tasks} quests={quests} skills={skills} meds={meds} xpLog={xpLog} journal={journal} settings={settings} onClose={()=>setShowReview(false)} onNavigate={id=>{setShowReview(false);handleTabChange(id);}} onAddTask={addTask}/>}
+          {/* Streak Rescue Banner */}
+          {streakRescue&&<StreakRescueBanner rescue={streakRescue} onDismiss={()=>{localStorage.setItem(`cx_rescue_${new Date().toDateString()}_${streakRescue.skillId}`,"1");setStreakRescue(null);}} onLog={()=>{setPendingPractice({skillId:streakRescue.skillId});setStreakRescue(null);setTab("journal");setJournalSubTab("log");localStorage.setItem(`cx_rescue_${new Date().toDateString()}_${streakRescue.skillId}`,"1");}}/>}
+          {/* Quest Breakdown Modal */}
+          {showBreakdown&&<QuestBreakdownModal questId={showBreakdown} quests={quests} skills={skills} settings={settings} onClose={()=>setShowBreakdown(null)} onAddSubquest={addSubquest} onAddQuest={addQuest} showToast={showToast}/>}
+          {/* Skill Gap Modal */}
+          {showSkillGap&&<SkillGapModal quests={quests} skills={skills} tasks={tasks} settings={settings} onClose={()=>setShowSkillGap(false)} onAddTask={addTask} onEditQuest={editQuest} showToast={showToast}/>}
           {/* Focus Timer mini-bar (when running in background) */}
           {focusTimer?.running&&tab!=="focus"&&(
             <div className="timer-bar" onClick={()=>setTab("__focus__")}>
@@ -1616,7 +885,7 @@ function QuestPlannerCard({quest,skills,onToggle,radiantAvailable,radiantCooldow
   );
 }
 
-function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAddTask,onToggle,onDelete,onEdit,onToggleQuest,radiantAvailable,radiantCooldownLabel,nudge,onDismissNudge,onAcceptNudge}){
+function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAddTask,onToggle,onDelete,onEdit,onToggleQuest,radiantAvailable,radiantCooldownLabel,nudge,onDismissNudge,onAcceptNudge,dailyBriefing,onRefreshBriefing,onOpenBreakdown,onOpenSkillGap}){
   const {settings}=useSettings(); const L=settings.labels;
   const [showForm,setShowForm]=useState(false);
   const [qaMode,setQaMode]=useState("task");
@@ -1628,8 +897,8 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
   const [dragId,setDragId]=useState(null);
   const [showSubForm,setShowSubForm]=useState(false);
   const [subF,setSubF]=useState({title:"",skill:"",xpVal:20,recurrenceDays:[],priority:"med"});
-  const WDAY_LABELS=["Mo","Tu","We","Th","Fr","Sa","Su"];
-  const TIME_BLOCKS=[{id:"morning",label:"Morning"},{id:"afternoon",label:"Afternoon"},{id:"evening",label:"Evening"}];
+
+
   const todayDk=dayKey(new Date());
   const toggleWday=i=>setF(v=>({...v,recurrenceDays:v.recurrenceDays.includes(i)?v.recurrenceDays.filter(x=>x!==i):[...v.recurrenceDays,i]}));
   const toggleSubWday=i=>setSubF(v=>({...v,recurrenceDays:v.recurrenceDays.includes(i)?v.recurrenceDays.filter(x=>x!==i):[...v.recurrenceDays,i]}));
@@ -1713,7 +982,7 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
         </div>
         {open&&<div className="block-body">
           {items.map(item=>item.type==="radiant"
-            ?<QuestPlannerCard key={item.id} quest={item} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>
+            ?<QuestPlannerCard key={item.id} quest={item} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>
             :<React.Fragment key={item.id}><TaskCard task={item} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>
               {nudge?.taskId===item.id&&(
                 <div className="practice-nudge">
@@ -1747,6 +1016,23 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
     {period==="monthly"&&<div className="date-hdr">{monthLabel()}</div>}
     {period==="yearly"&&<div className="date-hdr">{new Date().getFullYear()} — Annual Goals</div>}
     {period==="weekly"&&<div className="date-hdr">Week of {weekDays[0]?.toLocaleDateString("en-US",{month:"short",day:"numeric"})}</div>}
+
+    {/* Daily Briefing Panel */}
+    {period==="daily"&&dailyBriefing&&(
+      <div style={{background:"var(--s1)",border:"1px solid var(--b2)",borderRadius:"var(--r)",padding:"12px 14px",marginBottom:12,position:"relative"}}>
+        <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,color:"var(--primary)",textTransform:"uppercase"}}>✦ Daily Briefing</div>
+          <div style={{display:"flex",gap:6}}>
+            {onOpenSkillGap&&<button onClick={onOpenSkillGap} style={{background:"none",border:"1px solid var(--b2)",borderRadius:3,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:8,cursor:"pointer",padding:"2px 7px",letterSpacing:.5}} title="Skill gap analysis">◈ Gaps</button>}
+            <button onClick={onRefreshBriefing} style={{background:"none",border:"none",color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:8,cursor:"pointer",padding:"2px 4px",letterSpacing:.5}} title="Regenerate">↺</button>
+          </div>
+        </div>
+        {dailyBriefing.loading
+          ? <div style={{fontSize:11,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontStyle:"italic"}}>Generating briefing…</div>
+          : <div style={{fontSize:12,color:"var(--tx2)",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{dailyBriefing.text}</div>
+        }
+      </div>
+    )}
 
     {period==="daily"&&<>
       <div className="nl-row">
@@ -1825,7 +1111,7 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
             <span className="block-count">{overdueQuests.length}</span>
             <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",marginLeft:"auto"}}>{!collapsed.overdue?"▾":"▸"}</span>
           </div>
-          {!collapsed.overdue&&<div className="block-body">{overdueQuests.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}</div>}
+          {!collapsed.overdue&&<div className="block-body">{overdueQuests.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>)}</div>}
         </div>
       </>}
 
@@ -1869,13 +1155,13 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
             {radiantQ.length>0&&<>
               <div className="slbl" style={{marginBottom:6}}>◉ Repeatable this week</div>
               <div className="clist" style={{marginBottom:8}}>
-                {radiantQ.slice(0,8).map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}
+                {radiantQ.slice(0,8).map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>)}
               </div>
             </>}
             {undatedQ.length>0&&<>
               <div className="slbl" style={{marginBottom:6}}>◇ Active quests (no date)</div>
               <div className="clist" style={{marginBottom:8}}>
-                {undatedQ.slice(0,6).map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}
+                {undatedQ.slice(0,6).map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>)}
               </div>
             </>}
           </div>
@@ -1913,7 +1199,7 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
           <div key={i} className="wk-day" onDragOver={e=>{e.preventDefault();e.currentTarget.style.outline="1px dashed var(--primaryb)";}} onDragLeave={e=>{e.currentTarget.style.outline="none";}} onDrop={e=>{e.currentTarget.style.outline="none";handleDrop(e,dk);}}>
             <div className={`wk-day-lbl ${isToday?"today":""}`}>{["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][i]} {d.getDate()}{isToday?" · today":""}</div>
             {dt.length===0&&dq.length===0?<div style={{fontSize:12,color:"var(--tx3)",paddingLeft:2}}>—</div>:<>
-              {dq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}
+              {dq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>)}
               <div className="clist">{dt.map(t=><div key={t.id} draggable onDragStart={e=>handleDragStart(e,t.id)} style={{cursor:"grab"}}><TaskCard task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/></div>)}</div>
             </>}
           </div>
@@ -1975,7 +1261,7 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
             <button className="fsbtn" onClick={submitSub}>Add monthly task</button>
           </div>
         ):<button className="addbtn" style={{marginBottom:10}} onClick={()=>setShowSubForm(true)}><span>+</span> Add monthly task</button>}
-        {mq.length>0&&<><div className="slbl" style={{marginBottom:6}}>◆ Quests this month</div>{mq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}</>}
+        {mq.length>0&&<><div className="slbl" style={{marginBottom:6}}>◆ Quests this month</div>{mq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>)}</>}
         {tasks.length>0&&<>
           <div className="slbl" style={{marginBottom:8,marginTop:12}}>◎ Monthly Tasks</div>
           {tasks.map(t=>(
@@ -2030,7 +1316,7 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
         ):<button className="addbtn" style={{marginBottom:10}} onClick={()=>setShowSubForm(true)}><span>+</span> Add annual goal</button>}
         {yearQuests.length>0&&<>
           <div className="slbl" style={{marginBottom:6}}>◆ Quests due this year</div>
-          {yearQuests.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>)}
+          {yearQuests.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>)}
           <div style={{height:16}}/>
         </>}
         {tasks.length>0&&<>
@@ -2055,7 +1341,7 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
 }
 
 
-function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,onToggleSubquest,onDeleteSubquest,onReorder,radiantAvailable,radiantCooldownLabel}){
+function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,onToggleSubquest,onDeleteSubquest,onReorder,radiantAvailable,radiantCooldownLabel,onOpenBreakdown}){
   const {settings}=useSettings(); const L=settings.labels;
   const [form,setForm]=useState(null);
   const [search,setSearch]=useState("");
@@ -2212,13 +1498,13 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
       :<button className="addbtn" onClick={()=>openForm("main")}><span>+</span> New {L.mainQuest.toLowerCase()}</button>}
     <div className="clist">{mainA.map(q=>(
       <div key={q.id} {...getQDragProps(q.id)}>
-        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} quests={quests} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>
+        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} quests={quests} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>
       </div>
     ))}</div>
     {mainD.length>0&&<><div className="gap"/><div className="slbl">{L.completed}</div>
       <div className="clist">{mainD.map(q=>(
       <div key={q.id} {...getQDragProps(q.id)}>
-        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} quests={quests} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>
+        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} quests={quests} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>
       </div>
     ))}</div></>}
     {quests.filter(q=>q.type==="main").length===0&&form!=="main"&&(
@@ -2290,7 +1576,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
       :<button className="addbtn" onClick={()=>openForm("side")}><span>+</span> New {L.sideQuest.toLowerCase()}</button>}
     <div className="clist">{side.map(q=>(
       <div key={q.id} {...getQDragProps(q.id)}>
-        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} quests={quests} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>
+        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} quests={quests} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>
       </div>
     ))}</div>
     {side.length===0&&form!=="side"&&(
@@ -2368,7 +1654,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
       :<button className="addbtn" onClick={()=>openForm("radiant")}><span>+</span> New {L.radiantQuest.toLowerCase()}</button>}
     <div className="clist">{radiant.map(q=>(
       <div key={q.id} {...getQDragProps(q.id)}>
-        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} quests={quests} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}/>
+        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} quests={quests} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>
       </div>
     ))}</div>
     {radiant.length===0&&form!=="radiant"&&(
@@ -2433,7 +1719,7 @@ function QuestRoadmap({quests,skills}){
   );
 }
 
-const SKILL_ICONS_EXTRA = ["◈","◉","◎","◆","◬","✦","◌","◊","△","○","□","◇","❋","⊕","◐","◑","⬡","✧","⟡","◿","⚔","🧠","💪","🎯","🎨","📚","🎵","🌱","⚡","🔥","💎","🏆","🎭","🔬","🌟","✍","🎸","🏋","🧘","💻","🗺","🎲","⚙","🛡","🌊","🦾","🧩","🎤","📖","🌙"];
+
 
 // GitHub-style 90-day streak heatmap
 function HeatMap({days, color}){
@@ -2694,7 +1980,7 @@ function SkAiCatBtn({name,intention,onAssign}){
   );
 }
 
-function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,onEdit,onReorder,onLink,onStartFocus,onAward}){
+function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,onEdit,onReorder,onLink,onStartFocus,onAward,onOpenSkillGap}){
   const {settings}=useSettings(); const L=settings.labels;
   const mainSkills=skills.filter(s=>s.type!=="subskill");
   const subSkills=skills.filter(s=>s.type==="subskill");
@@ -3095,6 +2381,11 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
         style={{background:"none",border:"1px solid var(--b2)",borderRadius:3,padding:"5px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)",flexShrink:0}}>
         {viewMode==="grid"?"≡ list":"▦ grid"}
       </button>
+      {onOpenSkillGap&&<button onClick={onOpenSkillGap} title="Skill gap analysis"
+        style={{background:"none",border:"1px solid var(--b2)",borderRadius:3,padding:"5px 10px",
+          cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--primary)",flexShrink:0}}>
+        ⟡ gaps
+      </button>}
     </div>
 
     {showForm&&<>{renderForm()}<button className="fsbtn" style={{marginTop:4}} onClick={()=>setShowForm(false)}>Cancel</button></>}
@@ -3543,64 +2834,7 @@ function MedCard({med,ptype,mSkills,skills,onDelete,onEdit}){
   );
 }
 
-function buildAdvisorTools(skills,quests){
-  const sn=skills.map(s=>`${s.id}=${s.name}`).join(",")||"none";
-  const qn=(quests||[]).filter(q=>!q.done).map(q=>`${q.id}="${q.title}"[${q.type}]`).join(",")||"none";
-  const qnAll=(quests||[]).map(q=>`${q.id}="${q.title}"[${q.type}]`).join(",")||"none";
-  return [
-    {name:"add_quest",description:"Add a new quest. Use 'main' for multi-day goals, 'side' for contained tasks, 'radiant' for repeatable daily habits.",
-     input_schema:{type:"object",properties:{
-       title:{type:"string"},
-       type:{type:"string",enum:["main","side","radiant"]},
-       skillIds:{type:"array",items:{type:"string"},description:`Array of skill IDs to link. Available: ${sn}`},
-       note:{type:"string",description:"Intention or description"},
-       dueDate:{type:"string",description:"YYYY-MM-DD"},
-       priority:{type:"string",enum:["high","med","low"]}
-     },required:["title","type"]}},
-    {name:"update_quest",description:`Update an existing quest's title, note, due date, or skills. Active quests: ${qn}`,
-     input_schema:{type:"object",properties:{
-       questId:{type:"string",description:"ID of quest to update"},
-       title:{type:"string"},note:{type:"string"},
-       dueDate:{type:"string",description:"YYYY-MM-DD"},
-       type:{type:"string",enum:["main","side","radiant"]},
-       skillIds:{type:"array",items:{type:"string"}},
-       priority:{type:"string",enum:["high","med","low"]}
-     },required:["questId"]}},
-    {name:"delete_quest",description:`Delete/remove a quest permanently. All quests: ${qnAll}`,
-     input_schema:{type:"object",properties:{questId:{type:"string"}},required:["questId"]}},
-    {name:"add_task",description:"Add a recurring or one-time task to the planner.",
-     input_schema:{type:"object",properties:{
-       title:{type:"string"},
-       period:{type:"string",enum:["daily","weekly","monthly"]},
-       skillId:{type:"string",description:`Optional skill: ${sn}`},
-       xpVal:{type:"number",description:"XP for completion, typically 10-80 for tasks"}
-     },required:["title","period"]}},
-    {name:"delete_task",description:"Delete a task from the planner.",
-     input_schema:{type:"object",properties:{taskId:{type:"string"}},required:["taskId"]}},
-    {name:"add_skill",description:"Create a new skill for the user.",
-     input_schema:{type:"object",properties:{
-       name:{type:"string"},
-       icon:{type:"string",description:"Single emoji or symbol"},
-       category:{type:"string",enum:["body","mind","spirit","craft","social","other"]}
-     },required:["name"]}},
-    {name:"delete_skill",description:`Delete a skill and all its XP. Skills: ${sn}`,
-     input_schema:{type:"object",properties:{skillId:{type:"string"}},required:["skillId"]}},
-    {name:"adjust_skill_xp",description:`Manually set or adjust a skill's XP total. Use to correct mismatches. 1 level = 6000 XP. Skills: ${sn}`,
-     input_schema:{type:"object",properties:{
-       skillId:{type:"string"},
-       xpAmount:{type:"number",description:"Amount to ADD (can be negative to subtract)"},
-       reason:{type:"string"}
-     },required:["skillId","xpAmount"]}},
-    {name:"log_session",description:"Log a practice session.",
-     input_schema:{type:"object",properties:{
-       type:{type:"string",enum:["mindfulness","presence","grounding","visualization","ritual","breathwork","contemplation","open"]},
-       duration:{type:"number",description:"Minutes"},
-       skillId:{type:"string",description:`Optional skill: ${sn}`},
-       note:{type:"string"},backlogDate:{type:"string"}
-     },required:["type","duration"]}},
-  ];
-}
-
+// Convert Anthropic tool format {name,description,input_schema} → OpenAI/Groq format {type:"function",function:{name,description,parameters}}
 function JarvisOverlay({tasks,quests,skills,onAddQuest,onAddTask,onClose,onLogMed}){
   const {settings}=useSettings();
   const [input,setInput]=useState("");
@@ -3634,7 +2868,7 @@ function JarvisOverlay({tasks,quests,skills,onAddQuest,onAddTask,onClose,onLogMe
     const history=[...msgs.filter(m=>!m.actions).map(m=>({role:m.role,content:m.content})),{role:"user",content:txt}];
     setMsgs(v=>[...v,{role:"user",content:txt}]); setInput(""); setLoading(true);
     try{
-      const tools=buildAdvisorTools(skills,quests);
+      const tools=toGroqTools(buildAdvisorTools(skills,quests,tasks));
       const activeQuests=quests.filter(q=>!q.done).map(q=>'"'+q.title+'" ('+q.type+')').slice(0,10).join(", ")||"none";
       const skPerLvLocal=settings?.xp?.skillPerLevel||6000;
       const skillList=skills.map(s=>s.name+' Lv'+(Math.floor(s.xp/skPerLvLocal)+1)).join(", ")||"none";
@@ -3794,7 +3028,7 @@ Be direct. Reference actual task/quest names and IDs. 3–5 sentences unless bre
     const history=[...msgs.map(m=>({role:m.role,content:m.content})),{role:"user",content:msg}];
     setMsgs(prev=>[...prev,{role:"user",content:msg}]);
     try{
-      const advisorTools=buildAdvisorTools(skills,quests);
+      const advisorTools=toGroqTools(buildAdvisorTools(skills,quests,tasks));
       const res=await fetch("/api/chat",{
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({max_tokens:1000,
@@ -3853,17 +3087,21 @@ Be direct. Reference actual task/quest names and IDs. 3–5 sentences unless bre
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:6}}>
           {[
             {icon:"⚔",label:"Break a quest",sub:"Splits into subquests + XP",
-             prompt:`I want to break down one of my active main quests into specific subquests with XP values. Look at my active main quests: ${quests.filter(q=>!q.done&&q.type==="main").map(q=>'"'+q.title+'"').join(", ")||"none yet"}. Pick the one that most needs structure and use add_quest or explain subquests I should create as individual items I can confirm.`},
+             prompt:`I want to break down one of my active main quests into specific subquests with XP values. Look at my active main quests: ${quests.filter(q=>!q.done&&q.type==="main").map(q=>'"'+q.title+'"').join(", ")||"none yet"}. Pick the one that most needs structure and propose each step as a separate add_quest action I can confirm.`},
             {icon:"📅",label:"Plan my day",sub:"Optimal schedule from quests",
-             prompt:`Build me an optimal plan for today. I have these active tasks and quests. Suggest what I should do in what order for today given my skills and priorities. Use add_task to schedule specific actions if needed.`},
-            {icon:"⚡",label:"XP audit",sub:"Check if my levels feel right",
-             prompt:`Audit my skill XP levels. Skills: ${skills.map(s=>`${s.name} Lv${Math.floor((s.xp||0)/(settings.xp.skillPerLevel||6000))+1} (${s.xp||0} XP)`).join(", ")||"none"}. One level = ${settings.xp.skillPerLevel||6000} XP ≈ 100 hours. Do my levels feel calibrated to my real effort? If any are off, use adjust_skill_xp to propose corrections.`},
+             prompt:`Build me an optimal plan for today. Look at my active tasks, overdue items, and quests. Tell me exactly what to do and in what order — morning, afternoon, evening. Use add_task for any specific actions you'd schedule.`},
+            {icon:"⚡",label:"XP audit",sub:"Recalibrate skill levels",
+             prompt:`Audit my skill XP. Skills: ${skills.map(s=>`${s.name} Lv${Math.floor((s.xp||0)/(settings.xp.skillPerLevel||6000))+1} (${s.xp||0} XP total)`).join(", ")||"none"}. 1 level = ${settings.xp.skillPerLevel||6000} XP ≈ 100 genuine hours. Look at each skill — does the level match real effort? Propose adjust_skill_xp corrections for any that are clearly off. Be conservative — only correct obvious mismatches.`},
             {icon:"🗺",label:"Suggest quests",sub:"New goals based on my gaps",
-             prompt:`Based on my current skills, active quests, and what I've been working on, suggest 3 new quests I should add that address my gaps or next logical growth areas. Use add_quest for each one you propose.`},
-            {icon:"🌿",label:"Skill tree check",sub:"Am I missing skills?",
-             prompt:`Review my skill list: ${skills.map(s=>s.name).join(", ")||"none"}. Are there obvious skills missing given my quests and goals? Suggest any I should add and use add_skill for ones that clearly fit. Also flag any that seem redundant or should be merged.`},
-            {icon:"🔍",label:"What's blocking me",sub:"Analyze stalled quests",
-             prompt:`I have ${quests.filter(q=>!q.done).length} active quests but things feel stuck. Analyze which quests are stalled or unclear and tell me the single highest-leverage action I could take right now. Be direct and specific — name the quest and the exact next step.`},
+             prompt:`Based on my current skills, active quests, and what I've been working on, suggest 3 new quests I should add. Focus on gaps or logical next steps. Use add_quest for each one.`},
+            {icon:"✎",label:"Edit a quest",sub:"Move, rename, link — just say it",
+             prompt:`I want to edit one of my quests. I'll describe the change in plain language and you should use update_quest to apply it. My active quests: ${quests.filter(q=>!q.done).map(q=>`"${q.title}" [id:${q.id}]`).join(", ")||"none"}. What do you want to change?`},
+            {icon:"🌿",label:"Skill tree check",sub:"Missing or redundant skills?",
+             prompt:`Review my skill list: ${skills.map(s=>s.name).join(", ")||"none"}. Given my quests and goals, are there obvious skills missing? Use add_skill for clear additions. Flag any that seem redundant or should be merged.`},
+            {icon:"🧹",label:"Clean up",sub:"Archive done, delete orphans",
+             prompt:`Help me clean up. I have ${quests.filter(q=>q.done).length} completed quests and ${quests.filter(q=>!q.done).length} active ones. Review my active quests and flag any that seem abandoned, duplicated, or no longer relevant. Use delete_quest for ones I should remove, or update_quest to archive. Be selective — only the obvious ones.`},
+            {icon:"🔍",label:"What's blocking me",sub:"Highest-leverage next action",
+             prompt:`I have ${quests.filter(q=>!q.done).length} active quests. What's actually blocking progress right now? Identify the single highest-leverage action I could take today. Name the specific quest and the exact next step. Be direct.`},
           ].map(({icon,label,sub,prompt:p})=>(
             <button key={label} onClick={()=>send(p)}
               style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"10px 12px",cursor:"pointer",textAlign:"left",transition:"border-color .15s"}}
@@ -3914,30 +3152,59 @@ Be direct. Reference actual task/quest names and IDs. 3–5 sentences unless bre
 }
 
 function ActionCard({action,skills,onAccept,onCancel}){
-  const sk=skills.find(s=>s.id===action.input.skillId);
-  let summary="", detail="";
+  const sk=skills.find(s=>s.id===action.input.skillId||s.id===action.input.skillIds?.[0]);
+  const linkedSkills=(action.input.skillIds||[]).map(id=>skills.find(s=>s.id===id)?.name).filter(Boolean);
+  let summary="", detail="", danger=false;
+
   if(action.tool==="add_quest"){
-    summary=`[${action.input.type}] "${action.input.title}"`;
-    detail=[sk?`→ ${sk.name}`:null,action.input.note,action.input.dueDate?`due ${action.input.dueDate}`:null].filter(Boolean).join(" · ");
+    const typeIcon=action.input.type==="main"?"◆":action.input.type==="radiant"?"◉":"◇";
+    summary=`${typeIcon} Add quest: "${action.input.title}"`;
+    detail=[linkedSkills.length?`→ ${linkedSkills.join(", ")}`:null,action.input.note,action.input.dueDate?`due ${action.input.dueDate}`:null,action.input.priority?`[${action.input.priority}]`:null].filter(Boolean).join(" · ");
   } else if(action.tool==="update_quest"){
-    summary=`Update quest`;
-    detail=[action.input.title?`rename → "${action.input.title}"`:null,action.input.dueDate?`set due ${action.input.dueDate}`:null,action.input.note?`note: ${action.input.note}`:null].filter(Boolean).join(" · ");
+    summary=`✎ Update quest`;
+    detail=[action.input.title?`rename → "${action.input.title}"`:null,action.input.type?`type → ${action.input.type}`:null,action.input.dueDate?`due → ${action.input.dueDate}`:null,action.input.note?`note: "${action.input.note}"`:null].filter(Boolean).join(" · ");
+  } else if(action.tool==="delete_quest"){
+    const q=action.input.questId;
+    summary=`✕ Delete quest`;
+    detail=`ID: ${q}`;
+    danger=true;
   } else if(action.tool==="add_task"){
-    summary=`[${action.input.period}] "${action.input.title}"`;
-    detail=[sk?`→ ${sk.name}`:null,action.input.xpVal?`${action.input.xpVal}xp`:null].filter(Boolean).join(" · ");
+    summary=`□ Add task: "${action.input.title}"`;
+    detail=[`[${action.input.period}]`,sk?`→ ${sk.name}`:null,action.input.xpVal?`${action.input.xpVal}xp`:null].filter(Boolean).join(" · ");
+  } else if(action.tool==="delete_task"){
+    summary=`✕ Delete task`;
+    detail=`ID: ${action.input.taskId}`;
+    danger=true;
+  } else if(action.tool==="add_skill"){
+    summary=`◈ Add skill: "${action.input.name}"`;
+    detail=[action.input.icon,action.input.category].filter(Boolean).join(" · ");
+  } else if(action.tool==="delete_skill"){
+    const targetSk=skills.find(s=>s.id===action.input.skillId);
+    summary=`✕ Delete skill: "${targetSk?.name||action.input.skillId}"`;
+    detail=targetSk?`${targetSk.xp||0} XP will be lost`:"";
+    danger=true;
+  } else if(action.tool==="adjust_skill_xp"){
+    const targetSk=skills.find(s=>s.id===action.input.skillId);
+    const sign=action.input.xpAmount>0?"+":"";
+    summary=`✦ ${sign}${action.input.xpAmount} XP → ${targetSk?.name||action.input.skillId}`;
+    detail=action.input.reason||"";
   } else if(action.tool==="log_session"){
-    summary=`${action.input.type} · ${action.input.duration}min`;
+    summary=`◉ Log: ${action.input.type} · ${action.input.duration}min`;
     detail=[sk?`→ ${sk.name}`:null,action.input.note,action.input.backlogDate?`(${action.input.backlogDate})`:null].filter(Boolean).join(" · ");
+  } else {
+    summary=action.tool.replace(/_/g," ");
+    detail=JSON.stringify(action.input).slice(0,80);
   }
-  if(action.status==="accepted") return <div className="act-done" style={{color:"var(--success)"}}>✓ {summary} — added</div>;
-  if(action.status==="cancelled") return <div className="act-done" style={{color:"var(--tx3)"}}>✕ {summary} — skipped</div>;
+
+  if(action.status==="accepted") return <div className="act-done" style={{color:"var(--success)"}}>✓ {summary}</div>;
+  if(action.status==="cancelled") return <div className="act-done" style={{color:"var(--tx3)"}}>✕ skipped</div>;
   return (
-    <div className="act-card">
-      <div className="act-tool">{action.tool.replace(/_/g," ")}</div>
+    <div className="act-card" style={danger?{borderColor:"var(--danger)33",background:"var(--dangerf)"}:{}}>
+      <div className="act-tool" style={danger?{color:"var(--danger)"}:{}}>{action.tool.replace(/_/g," ")}</div>
       <div className="act-sum">{summary}</div>
       {detail&&<div className="act-detail">{detail}</div>}
       <div className="act-btns">
-        <button className="abtn ok" onClick={onAccept}>Accept</button>
+        <button className="abtn ok" onClick={onAccept}>{danger?"Confirm delete":"Accept"}</button>
         <button className="abtn no" onClick={onCancel}>Cancel</button>
       </div>
     </div>
@@ -4367,7 +3634,7 @@ function TaskCard({task,skills,quests,onToggle,onDelete,onEdit}){
   );
 }
 
-function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,onToggleSubquest,onDeleteSubquest,radiantAvailable,radiantCooldownLabel}){
+function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,onToggleSubquest,onDeleteSubquest,radiantAvailable,radiantCooldownLabel,onOpenBreakdown}){
   const {settings}=useSettings(); const L=settings.labels;
   const qSkills=(quest.skills||[]).map(id=>skills.find(s=>s.id===id)).filter(Boolean);
   const prereq=(quests||[]).find(q=>q.id===quest.unlocksAfter)||null;
@@ -4613,6 +3880,9 @@ function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,o
           </div>
         </div>
         <button className="delbtn" onClick={()=>setEditing(true)} title="Edit">✎</button>
+        {onOpenBreakdown&&(quest.type==="main"||quest.type==="side")&&!quest.done&&(
+          <button className="delbtn" title="AI: Break into steps" onClick={()=>onOpenBreakdown(quest.id)} style={{color:"var(--primary)",opacity:.7}}>⟡</button>
+        )}
         <button className="delbtn" onClick={()=>onDelete(quest.id)}>✕</button>
       </div>
       {showSubs&&(
@@ -5005,809 +4275,3 @@ function JournalEntries({entries,skills,quests,onAdd,onDelete,onAwardXp,onEditQu
   </>);
 }
 
-// ─── WEEKLY REVIEW MODAL ────────────────────────────────────────────────────
-
-// ═══════════════════════════════════════════════════════════════════════════
-// COMMUNITY TAB - Wave 2 Multiplayer
-// ═══════════════════════════════════════════════════════════════════════════
-function CommunityTab({userId,settings,skills,quests,meds,journal,streaks,xp,friends,myFriendCode,profiles,onPublishProfile,onAddFriend,onRemoveFriend,onRefresh,onEditSkillPublish,onEditQuestPublish,onSaveSettings,showToast}){
-  const L=settings.labels;
-  const [view,setView]=useState("board"); // board | profile | friends
-  const [loading,setLoading]=useState(false);
-  const [friendInput,setFriendInput]=useState("");
-  const [filterCat,setFilterCat]=useState("all");
-  const [filterFriends,setFilterFriends]=useState(false);
-  const [profilePublic,setProfilePublic]=useState(settings.profile.public||false);
-
-  const level=Math.floor(skills.reduce((a,s)=>a+(s.xp||0),0)/(settings.xp.globalPerLevel||6000))+1;
-  const friendIds=new Set(friends.map(f=>f.userId));
-
-  // compute badges for a profile
-  const getBadges=(profile)=>{
-    const badges=[];
-    // Immaculate: any skill with 7+ day streak
-    if(Object.values(profile.streaks||{}).some(s=>s.count>=7)) badges.push({id:"immaculate",icon:"◆",label:"Immaculate",tip:"7+ day streak on a skill"});
-    // Verified: has journal entries
-    if((profile.journalCount||0)>=5) badges.push({id:"verified",icon:"✦",label:"Chronicler",tip:"5+ journal entries"});
-    // Practitioner: 10+ practice sessions
-    if((profile.totalPractice||0)>=10) badges.push({id:"practitioner",icon:"◉",label:"Practitioner",tip:"10+ practice sessions"});
-    return badges;
-  };
-
-  const refresh=async()=>{
-    setLoading(true);
-    await onRefresh();
-    setLoading(false);
-  };
-
-  useEffect(()=>{ refresh(); },[]);
-
-  const togglePublic=async(val)=>{
-    setProfilePublic(val);
-    const next={...settings,profile:{...settings.profile,public:val}};
-    await onSaveSettings(next);
-    await onPublishProfile(next);
-    showToast(val?"Profile published":"Profile hidden");
-  };
-
-  const filteredProfiles=profiles.filter(p=>{
-    if(p.userId===userId) return false; // don't show self
-    if(filterFriends&&!friendIds.has(p.userId)) return false;
-    if(filterCat!=="all"&&!p.skills?.some(s=>s.category===filterCat)) return false;
-    return true;
-  });
-
-  // Build my published data preview
-  const myPubSkills=skills.filter(s=>s.published&&s.type!=="subskill");
-  const myPubSubskills=skills.filter(s=>s.published&&s.type==="subskill");
-  const myPubQuests=quests.filter(q=>q.published);
-  const [bulkLoading,setBulkLoading]=useState(false);
-
-  const bulkCategorize=async()=>{
-    const uncategorized=skills.filter(s=>!s.category||s.category==="other");
-    if(!uncategorized.length){showToast("All skills already categorized");return;}
-    setBulkLoading(true);
-    const catList=SKILL_CATEGORIES.map(c=>c.id).join(", ");
-    for(const sk of uncategorized){
-      try{
-        const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({max_tokens:20,
-            messages:[{role:"user",content:`Skill: "${sk.name}"${sk.intention?`. Intention: "${sk.intention}"`:""}.
-Assign to exactly one category from: ${catList}.
-Reply with ONLY the category id.`}]})});
-        const data=await res.json();
-        const txt=(data.choices?.[0]?.message?.content||data.content?.[0]?.text||"").trim().toLowerCase();
-        const valid=SKILL_CATEGORIES.find(c=>txt.includes(c.id));
-        if(valid) await onEditSkillPublish(sk.id,{category:valid.id});
-      }catch(e){}
-    }
-    setBulkLoading(false);
-    showToast(`Categorized ${uncategorized.length} skills`);
-  };
-
-  return (
-    <div style={{padding:"0 0 80px"}}>
-      {/* Sub-nav */}
-      <div style={{display:"flex",gap:4,padding:"12px 0 0",marginBottom:16}}>
-        {[["board","⬡ Board"],["profile","◈ My Profile"],["friends","◉ Friends"]].map(([id,lbl])=>(
-          <button key={id} onClick={()=>setView(id)}
-            style={{flex:1,padding:"7px 0",borderRadius:"var(--r)",border:`1px solid ${view===id?"var(--primary)":"var(--b1)"}`,background:view===id?"var(--primaryf)":"var(--s1)",color:view===id?"var(--primary)":"var(--tx2)",fontSize:10,fontFamily:"'DM Mono',monospace",letterSpacing:.5,cursor:"pointer"}}>
-            {lbl}
-          </button>
-        ))}
-      </div>
-
-      {/* ── BOARD VIEW ── */}
-      {view==="board"&&(<>
-        <div style={{display:"flex",gap:8,alignItems:"center",marginBottom:12}}>
-          <button onClick={refresh} disabled={loading} style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",color:"var(--tx2)",fontSize:10,padding:"5px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace"}}>
-            {loading?"◌":"↺"} Refresh
-          </button>
-          <label style={{display:"flex",alignItems:"center",gap:5,cursor:"pointer"}}>
-            <input type="checkbox" checked={filterFriends} onChange={e=>setFilterFriends(e.target.checked)} style={{accentColor:"var(--primary)"}}/>
-            <span style={{fontSize:10,color:"var(--tx2)"}}>Friends only</span>
-          </label>
-          <div style={{flex:1}}/>
-          <span style={{fontSize:10,color:"var(--tx3)",fontFamily:"'DM Mono',monospace"}}>{filteredProfiles.length} practitioners</span>
-        </div>
-
-        {/* Category filter */}
-        <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:14}}>
-          <button onClick={()=>setFilterCat("all")} style={{padding:"3px 8px",borderRadius:"var(--r)",border:`1px solid ${filterCat==="all"?"var(--primary)":"var(--b2)"}`,background:filterCat==="all"?"var(--primaryf)":"var(--s2)",color:filterCat==="all"?"var(--primary)":"var(--tx3)",fontSize:9,cursor:"pointer",fontFamily:"'DM Mono',monospace"}}>All</button>
-          {SKILL_CATEGORIES.map(cat=>(
-            <button key={cat.id} onClick={()=>setFilterCat(filterCat===cat.id?"all":cat.id)}
-              style={{padding:"3px 8px",borderRadius:"var(--r)",border:`1px solid ${filterCat===cat.id?"var(--primary)":"var(--b2)"}`,background:filterCat===cat.id?"var(--primaryf)":"var(--s2)",color:filterCat===cat.id?"var(--primary)":"var(--tx3)",fontSize:9,cursor:"pointer",fontFamily:"'DM Mono',monospace"}}>
-              {cat.icon} {cat.label}
-            </button>
-          ))}
-        </div>
-
-        {filteredProfiles.length===0?(
-          <div className="empty-state">
-            <div className="es-icon">⬡</div>
-            <div className="es-title">{loading?"Loading...":"No practitioners yet"}</div>
-            <div className="es-desc">Publish your profile and share your friend code to see others here. The community board shows skills, streaks, and practice consistency.</div>
-          </div>
-        ):(
-          filteredProfiles.map(profile=>(
-            <CommunityCard key={profile.userId} profile={profile} isFriend={friendIds.has(profile.userId)} badges={getBadges(profile)} filterCat={filterCat}/>
-          ))
-        )}
-      </>)}
-
-      {/* ── MY PROFILE VIEW ── */}
-      {view==="profile"&&(<>
-        <div className="fwrap" style={{marginBottom:14}}>
-          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,color:"var(--tx3)",marginBottom:10,textTransform:"uppercase"}}>Profile Visibility</div>
-          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:8,flexWrap:"wrap"}}>
-            <span style={{fontSize:13,color:"var(--tx)"}}>{settings.profile.name||"Anonymous"}</span>
-            <span style={{fontSize:9,fontFamily:"'DM Mono',monospace",color:"var(--tx3)",background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:3,padding:"2px 6px",cursor:"pointer"}}
-              title="Click to copy"
-              onClick={()=>{if(myFriendCode){navigator.clipboard?.writeText(myFriendCode);showToast("Code copied!");}}}>
-              CODE: {myFriendCode||"—"} ⧉
-            </span>
-            {getBadges({streaks,journalCount:journal.length,totalPractice:meds.length}).map(b=>(
-              <span key={b.id} title={b.tip} style={{fontSize:9,color:"var(--primary)",fontFamily:"'DM Mono',monospace"}}>{b.icon} {b.label}</span>
-            ))}
-          </div>
-          <label style={{display:"flex",alignItems:"center",gap:8,cursor:"pointer",marginBottom:12}}>
-            <input type="checkbox" checked={profilePublic} onChange={e=>togglePublic(e.target.checked)} style={{accentColor:"var(--primary)",width:14,height:14}}/>
-            <div>
-              <div style={{fontSize:12,color:"var(--tx)"}}>Public profile</div>
-              <div style={{fontSize:10,color:"var(--tx3)"}}>Visible on the community board. Unpublished skills and quests are always private.</div>
-            </div>
-          </label>
-          {!userId&&<div style={{fontSize:11,color:"var(--danger)",padding:"8px 0"}}>Sign in to publish your profile and connect with others.</div>}
-        </div>
-
-        {/* Published skills */}
-        {/* Bulk categorize */}
-        {skills.some(s=>!s.category||s.category==="other")&&(
-          <div style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",marginBottom:12}}>
-            <span style={{fontSize:11,color:"var(--tx2)",flex:1}}>{skills.filter(s=>!s.category||s.category==="other").length} skills uncategorized</span>
-            <button onClick={bulkCategorize} disabled={bulkLoading}
-              style={{background:"var(--primaryf)",border:"1px solid var(--primaryb)",borderRadius:"var(--r)",color:"var(--primary)",fontSize:10,padding:"4px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace"}}>
-              {bulkLoading?"◌ AI working...":"⟡ AI categorize all"}
-            </button>
-          </div>
-        )}
-
-        <div className="slbl">Published Skills ({myPubSkills.length})</div>
-        {myPubSkills.length===0?(
-          <div style={{fontSize:12,color:"var(--tx3)",padding:"8px 0 12px",fontStyle:"italic"}}>No skills published. Edit a skill to publish it to the community.</div>
-        ):(
-          myPubSkills.map(sk=>{
-            const cat=SKILL_CATEGORIES.find(c=>c.id===sk.category)||SKILL_CATEGORIES[7];
-            const lv=Math.floor((sk.xp||0)/(settings.xp.skillPerLevel||6000))+1;
-            const streak=streaks[sk.id]?.count||0;
-            return (
-              <div key={sk.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",marginBottom:6}}>
-                <span style={{fontSize:16}}>{sk.icon==="img"?<img src={sk.customImg} style={{width:18,height:18,borderRadius:3,objectFit:"cover"}}/>:sk.icon}</span>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:12,color:"var(--tx)"}}>{sk.name}</div>
-                  <div style={{fontSize:10,color:"var(--tx3)"}}>{cat.icon} {cat.label} · Lv{lv}{streak>0?` · ${streak}d streak`:""}</div>
-                  {sk.intention&&<div style={{fontSize:10,color:"var(--tx2)",fontStyle:"italic",marginTop:1}}>"{sk.intention}"</div>}
-                </div>
-                <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:3}}>
-                  <span style={{fontSize:9,color:sk.notesPublic?"var(--success)":"var(--tx3)",fontFamily:"'DM Mono',monospace"}}>{sk.notesPublic?"notes: on":"notes: off"}</span>
-                  <button className="delbtn" style={{fontSize:9}} onClick={()=>onEditSkillPublish(sk.id,{published:false})}>unpublish</button>
-                </div>
-              </div>
-            );
-          })
-        )}
-
-        {/* Published quests */}
-        {myPubSubskills.length>0&&<>
-          <div className="slbl" style={{marginTop:12}}>Published Subskills ({myPubSubskills.length})</div>
-          {myPubSubskills.map(sk=>{
-            const parents=(sk.parentIds||[]).map(pid=>skills.find(s=>s.id===pid)).filter(Boolean);
-            const cat=SKILL_CATEGORIES.find(c=>c.id===sk.category)||SKILL_CATEGORIES[7];
-            const lv=Math.floor((sk.xp||0)/(settings.xp.skillPerLevel||6000))+1;
-            return (
-              <div key={sk.id} style={{display:"flex",alignItems:"center",gap:8,padding:"7px 10px",background:"var(--bg)",border:"1px solid var(--b1)",borderRadius:"var(--r)",marginBottom:5,marginLeft:12,borderLeft:`2px solid var(--b2)`}}>
-                <span style={{fontSize:14}}>{sk.icon}</span>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:11,color:"var(--tx)"}}>{sk.name}</div>
-                  <div style={{fontSize:9,color:"var(--tx3)",fontFamily:"'DM Mono',monospace"}}>
-                    {cat.icon} {cat.label} · Lv{lv}
-                    {parents.length>0&&<> · {parents.map(p=>`${p.icon} ${p.name}`).join(", ")}</>}
-                  </div>
-                </div>
-                <button className="delbtn" style={{fontSize:9}} onClick={()=>onEditSkillPublish(sk.id,{published:false})}>unpublish</button>
-              </div>
-            );
-          })}
-        </>}
-        <div className="slbl" style={{marginTop:14}}>Published Quests ({myPubQuests.length})</div>
-        {myPubQuests.length===0?(
-          <div style={{fontSize:12,color:"var(--tx3)",padding:"8px 0 12px",fontStyle:"italic"}}>No quests published. Edit a quest to publish it.</div>
-        ):(
-          myPubQuests.map(q=>(
-            <div key={q.id} style={{display:"flex",alignItems:"center",gap:8,padding:"8px 10px",background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",marginBottom:6}}>
-              <span style={{width:8,height:8,borderRadius:"50%",background:q.color||"var(--primary)",flexShrink:0}}/>
-              <div style={{flex:1}}>
-                <div style={{fontSize:12,color:"var(--tx)"}}>{q.title}</div>
-                <div style={{fontSize:10,color:"var(--tx3)"}}>{q.type} quest</div>
-              </div>
-              <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:3}}>
-                <span style={{fontSize:9,color:q.notesPublic?"var(--success)":"var(--tx3)",fontFamily:"'DM Mono',monospace"}}>{q.notesPublic?"notes: on":"notes: off"}</span>
-                <button className="delbtn" style={{fontSize:9}} onClick={()=>onEditQuestPublish(q.id,{published:false})}>unpublish</button>
-              </div>
-            </div>
-          ))
-        )}
-
-        <div style={{marginTop:16,padding:"10px 12px",background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)"}}>
-          <div style={{fontSize:10,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",marginBottom:4}}>STATS VISIBLE WHEN PUBLISHED</div>
-          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:4}}>
-            {[["Level",level],["Total Practice",meds.length],["Journal Entries",journal.length],["Active Streaks",Object.values(streaks).filter(s=>s.count>0).length]].map(([lbl,val])=>(
-              <div key={lbl} style={{fontSize:10,color:"var(--tx2)"}}>{lbl}: <span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace"}}>{val}</span></div>
-            ))}
-          </div>
-        </div>
-      </>)}
-
-      {/* ── FRIENDS VIEW ── */}
-      {view==="friends"&&(<>
-        <div className="fwrap" style={{marginBottom:14}}>
-          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,color:"var(--tx3)",marginBottom:8,textTransform:"uppercase"}}>Add Friend</div>
-          <div style={{fontSize:11,color:"var(--tx2)",marginBottom:6}}>Your code: <span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",letterSpacing:2,cursor:"pointer",borderBottom:"1px dashed var(--primaryb)"}} title="Click to copy" onClick={()=>{if(myFriendCode){navigator.clipboard?.writeText(myFriendCode);showToast("Code copied!");} }}>{myFriendCode||"—"}</span> <span style={{fontSize:10,color:"var(--tx3)"}}>(tap to copy)</span></div>
-          <div style={{display:"flex",gap:6}}>
-            <input className="fi" placeholder="Enter friend's 6-digit code" value={friendInput} onChange={e=>setFriendInput(e.target.value.replace(/\D/g,"").slice(0,6))}
-              onKeyDown={e=>e.key==="Enter"&&onAddFriend(friendInput).then(()=>setFriendInput(""))}
-              style={{flex:1,letterSpacing:2,fontFamily:"'DM Mono',monospace"}}/>
-            <button className="fsbtn" style={{width:"auto",padding:"0 14px",margin:0}} onClick={()=>onAddFriend(friendInput).then(()=>setFriendInput(""))}>Add</button>
-          </div>
-        </div>
-
-        <div className="slbl">Friends ({friends.length})</div>
-        {friends.length===0?(
-          <div className="empty-state">
-            <div className="es-icon">◉</div>
-            <div className="es-title">No friends yet</div>
-            <div className="es-desc">Share your 6-digit code with others or enter theirs above. Friends can see each other on the board with the friends-only filter.</div>
-          </div>
-        ):(
-          friends.map(f=>{
-            const profile=profiles.find(p=>p.userId===f.userId);
-            return (
-              <div key={f.userId} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",marginBottom:8}}>
-                <div style={{width:32,height:32,borderRadius:"50%",background:"var(--primaryf)",border:"1px solid var(--primaryb)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,color:"var(--primary)",fontFamily:"'DM Mono',monospace",flexShrink:0}}>
-                  {(f.name||"?")[0]?.toUpperCase()}
-                </div>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:12,color:"var(--tx)"}}>{f.name||"Anonymous"}</div>
-                  {profile?(
-                    <div style={{fontSize:10,color:"var(--tx3)"}}>Lv{profile.level} · {profile.totalPractice} sessions · {profile.journalCount} journal</div>
-                  ):(
-                    <div style={{fontSize:10,color:"var(--tx3)"}}>Not published yet</div>
-                  )}
-                </div>
-                <button className="delbtn" onClick={()=>onRemoveFriend(f.userId)}>remove</button>
-              </div>
-            );
-          })
-        )}
-      </>)}
-    </div>
-  );
-}
-
-function CommunityCard({profile,isFriend,badges,filterCat}){
-  const [expanded,setExpanded]=useState(false);
-  const allProfileSkills=profile.skills||[];
-  const mainProfileSkills=allProfileSkills.filter(s=>s.type!=="subskill");
-  const subProfileSkills=allProfileSkills.filter(s=>s.type==="subskill");
-  const relevantSkills=(filterCat==="all"?mainProfileSkills:mainProfileSkills.filter(s=>s.category===filterCat));
-  const displaySkills=(relevantSkills||[]).slice(0,expanded?99:4);
-
-  return (
-    <div style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",marginBottom:10,overflow:"hidden"}}>
-      {/* Header */}
-      <div style={{padding:"10px 12px",cursor:"pointer",display:"flex",gap:10,alignItems:"center"}} onClick={()=>setExpanded(!expanded)}>
-        <div style={{width:36,height:36,borderRadius:"50%",background:"var(--primaryf)",border:"1px solid var(--primaryb)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:14,color:"var(--primary)",fontFamily:"'DM Mono',monospace",flexShrink:0}}>
-          {(profile.name||"?")[0]?.toUpperCase()}
-        </div>
-        <div style={{flex:1,minWidth:0}}>
-          <div style={{display:"flex",alignItems:"center",gap:6,marginBottom:2}}>
-            <span style={{fontSize:13,color:"var(--tx)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{profile.name||"Anonymous"}</span>
-            {isFriend&&<span style={{fontSize:8,color:"var(--secondary)",fontFamily:"'DM Mono',monospace",background:"var(--secondaryf)",border:"1px solid var(--secondaryb)",borderRadius:3,padding:"1px 4px",flexShrink:0}}>friend</span>}
-            {badges.map(b=><span key={b.id} title={b.tip} style={{fontSize:8,color:"var(--primary)",fontFamily:"'DM Mono',monospace",background:"var(--primaryf)",border:"1px solid var(--primaryb)",borderRadius:3,padding:"1px 4px",flexShrink:0}}>{b.icon} {b.label}</span>)}
-          </div>
-          <div style={{fontSize:10,color:"var(--tx3)",fontFamily:"'DM Mono',monospace"}}>
-            Lv{profile.level} · {profile.totalPractice} sessions · {profile.journalCount} journal
-          </div>
-        </div>
-        <span style={{fontSize:11,color:"var(--tx3)"}}>{expanded?"▲":"▼"}</span>
-      </div>
-
-      {/* Skill pills — always visible */}
-      {(relevantSkills||[]).length>0&&(
-        <div style={{padding:"0 12px 10px",display:"flex",flexWrap:"wrap",gap:4}}>
-          {displaySkills.map(sk=>{
-            const cat=SKILL_CATEGORIES.find(cc=>cc.id===sk.category)||SKILL_CATEGORIES[7];
-            return (
-              <div key={sk.id} style={{display:"flex",alignItems:"center",gap:4,padding:"3px 8px",background:"var(--s2)",border:`1px solid ${sk.color}44`,borderRadius:10,fontSize:9,fontFamily:"'DM Mono',monospace"}}>
-                <span style={{color:sk.color}}>{sk.icon==="img"?"◈":sk.icon}</span>
-                <span style={{color:"var(--tx2)"}}>{sk.name}</span>
-                <span style={{color:"var(--tx3)"}}>Lv{sk.level}</span>
-                {sk.streak>=3&&<span style={{color:sk.color}}>↑{sk.streak}d</span>}
-              </div>
-            );
-          })}
-          {!expanded&&(relevantSkills||[]).length>4&&<span style={{fontSize:9,color:"var(--tx3)",padding:"3px 0",cursor:"pointer"}} onClick={()=>setExpanded(true)}>+{(relevantSkills||[]).length-4} more</span>}
-        </div>
-      )}
-
-      {/* Expanded: radiant quests + intentions */}
-      {expanded&&(<>
-        {subProfileSkills.length>0&&(
-          <div style={{padding:"6px 12px 10px",borderTop:"1px solid var(--b1)"}}>
-            <div style={{fontSize:9,fontFamily:"'DM Mono',monospace",letterSpacing:1.5,color:"var(--tx3)",textTransform:"uppercase",marginBottom:6}}>Subskills</div>
-            <div style={{display:"flex",flexWrap:"wrap",gap:4}}>
-              {subProfileSkills.map(sk=>{
-                const parents=(sk.parentIds||[]).map(pid=>(relevantSkills||[]).find(s=>s.id===pid)).filter(Boolean);
-                return (
-                  <div key={sk.id} style={{display:"flex",alignItems:"center",gap:3,padding:"2px 7px",background:"var(--bg)",border:`1px solid ${sk.color}33`,borderRadius:10,fontSize:9,fontFamily:"'DM Mono',monospace"}}>
-                    <span style={{color:sk.color}}>{sk.icon==="img"?"◈":sk.icon}</span>
-                    <span style={{color:"var(--tx3)"}}>{sk.name}</span>
-                    {parents.length>0&&<span style={{color:"var(--tx3)",opacity:.6}}>↳{parents.map(p=>p.name).join(",")}</span>}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-        {(profile.radiantQuests||[]).length>0&&(
-          <div style={{padding:"8px 12px 10px",borderTop:"1px solid var(--b1)"}}>
-            <div style={{fontSize:9,fontFamily:"'DM Mono',monospace",letterSpacing:1.5,color:"var(--tx3)",textTransform:"uppercase",marginBottom:6}}>Radiant Practices</div>
-            {profile.radiantQuests.map(rq=>(
-              <div key={rq.id} style={{display:"flex",alignItems:"center",gap:8,padding:"5px 0",borderBottom:"1px solid var(--b1)"}}>
-                <span style={{width:6,height:6,borderRadius:"50%",background:rq.color||"var(--primary)",flexShrink:0}}/>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:11,color:"var(--tx)"}}>{rq.title}</div>
-                  {rq.intention&&<div style={{fontSize:10,color:"var(--tx3)",fontStyle:"italic"}}>"{rq.intention}"</div>}
-                  {rq.notesPublic&&rq.note&&<div style={{fontSize:10,color:"var(--tx2)",marginTop:2}}>{rq.note}</div>}
-                </div>
-                <span style={{fontSize:9,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",flexShrink:0}}>{rq.completions30}× / 30d</span>
-              </div>
-            ))}
-          </div>
-        )}
-        {(profile.skills||[]).filter(sk=>sk.intention).length>0&&(
-          <div style={{padding:"8px 12px 10px",borderTop:"1px solid var(--b1)"}}>
-            <div style={{fontSize:9,fontFamily:"'DM Mono',monospace",letterSpacing:1.5,color:"var(--tx3)",textTransform:"uppercase",marginBottom:6}}>Intentions</div>
-            {(profile.skills||[]).filter(sk=>sk.intention).map(sk=>(
-              <div key={sk.id} style={{fontSize:11,color:"var(--tx2)",padding:"3px 0",borderBottom:"1px solid var(--b1)"}}>
-                <span style={{color:"var(--tx3)"}}>{sk.name}: </span>"{sk.intention}"
-              </div>
-            ))}
-          </div>
-        )}
-      </>)}
-    </div>
-  );
-}
-
-function WeeklyReview({tasks,quests,skills,meds,xpLog,journal,settings,onClose,onNavigate,onAddTask}){
-  const L=settings.labels;
-  const [analysis,setAnalysis]=useState("");
-  const [loading,setLoading]=useState(false);
-  const [planStep,setPlanStep]=useState(false); // show planning step after review
-  const [planLoading,setPlanLoading]=useState(false);
-  const [planSuggestions,setPlanSuggestions]=useState([]); // [{questId,title,reason}]
-  const [planAccepted,setPlanAccepted]=useState(false);
-
-  const weekAgo=Date.now()-7*86400000;
-  const recentTasks=tasks.filter(t=>t.done&&t.created>weekAgo);
-  const recentQuests=quests.filter(q=>q.done&&q.created>weekAgo);
-  const recentMeds=meds.filter(m=>m.created>weekAgo);
-  const recentXp=(xpLog||[]).filter(e=>e.created>weekAgo).reduce((s,e)=>s+e.amt,0);
-  const activeStreaks=Object.entries(
-    skills.reduce((acc,sk)=>{acc[sk.id]={name:sk.name,count:0};return acc;},{})
-  );
-
-  const runReview=async()=>{
-    setLoading(true);
-    try{
-      const skPerLv=6000;
-      const practiceBySkill={};
-      recentMeds.forEach(m=>{
-        (m.skillIds||[m.skill]).filter(Boolean).forEach(sid=>{
-          practiceBySkill[sid]=(practiceBySkill[sid]||0)+(m.dur||0);
-        });
-      });
-      const skillContext=skills.filter(s=>s.type!=="subskill").map(s=>({
-        name:s.name, level:Math.floor((s.xp||0)/skPerLv)+1,
-        intention:s.intention||null,
-        minutesThisWeek:practiceBySkill[s.id]||0,
-      }));
-      // sessions with notes for quality signal
-      const sessionNotes=recentMeds.filter(m=>m.note&&m.note.length>10).map(m=>({
-        skill:skills.find(s=>(m.skillIds||[]).includes(s.id)||m.skill===s.id)?.name||"Unknown",
-        dur:m.dur, note:m.note.slice(0,120),
-        aiReason:m.aiReason||null
-      })).slice(0,6);
-      // streaks
-      const activeStreaks=Object.entries(xpLog&&xpLog.length?{}:{}).length; // basic
-      // week pattern
-      const dayActivity={};
-      recentMeds.forEach(m=>{
-        const d=new Date(m.created).toLocaleDateString("en",{weekday:"short"});
-        dayActivity[d]=(dayActivity[d]||0)+1;
-      });
-      const summary={
-        playerName:settings?.profile?.name||"Player",
-        tasksCompleted:recentTasks.length,
-        questsCompleted:recentQuests.length,
-        practiceSessionsLogged:recentMeds.length,
-        totalMinutesPracticed:recentMeds.reduce((s,m)=>s+(m.dur||0),0),
-        xpEarned:recentXp,
-        questsCompleted_titles:recentQuests.map(q=>q.title).slice(0,5),
-        radiantQuestsActive:quests.filter(q=>q.type==="radiant"&&!q.done).map(q=>q.title),
-        skills:skillContext,
-        sessionNotes,
-        dayActivity,
-        journalEntriesThisWeek:journal.filter(j=>j.created>weekAgo).length,
-      };
-      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          max_tokens:600,
-          messages:[
-            {role:"system",content:"You are a grounded, direct life coach. Be specific, personal, and honest — not just cheerleading. Acknowledge real struggles and patterns."},
-            {role:"user",content:`Weekly rewind for ${summary.playerName}.
-
-Week data:
-${JSON.stringify(summary,null,2)}
-
-Write a weekly rewind in exactly this structure:
-**⬡ WINS THIS WEEK**
-[2-3 specific things they actually did — reference real session notes, quest titles, skills if available]
-
-**◉ PATTERNS**
-[What does this week reveal about their habits? Be honest. What showed up consistently? What was avoided?]
-
-**◆ ONE FOCUS FOR NEXT WEEK**
-[One specific, concrete thing. Based on their intentions and where they fell short or can build momentum.]
-
-Keep it under 300 words. Be like a coach who read the actual notes, not a bot reciting stats.`}
-          ]
-        })
-      });
-      const data=await res.json();
-      const msg=(data.choices?.[0]?.message?.content||"Couldn't generate review. Try again.");
-      setAnalysis(msg);
-    }catch(e){ setAnalysis("Couldn't connect to advisor. Try again."); }
-    finally{ setLoading(false); }
-  };
-
-  const runPlan=async()=>{
-    setPlanLoading(true);
-    try{
-      const activeQ=quests.filter(q=>!q.done).map(q=>({id:q.id,title:q.title,type:q.type,skills:(q.skills||[]).map(id=>skills.find(s=>s.id===id)?.name).filter(Boolean)}));
-      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({
-          max_tokens:400,
-          messages:[
-            {role:"system",content:"You are a planning assistant. Reply ONLY with valid JSON array, no markdown, no explanation."},
-            {role:"user",content:`Based on this player's active quests, pick 3 to focus on next week. Prioritize momentum and skill variety.
-
-Active quests: ${JSON.stringify(activeQ)}
-Weekly review: ${analysis.slice(0,300)}
-
-Reply with JSON only: [{"questId":"id","title":"title","reason":"one sentence, 10 words max"}]`}
-          ]
-        })
-      });
-      const data=await res.json();
-      const txt=(data.choices?.[0]?.message?.content||"[]").replace(/```json|```/g,"").trim();
-      let parsed; try{parsed=JSON.parse(txt);}catch{parsed=[];}
-      setPlanSuggestions(parsed.slice(0,3));
-    }catch(e){setPlanSuggestions([]);}
-    setPlanLoading(false);
-  };
-
-  const acceptPlan=()=>{
-    planSuggestions.forEach(s=>{
-      if(onAddTask) onAddTask({title:s.title,period:"daily",skill:null,xpVal:20,questId:s.questId,timeBlock:null,priority:"med"});
-    });
-    setPlanAccepted(true);
-  };
-
-  return (
-    <div style={{position:"fixed",inset:0,background:"#000a",display:"flex",alignItems:"center",justifyContent:"center",zIndex:200,padding:16}}>
-      <div className="review-modal">
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
-          <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,letterSpacing:2,color:"var(--primary)"}}>
-            {planStep?"◆ PLAN NEXT WEEK":"WEEKLY REVIEW"}
-          </div>
-          <div style={{display:"flex",gap:8,alignItems:"center"}}>
-            {planStep&&<button className="delbtn" style={{fontSize:9,color:"var(--tx3)"}} onClick={()=>setPlanStep(false)}>← Back</button>}
-            <button className="delbtn" onClick={onClose}>✕</button>
-          </div>
-        </div>
-
-        {!planStep?(<>
-          <div className="review-section">
-            <div className="slbl" style={{margin:"0 0 10px"}}>This Week's Stats</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8}}>
-              {[
-                ["Tasks done",recentTasks.length],
-                ["Quests completed",recentQuests.length],
-                ["Practice sessions",recentMeds.length],
-                ["XP earned",recentXp],
-                ["Minutes practiced",recentMeds.reduce((s,m)=>s+(m.dur||0),0)],
-              ].map(([label,val])=>(
-                <div key={label} style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"10px 14px"}}>
-                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:16,color:"var(--primary)"}}>{val}</div>
-                  <div style={{fontSize:11,color:"var(--tx2)",marginTop:2}}>{label}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {recentQuests.length>0&&(
-            <div className="review-section">
-              <div className="slbl" style={{margin:"0 0 8px"}}>Quests Completed</div>
-              {recentQuests.map(q=>(
-                <div key={q.id} style={{fontSize:12,color:"var(--tx2)",padding:"3px 0",borderBottom:"1px solid var(--b1)"}}>◆ {q.title}</div>
-              ))}
-            </div>
-          )}
-
-          <div className="review-section">
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
-              <div className="slbl" style={{margin:0}}>AI Analysis</div>
-              {!analysis&&<button className="fsbtn" style={{width:"auto",padding:"6px 14px",margin:0,fontSize:10}} onClick={runReview} disabled={loading}>
-                {loading?"◌ Analysing...":"Get Review"}
-              </button>}
-            </div>
-            {analysis?(
-              <div style={{fontSize:13,color:"var(--tx)",lineHeight:1.8,whiteSpace:"pre-wrap"}}>{analysis}</div>
-            ):(
-              <div style={{fontSize:12,color:"var(--tx3)",fontStyle:"italic"}}>Click "Get Review" for an AI-powered analysis of your week.</div>
-            )}
-          </div>
-
-          <div style={{display:"flex",gap:8,flexWrap:"wrap",marginTop:8}}>
-            {analysis&&<button className="fsbtn primary" style={{width:"auto",padding:"6px 14px",margin:0,fontSize:10}} onClick={()=>{setPlanStep(true);if(!planSuggestions.length)runPlan();}}>◆ Plan Next Week →</button>}
-            {[["quests","Quests"],["skills","Skills"],["journal","Log"],["advisor","Advisor"]].map(([t,label])=>(
-              <button key={t} className="fsbtn" style={{width:"auto",padding:"6px 14px",margin:0,fontSize:10,background:"var(--s2)",color:"var(--tx2)",border:"1px solid var(--b2)"}}
-                onClick={()=>onNavigate(t)}>
-                {label}
-              </button>
-            ))}
-          </div>
-        </>):(<>
-          <div style={{fontSize:12,color:"var(--tx3)",marginBottom:16,lineHeight:1.6}}>Based on your week, here are 3 quests to focus on. Accept to pin them as today's tasks.</div>
-          {planLoading&&<div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"var(--tx3)",letterSpacing:1,padding:"20px 0",textAlign:"center"}}>◌ Thinking...</div>}
-          {!planLoading&&planSuggestions.map((s,i)=>(
-            <div key={i} style={{background:"var(--primaryf)",border:"1px solid var(--primaryb)",borderRadius:"var(--r)",padding:"10px 14px",marginBottom:6}}>
-              <div style={{fontSize:13,color:"var(--tx)",marginBottom:3}}>◆ {s.title}</div>
-              <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)",letterSpacing:.5}}>{s.reason}</div>
-            </div>
-          ))}
-          {!planLoading&&planSuggestions.length===0&&<div style={{fontSize:12,color:"var(--tx3)",fontStyle:"italic",padding:"12px 0"}}>No active quests to suggest. Add some quests first.</div>}
-          {!planLoading&&planSuggestions.length>0&&(
-            planAccepted
-              ?<div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"var(--success)",letterSpacing:1,padding:"12px 0",textAlign:"center"}}>✓ Added to today's planner</div>
-              :<div style={{display:"flex",gap:8,marginTop:8}}>
-                <button className="fsbtn primary" style={{margin:0}} onClick={acceptPlan}>◆ Add to Planner</button>
-                <button className="fsbtn" style={{width:"auto",padding:"8px 14px",margin:0,color:"var(--tx3)",background:"none"}} onClick={()=>onNavigate("planner")}>Open Planner</button>
-              </div>
-          )}
-        </>)}
-      </div>
-    </div>
-  );
-}
-
-// ─── FOCUS TIMER ─────────────────────────────────────────────────────────────
-function FocusTimer({elapsed,skillName,onStop,onCancel}){
-  const mins=String(Math.floor(elapsed/60)).padStart(2,"0");
-  const secs=String(elapsed%60).padStart(2,"0");
-  return (
-    <div className="timer-overlay">
-      <div className="timer-skill">◉ {skillName||"Focus Session"}</div>
-      <div className="timer-face">{mins}:{secs}</div>
-      <div style={{color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,marginBottom:48}}>IN SESSION</div>
-      <button className="timer-btn timer-stop" onClick={onStop}>■ Stop & Log</button>
-      <button className="timer-btn timer-cancel" onClick={onCancel}>Cancel</button>
-    </div>
-  );
-}
-
-// ─── PROFILE MODAL ────────────────────────────────────────────────────────────
-function ProfileModal({settings,xp,level,prog,skills,streaks,meds,quests,journal,userId,myFriendCode,friends,profiles,onSignIn,onSignOut,onClose,onPublish,onAddFriend,onRemoveFriend,onRefresh,onSaveSettings,showToast}){
-  const L=settings.labels;
-  const [view,setView]=useState("profile"); // profile | community | friends | share
-  const [friendInput,setFriendInput]=useState("");
-  const [loading,setLoading]=useState(false);
-  const [profilePublic,setProfilePublic]=useState(settings.profile.public||false);
-  const perLv=settings.xp.globalPerLevel||6000;
-
-  const getBadges=()=>{
-    const badges=[];
-    if(Object.values(streaks).some(s=>s.count>=7)) badges.push({icon:"◆",label:"Immaculate",tip:"7-day streak"});
-    if((journal||[]).length>=5) badges.push({icon:"✦",label:"Chronicler",tip:"5+ journal entries"});
-    if((meds||[]).length>=10) badges.push({icon:"◉",label:"Practitioner",tip:"10+ sessions"});
-    if(quests.filter(q=>q.done).length>=5) badges.push({icon:"◈",label:"Seeker",tip:"5+ quests completed"});
-    return badges;
-  };
-  const badges=getBadges();
-  const topSkills=skills.filter(s=>s.type!=="subskill").sort((a,b)=>(b.xp||0)-(a.xp||0)).slice(0,3);
-  const totalMins=meds.reduce((a,m)=>a+(m.dur||0),0);
-  const doneQuests=quests.filter(q=>q.done).length;
-
-  const togglePublic=async(val)=>{
-    setProfilePublic(val);
-    const next={...settings,profile:{...settings.profile,public:val}};
-    await onSaveSettings(next);
-    await onPublish(next);
-    showToast(val?"Profile published":"Profile hidden");
-  };
-
-  const addFriend=async()=>{
-    if(!friendInput.trim()) return;
-    setLoading(true);
-    await onAddFriend(friendInput.trim().toUpperCase());
-    setFriendInput(""); setLoading(false);
-    showToast("Friend added");
-  };
-
-  return (
-    <div className="profile-modal" onClick={onClose}>
-      <div className="profile-modal-bg"/>
-      <div className="profile-sheet" onClick={e=>e.stopPropagation()}>
-        <div className="profile-pill"/>
-        {/* Sub-nav */}
-        <div className="stabs" style={{marginBottom:18}}>
-          {[["profile","◎ Profile"],["community","⬡ Community"],["share","◈ Share"]].map(([id,lbl])=>(
-            <button key={id} className={`stab ${view===id?"on":""}`} onClick={()=>setView(id)}>{lbl}</button>
-          ))}
-        </div>
-
-        {view==="profile"&&<>
-          <div style={{display:"flex",alignItems:"center",gap:14,marginBottom:16}}>
-            <div className="profile-avatar">{settings.profile.name?settings.profile.name[0].toUpperCase():"?"}</div>
-            <div style={{flex:1}}>
-              <div className="profile-name">{settings.profile.name||"Adventurer"}</div>
-              <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--primary)",letterSpacing:1}}>{L.levelName} {level}</div>
-              <div className="profile-xp-bar"><div className="profile-xp-fill" style={{width:`${prog}%`}}/></div>
-              <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)"}}>{xp % perLv} / {perLv} {L.xpName}</div>
-            </div>
-          </div>
-          {badges.length>0&&<div className="badge-row" style={{marginBottom:14}}>{badges.map(b=><div key={b.label} className="badge" title={b.tip}>{b.icon} {b.label}</div>)}</div>}
-          <div className="stats" style={{marginBottom:16}}>
-            <div className="sbox"><div className="snum">{doneQuests}</div><div className="slb2">Quests</div></div>
-            <div className="sbox"><div className="snum">{totalMins>=60?Math.round(totalMins/60)+"h":totalMins+"m"}</div><div className="slb2">Practiced</div></div>
-            <div className="sbox"><div className="snum">{(journal||[]).length}</div><div className="slb2">Entries</div></div>
-          </div>
-          {topSkills.length>0&&<>
-            <div className="slbl" style={{marginBottom:8}}>Top Skills</div>
-            {topSkills.map(s=>{const lv=Math.floor((s.xp||0)/(settings.xp.skillPerLevel||6000))+1;return(
-              <div key={s.id} style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
-                <span style={{fontSize:14}}>{s.icon}</span>
-                <div style={{flex:1}}>
-                  <div style={{fontSize:12,color:"var(--tx)",marginBottom:2}}>{s.name}</div>
-                  <div style={{height:2,background:"var(--b1)",borderRadius:1,overflow:"hidden"}}><div style={{height:"100%",width:`${skillProg(s.xp||0,settings.xp.skillPerLevel||6000)}%`,background:s.color,borderRadius:1}}/></div>
-                </div>
-                <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)"}}>Lv {lv}</span>
-              </div>
-            );})}
-          </>}
-          <div style={{height:12}}/>
-          {/* Account */}
-          <div className="slbl" style={{marginBottom:8}}>Account</div>
-          {userId
-            ?<div style={{display:"flex",gap:8,marginBottom:8}}>
-              <div style={{flex:1,fontSize:11,color:"var(--tx2)",fontFamily:"'DM Mono',monospace",padding:"8px 0"}}>Signed in · syncing</div>
-              <button className="fsbtn" style={{width:"auto",padding:"6px 14px",margin:0}} onClick={onSignOut}>Sign Out</button>
-            </div>
-            :<button className="fsbtn" style={{marginBottom:8}} onClick={onSignIn}>Sign In / Create Account</button>
-          }
-          {myFriendCode&&<div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)",marginBottom:8}}>Friend code: <span style={{color:"var(--tx2)",letterSpacing:2}}>{myFriendCode}</span></div>}
-          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",padding:"8px 0",borderTop:"1px solid var(--b1)",marginTop:4}}>
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)"}}>Public profile</div>
-            <button className={`tog ${profilePublic?"on":""}`} onClick={()=>togglePublic(!profilePublic)}><div className="tog-knob"/></button>
-          </div>
-          {/* Add friend */}
-          {userId&&<div style={{marginTop:12}}>
-            <div className="slbl" style={{marginBottom:6}}>Add Friend</div>
-            <div style={{display:"flex",gap:6}}>
-              <input className="fi" placeholder="Friend code..." value={friendInput} onChange={e=>setFriendInput(e.target.value.toUpperCase())} style={{letterSpacing:2,fontFamily:"'DM Mono',monospace"}}/>
-              <button className="fsbtn" style={{width:"auto",padding:"7px 12px",margin:0}} onClick={addFriend} disabled={loading}>Add</button>
-            </div>
-          </div>}
-        </>}
-
-        {view==="community"&&<>
-          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-            <div className="slbl" style={{margin:0}}>Community Board</div>
-            <button className="fsbtn" style={{width:"auto",padding:"5px 12px",margin:0,fontSize:8}} onClick={async()=>{setLoading(true);await onRefresh();setLoading(false);}}>
-              {loading?"…":"↺ Refresh"}
-            </button>
-          </div>
-          {(profiles||[]).filter(p=>p.public!==false).slice(0,10).map(p=>(
-            <div key={p.userId} style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"10px 12px",marginBottom:6}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4}}>
-                <div style={{fontSize:13}}>{p.name||"Adventurer"}</div>
-                <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--primary)"}}>Lv {Math.floor((p.xp||0)/(settings.xp.globalPerLevel||6000))+1}</div>
-              </div>
-              {p.skills?.slice(0,3).map(s=><span key={s.id} className="ctag" style={{marginRight:4}}>{s.icon} {s.name}</span>)}
-            </div>
-          ))}
-          {(profiles||[]).length===0&&<div className="empty">No profiles yet</div>}
-        </>}
-
-        {view==="share"&&<ShareCard settings={settings} level={level} xp={xp} skills={skills} streaks={streaks} meds={meds} quests={quests} journal={journal} showToast={showToast}/>}
-      </div>
-    </div>
-  );
-}
-
-// ─── SHARE CARD ───────────────────────────────────────────────────────────────
-function ShareCard({settings,level,xp,skills,streaks,meds,quests,journal,showToast}){
-  const L=settings.labels;
-  const topSkills=skills.filter(s=>s.type!=="subskill").sort((a,b)=>(b.xp||0)-(a.xp||0)).slice(0,3);
-  const topStreak=Math.max(0,...Object.values(streaks).map(s=>s.count||0));
-  const totalMins=meds.reduce((a,m)=>a+(m.dur||0),0);
-  const doneQuests=quests.filter(q=>q.done).length;
-  const cardRef=useRef();
-
-  const copyText=()=>{
-    const lines=[
-      `${settings.profile.name||"Adventurer"} — ${L.levelName} ${level}`,
-      `◆ ${doneQuests} quests completed`,
-      `◉ ${totalMins>=60?Math.round(totalMins/60)+"h practiced":totalMins+"min practiced"}`,
-      `✦ ${topStreak} day streak`,
-      topSkills.length?`Top skills: ${topSkills.map(s=>s.name).join(", ")}`:"",
-    ].filter(Boolean).join("\n");
-    navigator.clipboard?.writeText(lines).then(()=>showToast("Copied to clipboard!"));
-  };
-
-  return (<>
-    <div className="share-card" ref={cardRef}>
-      <div className="share-level">{level}</div>
-      <div className="share-name">{settings.profile.name||"Adventurer"}</div>
-      <div className="share-stats">
-        <div className="share-stat"><div className="share-stat-num">{doneQuests}</div><div className="share-stat-lbl">Quests</div></div>
-        <div className="share-stat"><div className="share-stat-num">{totalMins>=60?Math.round(totalMins/60)+"h":totalMins+"m"}</div><div className="share-stat-lbl">Practice</div></div>
-        <div className="share-stat"><div className="share-stat-num">{topStreak}</div><div className="share-stat-lbl">Streak</div></div>
-      </div>
-      {topSkills.length>0&&<div style={{display:"flex",justifyContent:"center",gap:8,flexWrap:"wrap"}}>
-        {topSkills.map(s=><span key={s.id} style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)",border:"1px solid var(--b2)",borderRadius:20,padding:"2px 8px"}}>{s.icon} {s.name}</span>)}
-      </div>}
-    </div>
-    <button className="fsbtn" onClick={copyText}>◈ Copy Progress to Clipboard</button>
-  </>);
-}
-
-// ─── CUSTOM IMAGES SUPPORT ──────────────────────────────────────────────────
-// CustomImageUploader: reusable component for uploading images as base64
-function CustomImageUploader({label,value,onChange,aspectHint}){
-  const ref=useRef();
-  const handleFile=e=>{
-    const file=e.target.files?.[0]; if(!file) return;
-    if(file.size>2*1024*1024){ alert("Image too large. Please use an image under 2MB."); return; }
-    const reader=new FileReader();
-    reader.onload=ev=>onChange(ev.target.result);
-    reader.readAsDataURL(file);
-    e.target.value="";
-  };
-  return (
-    <div style={{marginBottom:12}}>
-      <div style={{fontSize:11,color:"var(--tx2)",marginBottom:6}}>{label}{aspectHint&&<span style={{color:"var(--tx3)",marginLeft:6}}>({aspectHint})</span>}</div>
-      <div style={{display:"flex",gap:8,alignItems:"center"}}>
-        {value&&<img src={value} alt={label} style={{width:48,height:48,objectFit:"cover",borderRadius:"var(--r)",border:"1px solid var(--b1)"}}/>}
-        <button className="fsbtn" style={{width:"auto",padding:"6px 14px",margin:0,fontSize:10,background:"var(--s2)",color:"var(--tx2)",border:"1px solid var(--b2)"}}
-          onClick={()=>ref.current?.click()}>
-          {value?"Change image":"Upload image"}
-        </button>
-        {value&&<button className="delbtn" style={{fontSize:9}} onClick={()=>onChange(null)}>Remove</button>}
-        <input ref={ref} type="file" accept="image/png,image/jpeg,image/gif,image/webp" style={{display:"none"}} onChange={handleFile}/>
-      </div>
-    </div>
-  );
-}
