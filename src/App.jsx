@@ -139,6 +139,9 @@ export default function App(){
     generateBriefing(tasks,quests,skills,streaks,settings);
     checkStreakRescue(skills,streaks,tasks);
   },[loaded]); // only on initial load
+
+  useEffect(()=>{
+    // Check for existing session on mount
     (async()=>{
       const s=await getSession();
       if(s){ setSession(s); setUserId(s.user.id); await loadData(s.user.id); }
