@@ -855,7 +855,228 @@ function ProfileSetup({onComplete}){
   );
 }
 
-function QuestPlannerCard({quest,skills,onToggle,radiantAvailable,radiantCooldownLabel,locked,prereqTitle}){
+// ── AI DAY PLANNER ────────────────────────────────────────────────────────────
+function DailyAIPlan({quests,tasks,skills,onAddTask}){
+  const {settings}=useSettings();
+  const [loading,setLoading]=useState(false);
+  const [plan,setPlan]=useState(null); // [{title,timeBlock,skillId,xpVal,reason}]
+  const [vibe,setVibe]=useState("grind");
+  const VIBES=[{id:"grind",label:"⚔ Grind",sub:"Main quests, high XP"},{id:"focus",label:"◉ Focus",sub:"Skill practice, depth"},{id:"light",label:"◇ Light",sub:"Quick wins, admin"},{id:"open",label:"✦ Open",sub:"AI decides"}];
+
+  const generate=async()=>{
+    setLoading(true); setPlan(null);
+    const skPerLv=settings.xp?.skillPerLevel||6000;
+    const activeQ=quests.filter(q=>!q.done).slice(0,12).map(q=>`${q.type}: "${q.title}" [skills:${(q.skills||[]).map(id=>skills.find(s=>s.id===id)?.name).filter(Boolean).join(",")||"none"}]`).join("; ");
+    const topSkills=skills.filter(s=>s.type!=="subskill").sort((a,b)=>(b.xp||0)-(a.xp||0)).slice(0,6).map(s=>`${s.name} Lv${Math.floor((s.xp||0)/skPerLv)+1}`).join(", ");
+    const vibeGuide={grind:"Prioritize main quests and high-XP tasks. Fill morning with hardest items.",focus:"Prioritize skills needing practice. Mix spiritual/ritual radiant quests with skill work. Aim for depth over volume.",light:"Pick quick-win side quests and admin tasks. Nothing requiring deep focus. Under 30 min each.",open:"Balance across all types based on priority and what's been neglected."};
+    try{
+      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({max_tokens:500,messages:[{role:"user",content:`Plan today. Vibe: ${vibe} — ${vibeGuide[vibe]}
+
+Active quests: ${activeQ||"none"}
+Skills: ${topSkills||"none"}
+Today's existing tasks: ${tasks.filter(t=>t.period==="daily"&&!t.done).length} already scheduled
+
+Generate 4-6 specific tasks for today, assigned to morning/afternoon/evening or flexible.
+Reply ONLY with JSON array, no markdown:
+[{"title":"task","timeBlock":"morning|afternoon|evening|null","skillId":"${skills.slice(0,3).map(s=>s.id).join('|')||"null"} or null","xpVal":number,"reason":"5 words why"}]
+Use actual skill IDs from this list: ${skills.map(s=>s.id+"="+s.name).join(",")||"none"}`}]})});
+      const data=await res.json();
+      const raw=(data.choices?.[0]?.message?.content||"").replace(/```json|```/g,"").trim();
+      const m=raw.match(/\[[\s\S]*\]/);
+      if(m) setPlan(JSON.parse(m[0]));
+    }catch{}
+    setLoading(false);
+  };
+
+  const accept=(item)=>{
+    onAddTask({title:item.title,period:"daily",skill:item.skillId||null,xpVal:item.xpVal||20,questId:null,timeBlock:item.timeBlock||null,priority:"med"});
+    setPlan(prev=>prev.filter(p=>p!==item));
+  };
+  const acceptAll=()=>{ plan.forEach(accept); };
+
+  return(
+    <div style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"12px 14px",marginBottom:12}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,color:"var(--primary)",textTransform:"uppercase"}}>⟡ AI Day Plan</div>
+        {plan&&<button onClick={acceptAll} style={{background:"var(--primaryf)",border:"1px solid var(--primaryb)",borderRadius:3,padding:"3px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--primary)",letterSpacing:.5}}>+ Add all</button>}
+      </div>
+      <div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>
+        {VIBES.map(v=><button key={v.id} onClick={()=>setVibe(v.id)}
+          style={{padding:"4px 10px",borderRadius:4,border:`1px solid ${vibe===v.id?"var(--primary)":"var(--b2)"}`,background:vibe===v.id?"var(--primaryf)":"var(--bg)",color:vibe===v.id?"var(--primary)":"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,cursor:"pointer"}}>
+          {v.label}
+        </button>)}
+      </div>
+      {!plan&&<button onClick={generate} disabled={loading} style={{background:"none",border:"1px solid var(--b2)",borderRadius:4,padding:"7px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:loading?"var(--tx3)":"var(--tx2)",width:"100%",transition:"all .15s"}}>
+        {loading?"⟡ Planning…":"⟡ Plan my day"}
+      </button>}
+      {plan&&plan.map((item,i)=>(
+        <div key={i} style={{display:"flex",alignItems:"flex-start",gap:8,padding:"7px 0",borderBottom:"1px solid var(--b1)"}}>
+          <div style={{flex:1,minWidth:0}}>
+            <div style={{fontSize:12,color:"var(--tx)",marginBottom:2}}>{item.title}</div>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",display:"flex",gap:8}}>
+              {item.timeBlock&&<span>{item.timeBlock}</span>}
+              {item.skillId&&<span>{skills.find(s=>s.id===item.skillId)?.name}</span>}
+              <span>+{item.xpVal} XP</span>
+              {item.reason&&<span style={{fontStyle:"italic"}}>— {item.reason}</span>}
+            </div>
+          </div>
+          <button onClick={()=>accept(item)} style={{background:"var(--primaryf)",border:"1px solid var(--primaryb)",borderRadius:3,padding:"3px 8px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--primary)",flexShrink:0}}>+</button>
+          <button onClick={()=>setPlan(prev=>prev.filter(p=>p!==item))} style={{background:"none",border:"none",cursor:"pointer",color:"var(--tx3)",fontSize:11,padding:"2px 2px",flexShrink:0}}>✕</button>
+        </div>
+      ))}
+      {plan&&plan.length===0&&<div style={{fontSize:11,color:"var(--success)",fontFamily:"'DM Mono',monospace",padding:"4px 0"}}>✓ All tasks added</div>}
+    </div>
+  );
+}
+
+// ── AI WEEK PLANNER ───────────────────────────────────────────────────────────
+function WeeklyAIPlan({quests,tasks,skills,weekDays,onAddTask}){
+  const {settings}=useSettings();
+  const [loading,setLoading]=useState(false);
+  const [plan,setPlan]=useState(null);
+  const [open,setOpen]=useState(false);
+  const DAYS=["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+
+  const generate=async()=>{
+    setLoading(true); setPlan(null);
+    const skPerLv=settings.xp?.skillPerLevel||6000;
+    const activeQ=quests.filter(q=>!q.done).slice(0,10).map(q=>`[${q.type}] "${q.title}"`).join("; ");
+    const topSkills=skills.filter(s=>s.type!=="subskill").sort((a,b)=>(b.xp||0)-(a.xp||0)).slice(0,5).map(s=>`${s.name} Lv${Math.floor((s.xp||0)/skPerLv)+1}`).join(", ");
+    try{
+      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({max_tokens:700,messages:[{role:"user",content:`Plan this week. Distribute tasks across 7 days (Mon-Sun index 0-6).
+
+Active quests: ${activeQ||"none"}
+Skills: ${topSkills||"none"}
+
+Generate 1-2 tasks per day, spread across the week. Focus on realistic distribution — don't pile everything on Monday.
+Reply ONLY with JSON array:
+[{"title":"task","dayIndex":0,"skillId":"id or null","xpVal":number}]
+Available skill IDs: ${skills.map(s=>s.id+"="+s.name).join(",")||"none"}`}]})});
+      const data=await res.json();
+      const raw=(data.choices?.[0]?.message?.content||"").replace(/```json|```/g,"").trim();
+      const m=raw.match(/\[[\s\S]*\]/);
+      if(m) setPlan(JSON.parse(m[0]));
+    }catch{}
+    setLoading(false);
+  };
+
+  const accept=(item)=>{
+    const targetDay=weekDays[item.dayIndex||0]||weekDays[0];
+    onAddTask({title:item.title,period:"daily",skill:item.skillId||null,xpVal:item.xpVal||20,questId:null,timeBlock:null,priority:"med",dayKey:dayKey(targetDay)});
+    setPlan(prev=>prev.filter(p=>p!==item));
+  };
+
+  if(!open) return(
+    <button onClick={()=>setOpen(true)} style={{display:"flex",alignItems:"center",gap:6,background:"none",border:"1px dashed var(--b2)",borderRadius:"var(--r)",padding:"8px 14px",cursor:"pointer",color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:.8,width:"100%",marginBottom:10,transition:"all .15s"}}>
+      <span>⟡</span> AI plan this week
+    </button>
+  );
+
+  return(
+    <div style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"12px 14px",marginBottom:12}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,color:"var(--primary)",textTransform:"uppercase"}}>⟡ AI Week Plan</div>
+        <button onClick={()=>setOpen(false)} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:12}}>✕</button>
+      </div>
+      {!plan&&<button onClick={generate} disabled={loading} style={{background:"none",border:"1px solid var(--b2)",borderRadius:4,padding:"7px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:loading?"var(--tx3)":"var(--tx2)",width:"100%"}}>
+        {loading?"⟡ Planning…":"⟡ Generate week plan"}
+      </button>}
+      {plan&&<>
+        {[0,1,2,3,4,5,6].map(di=>{
+          const dayItems=plan.filter(p=>p.dayIndex===di);
+          if(!dayItems.length) return null;
+          return(<div key={di} style={{marginBottom:8}}>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",letterSpacing:1,marginBottom:4}}>{DAYS[di]} {weekDays[di]?.getDate()}</div>
+            {dayItems.map((item,j)=>(
+              <div key={j} style={{display:"flex",alignItems:"center",gap:8,padding:"4px 0",borderBottom:"1px solid var(--b1)"}}>
+                <div style={{flex:1,fontSize:12,color:"var(--tx)"}}>{item.title}</div>
+                <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)"}}>{item.skillId?skills.find(s=>s.id===item.skillId)?.name:""} +{item.xpVal}</div>
+                <button onClick={()=>accept(item)} style={{background:"var(--primaryf)",border:"1px solid var(--primaryb)",borderRadius:3,padding:"2px 8px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--primary)",flexShrink:0}}>+</button>
+                <button onClick={()=>setPlan(prev=>prev.filter(p=>p!==item))} style={{background:"none",border:"none",cursor:"pointer",color:"var(--tx3)",fontSize:11,padding:"2px"}}>✕</button>
+              </div>
+            ))}
+          </div>);
+        })}
+        {plan.length===0&&<div style={{fontSize:11,color:"var(--success)",fontFamily:"'DM Mono',monospace"}}>✓ All tasks added</div>}
+      </>}
+    </div>
+  );
+}
+
+// ── AI MONTH PLANNER ──────────────────────────────────────────────────────────
+function MonthlyAIPlan({quests,tasks,skills,onAddTask}){
+  const {settings}=useSettings();
+  const [loading,setLoading]=useState(false);
+  const [plan,setPlan]=useState(null);
+  const [open,setOpen]=useState(false);
+
+  const generate=async()=>{
+    setLoading(true); setPlan(null);
+    const skPerLv=settings.xp?.skillPerLevel||6000;
+    const mainQ=quests.filter(q=>!q.done&&q.type==="main").slice(0,8).map(q=>`"${q.title}"`).join(", ");
+    const topSkills=skills.filter(s=>s.type!=="subskill").sort((a,b)=>(b.xp||0)-(a.xp||0)).slice(0,5).map(s=>`${s.name} Lv${Math.floor((s.xp||0)/skPerLv)+1}`).join(", ");
+    const month=new Date().toLocaleString("en-US",{month:"long",year:"numeric"});
+    try{
+      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({max_tokens:600,messages:[{role:"user",content:`Plan ${month}. Create 6-10 monthly milestones or goals derived from the active quests.
+
+Main quests: ${mainQ||"none"}
+Skills: ${topSkills||"none"}
+
+Each item should be a concrete, achievable milestone for this month — not vague.
+Reply ONLY with JSON array:
+[{"title":"milestone","skillId":"id or null","xpVal":number,"note":"why this month"}]
+Skill IDs: ${skills.map(s=>s.id+"="+s.name).join(",")||"none"}`}]})});
+      const data=await res.json();
+      const raw=(data.choices?.[0]?.message?.content||"").replace(/```json|```/g,"").trim();
+      const m=raw.match(/\[[\s\S]*\]/);
+      if(m) setPlan(JSON.parse(m[0]));
+    }catch{}
+    setLoading(false);
+  };
+
+  const accept=(item)=>{
+    onAddTask({title:item.title,period:"monthly",skill:item.skillId||null,xpVal:item.xpVal||100,questId:null,timeBlock:null,priority:"med"});
+    setPlan(prev=>prev.filter(p=>p!==item));
+  };
+
+  if(!open) return(
+    <button onClick={()=>setOpen(true)} style={{display:"flex",alignItems:"center",gap:6,background:"none",border:"1px dashed var(--b2)",borderRadius:"var(--r)",padding:"8px 14px",cursor:"pointer",color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:.8,width:"100%",marginBottom:10,transition:"all .15s"}}>
+      <span>⟡</span> AI plan this month
+    </button>
+  );
+
+  return(
+    <div style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"12px 14px",marginBottom:12}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,color:"var(--primary)",textTransform:"uppercase"}}>⟡ AI Month Plan</div>
+        <button onClick={()=>setOpen(false)} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:12}}>✕</button>
+      </div>
+      {!plan&&<button onClick={generate} disabled={loading} style={{background:"none",border:"1px solid var(--b2)",borderRadius:4,padding:"7px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:loading?"var(--tx3)":"var(--tx2)",width:"100%"}}>
+        {loading?"⟡ Planning…":"⟡ Generate month milestones"}
+      </button>}
+      {plan&&<>
+        {plan.map((item,i)=>(
+          <div key={i} style={{display:"flex",alignItems:"flex-start",gap:8,padding:"7px 0",borderBottom:"1px solid var(--b1)"}}>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:12,color:"var(--tx)",marginBottom:2}}>{item.title}</div>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",display:"flex",gap:8}}>
+                {item.skillId&&<span>{skills.find(s=>s.id===item.skillId)?.name}</span>}
+                <span>+{item.xpVal} XP</span>
+                {item.note&&<span style={{fontStyle:"italic"}}>— {item.note}</span>}
+              </div>
+            </div>
+            <button onClick={()=>accept(item)} style={{background:"var(--primaryf)",border:"1px solid var(--primaryb)",borderRadius:3,padding:"2px 8px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--primary)",flexShrink:0}}>+</button>
+            <button onClick={()=>setPlan(prev=>prev.filter(p=>p!==item))} style={{background:"none",border:"none",cursor:"pointer",color:"var(--tx3)",fontSize:11,padding:"2px"}}>✕</button>
+          </div>
+        ))}
+        {plan.length===0&&<div style={{fontSize:11,color:"var(--success)",fontFamily:"'DM Mono',monospace"}}>✓ All milestones added</div>}
+        <button onClick={generate} style={{marginTop:8,background:"none",border:"1px solid var(--b2)",borderRadius:4,padding:"5px 12px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)"}}>↺ Regenerate</button>
+      </>}
+    </div>
+  );
+}
+
+function QuestPlannerCard({quest,skills,onToggle,radiantAvailable,radiantCooldownLabel,locked,prereqTitle,onOpenBreakdown}){
   const {settings}=useSettings(); const L=settings.labels;
   const qSkills=(quest.skills||[]).map(id=>skills.find(s=>s.id===id)).filter(Boolean);
   const isRadiant=quest.type==="radiant";
@@ -1118,15 +1339,21 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
         </div>
       </>}
 
-      <Block id="morning" label="🌅 Morning" items={byBlock("morning")}/>
-      <Block id="afternoon" label="☀️ Afternoon" items={byBlock("afternoon")}/>
-      <Block id="evening" label="🌙 Evening" items={byBlock("evening")}/>
-      <Block id="flexible" label="◈ Flexible" items={flexible}/>
-
       {todayQuests.length>0&&<>
         <div className="slbl" style={{marginBottom:6}}>◆ Due today</div>
-        {todayQuests.map(q=>{const prereq=(quests||[]).find(p=>p.id===q.unlocksAfter);const locked=prereq&&!prereq.done;return <QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} locked={locked} prereqTitle={prereq?.title}/>;})}
+        {todayQuests.map(q=>{const prereq=(quests||[]).find(p=>p.id===q.unlocksAfter);const locked=prereq&&!prereq.done;return <QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} locked={locked} prereqTitle={prereq?.title} onOpenBreakdown={onOpenBreakdown}/>;})}
       </>}
+
+      <Block id="morning"   label="🌅 Morning"   items={byBlock("morning")}/>
+      <Block id="afternoon" label="☀️ Afternoon" items={byBlock("afternoon")}/>
+      <Block id="evening"   label="🌙 Evening"   items={byBlock("evening")}/>
+
+      {/* AI day planner — shown when blocks are empty to encourage use */}
+      {byBlock("morning").length===0&&byBlock("afternoon").length===0&&byBlock("evening").length===0&&(
+        <DailyAIPlan quests={quests} tasks={allTasks} skills={skills} onAddTask={onAddTask}/>
+      )}
+
+      <Block id="flexible" label="◈ Flexible / Unscheduled" items={[...tasks.filter(t=>!t.done&&!t.timeBlock).sort(sortByPrio),...availableRadiant]}/>
 
       {doneTasks.length>0&&<><div className="gap"/><div className="slbl">{L.done}</div>
         <div className="clist">{doneTasks.map(t=><TaskCard key={t.id} task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/>)}</div>
@@ -1148,7 +1375,27 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
     </>}
 
     {period==="weekly"&&<>
-      {/* Weekly radiant + undated quests panel */}
+      {/* Week calendar overview at top */}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:3,marginBottom:14}}>
+        {weekDays.map((d,i)=>{
+          const dk=dayKey(d), isToday=dk===dayKey(new Date());
+          const dayTasks=allTasks.filter(t=>(t.dayKey===dk||(t.period==="weekly"&&(t.recurrenceDays||[]).includes(i)))&&!t.done);
+          const dayQ=questsForDay(dk).filter(q=>!q.done);
+          const total=dayTasks.length+dayQ.length;
+          return(
+            <div key={i} style={{background:isToday?"var(--primaryf)":"var(--s1)",border:`1px solid ${isToday?"var(--primaryb)":"var(--b1)"}`,borderRadius:"var(--r)",padding:"6px 4px",textAlign:"center",cursor:"default"}}>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:isToday?"var(--primary)":"var(--tx3)",letterSpacing:.5,marginBottom:3}}>{["Mo","Tu","We","Th","Fr","Sa","Su"][i]}</div>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:11,color:isToday?"var(--primary)":"var(--tx)",fontWeight:isToday?"bold":"normal"}}>{d.getDate()}</div>
+              {total>0&&<div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",marginTop:2}}>{total} item{total>1?"s":""}</div>}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* AI week planner */}
+      <WeeklyAIPlan quests={quests} tasks={allTasks} skills={skills} weekDays={weekDays} onAddTask={onAddTask}/>
+
+      {/* Radiant + undated quests */}
       {(()=>{
         const radiantQ=(quests||[]).filter(q=>q.type==="radiant"&&!q.done);
         const undatedQ=(quests||[]).filter(q=>!q.done&&q.type!=="radiant"&&!q.due);
@@ -1170,7 +1417,8 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
           </div>
         );
       })()}
-      {/* Weekly add form */}
+
+      {/* Global weekly add + per-day sections */}
       {showSubForm?(
         <div className="fwrap" style={{marginBottom:10}}>
           <div className="frow"><input className="fi full" autoFocus placeholder="Weekly recurring task..." value={subF.title} onChange={e=>setSubF(v=>({...v,title:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submitSub()}/></div>
@@ -1194,13 +1442,19 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
           <button className="fsbtn" onClick={submitSub}>Add recurring task</button>
         </div>
       ):<button className="addbtn" style={{marginBottom:10}} onClick={()=>setShowSubForm(true)}><span>+</span> Add recurring task</button>}
+
       {weekDays.map((d,i)=>{
         const dk=dayKey(d), isToday=dk===dayKey(new Date()), dayIdx=i;
         const dt=[...new Map([...allTasks.filter(t=>t.dayKey===dk),...allTasks.filter(t=>t.period==="weekly"&&(t.recurrenceDays||[]).includes(dayIdx))].map(t=>[t.id,t])).values()];
         const dq=questsForDay(dk);
         return (
           <div key={i} className="wk-day" onDragOver={e=>{e.preventDefault();e.currentTarget.style.outline="1px dashed var(--primaryb)";}} onDragLeave={e=>{e.currentTarget.style.outline="none";}} onDrop={e=>{e.currentTarget.style.outline="none";handleDrop(e,dk);}}>
-            <div className={`wk-day-lbl ${isToday?"today":""}`}>{["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][i]} {d.getDate()}{isToday?" · today":""}</div>
+            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+              <div className={`wk-day-lbl ${isToday?"today":""}`} style={{marginBottom:0}}>{["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][i]} {d.getDate()}{isToday?" · today":""}</div>
+              <button onClick={()=>onAddTask({title:"",period:"daily",skill:null,xpVal:20,questId:null,timeBlock:null,priority:"med",dayKey:dk})}
+                style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:14,padding:"0 4px",lineHeight:1,fontFamily:"'DM Mono',monospace"}}
+                title={`Add task to ${["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][i]}`}>+</button>
+            </div>
             {dt.length===0&&dq.length===0?<div style={{fontSize:12,color:"var(--tx3)",paddingLeft:2}}>—</div>:<>
               {dq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>)}
               <div className="clist">{dt.map(t=><div key={t.id} draggable onDragStart={e=>handleDragStart(e,t.id)} style={{cursor:"grab"}}><TaskCard task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/></div>)}</div>
@@ -1264,6 +1518,8 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
             <button className="fsbtn" onClick={submitSub}>Add monthly task</button>
           </div>
         ):<button className="addbtn" style={{marginBottom:10}} onClick={()=>setShowSubForm(true)}><span>+</span> Add monthly task</button>}
+        {/* AI month planner */}
+        <MonthlyAIPlan quests={quests} tasks={allTasks} skills={skills} onAddTask={onAddTask}/>
         {mq.length>0&&<><div className="slbl" style={{marginBottom:6}}>◆ Quests this month</div>{mq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>)}</>}
         {tasks.length>0&&<>
           <div className="slbl" style={{marginBottom:8,marginTop:12}}>◎ Monthly Tasks</div>
