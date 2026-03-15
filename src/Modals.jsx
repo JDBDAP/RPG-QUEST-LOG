@@ -616,14 +616,6 @@ Reply with JSON only: [{"questId":"id","title":"title","reason":"one sentence, 1
   );
 }
 
-              </div>
-          )}
-        </>)}
-      </div>
-    </div>
-  );
-}
-
 // ─── STREAK RESCUE BANNER ─────────────────────────────────────────────────────
 export function StreakRescueBanner({rescue,onDismiss,onLog}){
   return (
