@@ -20,13 +20,45 @@ export function getWeekDays(){
 }
 
 // ── QUEST / RADIANT HELPERS ───────────────────────────────────────────────────
+// Returns true if a radiant quest is available to complete right now
 export function radiantAvailable(q){
   if(q.type!=="radiant") return false;
-  if(!q.lastDone) return true;
-  const cd=q.cooldown??60*60*1000;
-  return Date.now()-q.lastDone>=cd;
+  const freq=q.frequency||"cooldown";
+  if(freq==="cooldown"){
+    if(!q.lastDone) return true;
+    const cd=q.cooldown??60*60*1000;
+    return Date.now()-q.lastDone>=cd;
+  }
+  // Frequency-based: check if scheduled today and not yet done today
+  const todayStr=new Date().toISOString().split("T")[0];
+  if(q.lastDone){
+    const lastDate=new Date(q.lastDone).toISOString().split("T")[0];
+    if(lastDate===todayStr) return false; // already done today
+  }
+  return radiantDueToday(q);
 }
+
+// Returns true if this radiant is scheduled for today
+export function radiantDueToday(q){
+  const freq=q.frequency||"cooldown";
+  if(freq==="cooldown") return true; // cooldown-based always show
+  const dow=(new Date().getDay()+6)%7; // 0=Mon
+  if(freq==="daily") return true;
+  if(freq==="weekdays") return dow<5;
+  if(freq==="weekends") return dow>=5;
+  if(freq==="custom") return (q.frequencyDays||[]).includes(dow);
+  return true;
+}
+
 export function radiantCooldownLabel(q){
+  const freq=q.frequency||"cooldown";
+  if(freq!=="cooldown"){
+    if(!radiantDueToday(q)) return "not today";
+    if(!q.lastDone) return "";
+    const todayStr=new Date().toISOString().split("T")[0];
+    const lastDate=new Date(q.lastDone).toISOString().split("T")[0];
+    return lastDate===todayStr?"done today":"";
+  }
   if(!q.lastDone) return "";
   const cd=q.cooldown??60*60*1000;
   const rem=cd-(Date.now()-q.lastDone);
@@ -120,13 +152,16 @@ export async function sset(k,v){
   try{ localStorage.setItem(k,JSON.stringify(v)); }catch{}
 }
 // Write to localStorage (offline cache) + Supabase if logged in
-export async function dbSet(k,v,userId){
-  await sset(k,v);
+export async function dbSet(k, v, userId, onWrite){
+  await sset(k, v);
   if(userId){
     try{
       const col=KEY_MAP[k];
-      if(col) await saveField(userId,col,v);
-    }catch(e){ console.warn("dbSet supabase error",e); }
+      if(col){
+        onWrite?.(); // stamp localWriteTs before the async write
+        await saveField(userId, col, v);
+      }
+    }catch(e){ console.warn("dbSet supabase error", e); }
   }
 }
 

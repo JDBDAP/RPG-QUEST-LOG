@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import AuthScreen from "./AuthScreen";
-import { supabase, getSession, onAuthChange, signOut, loadUserData, saveField, migrateLocalStorage } from "./supabase";
+import { supabase, getSession, onAuthChange, signOut, loadUserData, saveField, migrateLocalStorage, subscribeToChanges, KEY_MAP } from "./supabase";
 
 // ── MODULE IMPORTS (replaces ~850 lines of inline constants/utils/CSS) ────────
 import {
@@ -8,13 +8,14 @@ import {
   DEFAULT_SETTINGS, DEFAULT_SKILLS, DEFAULT_PRACTICE_TYPES,
   THEME_PRESETS, PALETTES, SKILL_ICONS, SKILL_ICONS_EXTRA,
   SKILL_CATEGORIES, SKILL_COLORS, SKILL_PRESETS, SKILL_MILESTONES,
-  TAB_EXPLAINERS, PERIODS, WDAY_LABELS, TIME_BLOCKS, COOLDOWN_OPTIONS, KEY_MAP,
+  TAB_EXPLAINERS, PERIODS, WDAY_LABELS, TIME_BLOCKS, COOLDOWN_OPTIONS,
+  RADIANT_FREQ_OPTIONS, KEY_MAP,
 } from "./constants";
 
 import {
   uid, skillLv, skillProg, fmtDate, todayLabel, monthLabel,
   dayKey, todayKey, getWeekDays,
-  radiantAvailable, radiantCooldownLabel,
+  radiantAvailable, radiantCooldownLabel, radiantDueToday,
   getMultiplier, updateStreak, computedTabTitle, deepMerge,
   genFriendCode, communitySet, communityGet, communityList, communityDelete,
   sget, sset, dbSet,
@@ -33,15 +34,29 @@ import {
 
 // ── SHARED AI FETCH HELPER ────────────────────────────────────────────────────
 // Wraps /api/chat, throws a readable error if Groq returns an error response
-async function aiCall(payload){
-  const res=await fetch("/api/chat",{
-    method:"POST",
-    headers:{"Content-Type":"application/json"},
-    body:JSON.stringify(payload),
-  });
-  const data=await res.json();
-  if(data?.error) throw new Error(data.error.message||`API error ${res.status}`);
-  return data;
+async function aiCall(payload, retries=2){
+  let lastErr;
+  for(let i=0;i<=retries;i++){
+    if(i>0) await new Promise(r=>setTimeout(r,600*i)); // 0, 600ms, 1200ms
+    try{
+      const res=await fetch("/api/chat",{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify(payload),
+      });
+      const data=await res.json();
+      if(data?.error){
+        // Rate limit — worth retrying
+        if(res.status===429&&i<retries){ lastErr=data.error.message; continue; }
+        throw new Error(data.error.message||`API error ${res.status}`);
+      }
+      return data;
+    }catch(e){
+      lastErr=e.message;
+      if(i<retries) continue;
+    }
+  }
+  throw new Error(lastErr||"AI connection failed");
 }
 
 export default function App(){
@@ -85,10 +100,12 @@ export default function App(){
   const [streakRescue,setStreakRescue]=useState(null); // {skillId, skillName, streak, suggestion}
   const [showBreakdown,setShowBreakdown]=useState(null); // questId to break down
   const [showSkillGap,setShowSkillGap]=useState(false);
-  const [showMorningRitual,setShowMorningRitual]=useState(false); // morning planning overlay
-  const [dayGrades,setDayGrades]=useState({}); // {[dateStr]: {output,practice,body,mind,note}}
-  const [inlineNote,setInlineNote]=useState(null); // {questId, questTitle} for post-completion note
+  const [showMorningRitual,setShowMorningRitual]=useState(false);
+  const [dayGrades,setDayGrades]=useState({});
+  const [inlineNote,setInlineNote]=useState(null);
+  const [habits,setHabits]=useState([]);
   const toastRef=useRef(null);
+  const localWriteTs=useRef(0); // timestamp of last local write — used to ignore our own realtime echoes
 
   // Load data from Supabase if logged in, otherwise localStorage
   const loadData=async(uid)=>{
@@ -127,6 +144,7 @@ export default function App(){
     const am=await sget("cx_aimem");   if(am) setAiMemory(am);
     const al=await sget("cx_advisor"); if(al) setAdvisorLog(al);
     const dg=await sget("cx_grades");  if(dg) setDayGrades(dg);
+    const hb=await sget("cx_habits");  if(hb) setHabits(hb);
     setLoaded(true);
   };
 
@@ -147,35 +165,39 @@ export default function App(){
     if(db.seen_tabs)      setSeenTabs(db.seen_tabs);
     if(db.journal)        setJournal(db.journal);
     if(db.xp_log)         setXpLog(db.xp_log);
+    if(db.habits)         setHabits(db.habits);
+    if(db.day_grades)     setDayGrades(db.day_grades);
+    if(db.ai_memory)      setAiMemory(db.ai_memory);
+    if(db.advisor_log)    setAdvisorLog(db.advisor_log);
     setLoaded(true);
   };
+
+  // Stamp localWriteTs on every write so we can ignore our own realtime echoes
+  const stampWrite=()=>{ localWriteTs.current=Date.now(); };
 
   // Trigger AI features after data is loaded
   useEffect(()=>{
     if(!loaded||!skills.length) return;
     generateBriefing(tasks,quests,skills,streaks,settings);
     checkStreakRescue(skills,streaks,tasks);
-    // Show morning ritual if first open today and setup done
     if(settings.profile.setup){
       const todayStr=new Date().toDateString();
       const lastRitual=localStorage.getItem("cx_last_ritual");
       if(lastRitual!==todayStr) setShowMorningRitual(true);
     }
-  },[loaded]); // only on initial load
+  },[loaded]);
 
   const saveDayGrades=async(grades)=>{
     setDayGrades(grades);
-    await dbSet("cx_grades",grades,userId);
+    await dbSet("cx_grades",grades,userId,stampWrite);
   };
 
   useEffect(()=>{
-    // Check for existing session on mount
     (async()=>{
       const s=await getSession();
       if(s){ setSession(s); setUserId(s.user.id); await loadData(s.user.id); }
       else { await loadData(null); }
     })();
-    // Listen for auth changes (login/logout from another tab etc)
     const unsub=onAuthChange(async s=>{
       if(s){ setSession(s); setUserId(s.user.id); setMyFriendCode(genFriendCode(s.user.id)); setShowAuth(false); await loadData(s.user.id); }
       else { setSession(null); setUserId(null); }
@@ -183,7 +205,39 @@ export default function App(){
     return unsub;
   },[]);
 
-  const saveSettings=async s=>{setSettings(s);await dbSet("cx_settings",s,userId);};
+  // Realtime sync — subscribe when we have a userId
+  useEffect(()=>{
+    if(!userId) return;
+    const unsub=subscribeToChanges(userId,(row, serverTs)=>{
+      // Ignore if this is an echo of our own write (within 5 seconds)
+      const serverMs=serverTs?new Date(serverTs).getTime():0;
+      if(serverMs<=localWriteTs.current+5000) return;
+
+      // Apply changed fields — only update state, don't write back to Supabase
+      const COL_MAP={
+        tasks:setTasks, quests:setQuests, skills:setSkills,
+        meds:setMeds, practice_types:setPracticeTypes,
+        streaks:setStreaks, journal:setJournal, xp_log:setXpLog,
+        habits:setHabits, day_grades:setDayGrades,
+        ai_memory:setAiMemory, advisor_log:setAdvisorLog,
+      };
+      Object.entries(COL_MAP).forEach(([col,setter])=>{
+        if(row[col]!=null) setter(row[col]);
+      });
+      if(row.xp!=null) setXp(row.xp);
+      if(row.settings){
+        const merged=deepMerge(DEFAULT_SETTINGS,row.settings);
+        setSettings(merged);
+      }
+      // Also update localStorage so offline fallback is fresh
+      Object.entries(KEY_MAP).forEach(([lsKey,col])=>{
+        if(row[col]!=null) try{ localStorage.setItem(lsKey,JSON.stringify(row[col])); }catch{}
+      });
+    });
+    return unsub;
+  },[userId]);
+
+  const saveSettings=async s=>{setSettings(s);await dbSet("cx_settings",s,userId,stampWrite);};
   const handleSignOut=async()=>{
     await signOut();
     setSession(null); setUserId(null);
@@ -282,7 +336,7 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
     setTab(id);
     if(!seenTabs[id]&&TAB_EXPLAINERS[id]){
       const next={...seenTabs,[id]:true};
-      setSeenTabs(next); await dbSet("cx_seen",next,userId);
+      setSeenTabs(next); await dbSet("cx_seen",next,userId,stampWrite);
       setExplainer(TAB_EXPLAINERS[id]);
     }
   };
@@ -311,7 +365,7 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
     const streak=skillId?(curStreaks[skillId]||{count:0}):{count:0};
     const multiplier=getMultiplier(streak.count);
     const amt=Math.round(baseAmt*multiplier);
-    const nx=curXp+amt; setXp(nx); await dbSet("cx_xp",nx,userId);
+    const nx=curXp+amt; setXp(nx); await dbSet("cx_xp",nx,userId,stampWrite);
     setXpFlash(true); setTimeout(()=>setXpFlash(false),500);
     let leveledUp=null, skillMilestone=null, newSkills=curSkills;
     if(skillId){
@@ -324,22 +378,51 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
         }
         return {...s,xp:newXp};
       });
-      setSkills(newSkills); await dbSet("cx_skills",newSkills,userId);
+      setSkills(newSkills); await dbSet("cx_skills",newSkills,userId,stampWrite);
     }
     const sk=curSkills.find(s=>s.id===skillId);
     await saveXpLog({id:uid(),amt,label:label||"Task",skill:sk?.name||null,skillId:skillId||null,questId:questId||null,multiplier,created:Date.now()});
     return {amt,multiplier,leveledUp,newSkills,milestone:skillMilestone};
   },[settings.xp.skillPerLevel]);
 
-  const saveT=useCallback(async t=>{setTasks(t);await dbSet("cx_tasks",t,userId);},[userId]);
-  const saveQ=useCallback(async q=>{setQuests(q);await dbSet("cx_quests",q,userId);},[userId]);
-  const saveM=useCallback(async m=>{setMeds(m);await dbSet("cx_meds",m,userId);},[userId]);
-  const savePT=useCallback(async t=>{setPracticeTypes(t);await dbSet("cx_ptypes",t,userId);},[userId]);
+  const saveT=useCallback(async t=>{setTasks(t);await dbSet("cx_tasks",t,userId,stampWrite);},[userId]);
+  const saveQ=useCallback(async q=>{setQuests(q);await dbSet("cx_quests",q,userId,stampWrite);},[userId]);
+  const saveM=useCallback(async m=>{setMeds(m);await dbSet("cx_meds",m,userId,stampWrite);},[userId]);
+  const savePT=useCallback(async t=>{setPracticeTypes(t);await dbSet("cx_ptypes",t,userId,stampWrite);},[userId]);
+  const saveHabits=useCallback(async h=>{setHabits(h);await dbSet("cx_habits",h,userId,stampWrite);},[userId]);
+
+  const addHabit=async d=>saveHabits([...habits,{id:uid(),name:d.name,icon:d.icon||"◎",color:d.color||"#7c9ef8",skillId:d.skillId||null,xpVal:d.xpVal||10,frequency:d.frequency||"daily",frequencyDays:d.frequencyDays||[],completions:{},note:d.note||"",archived:false,created:Date.now()}]);
+  const editHabit=async(id,updates)=>saveHabits(habits.map(h=>h.id===id?{...h,...updates}:h));
+  const deleteHabit=async id=>saveHabits(habits.filter(h=>h.id!==id));
+
+  const logHabit=async(habitId,dateStr)=>{
+    const habit=habits.find(h=>h.id===habitId); if(!habit) return;
+    const already=habit.completions?.[dateStr];
+    if(already){
+      // toggle off
+      const next={...habit.completions}; delete next[dateStr];
+      await saveHabits(habits.map(h=>h.id===habitId?{...h,completions:next}:h));
+      return;
+    }
+    // Mark complete
+    const next={...habit.completions,[dateStr]:Date.now()};
+    await saveHabits(habits.map(h=>h.id===habitId?{...h,completions:next}:h));
+    // Award XP if skill linked
+    if(habit.skillId&&habit.xpVal){
+      const {leveledUp,milestone:ms}=await award(habit.xpVal,habit.skillId,xp,skills,streaks,`◎ ${habit.name}`);
+      spawnFloat(habit.xpVal);
+      showToast(`+${habit.xpVal} ${L.xpName} · ${habit.name}`);
+      if(leveledUp&&!ms) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);
+      if(ms) setMilestone(ms);
+    } else {
+      showToast(`◎ ${habit.name} done`);
+    }
+  };
   const addPracticeType=useCallback(async d=>{await savePT([...practiceTypes,{id:uid(),label:d.label,icon:d.icon||"◎"}]);},[savePT,practiceTypes]);
   const deletePracticeType=useCallback(async id=>{await savePT(practiceTypes.filter(t=>t.id!==id));},[savePT,practiceTypes]);
-  const saveS=useCallback(async s=>{setSkills(s);await dbSet("cx_skills",s,userId);},[userId]);
-  const reorderSkills=useCallback(async newOrder=>{setSkills(newOrder);await dbSet("cx_skills",newOrder,userId);},[userId]);
-  const saveStr=useCallback(async s=>{setStreaks(s);await dbSet("cx_streaks",s,userId);},[userId]);
+  const saveS=useCallback(async s=>{setSkills(s);await dbSet("cx_skills",s,userId,stampWrite);},[userId]);
+  const reorderSkills=useCallback(async newOrder=>{setSkills(newOrder);await dbSet("cx_skills",newOrder,userId,stampWrite);},[userId]);
+  const saveStr=useCallback(async s=>{setStreaks(s);await dbSet("cx_streaks",s,userId,stampWrite);},[userId]);
 
   // Wire up quick-add quest event from PlannerTab — use ref to avoid stale closure
   const addQuestRef=useRef(null);
@@ -450,7 +533,7 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
 
   const addJournalEntry=async(entry)=>{
     const next=[{id:uid(),...entry,created:Date.now()},...journal];
-    setJournal(next); await dbSet("cx_journal",next,userId);
+    setJournal(next); await dbSet("cx_journal",next,userId,stampWrite);
     showToast("Entry saved");
   };
   const awardFromJournal=async(skillAwards)=>{
@@ -474,8 +557,8 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
       });
       await saveXpLog({id:uid(),amt,label:`✦ ${a.reason||"Journal"}`,skill:curSkills.find(s=>s.id===a.skillId)?.name||null,multiplier:mult,created:Date.now()});
     }
-    setXp(curXp); await dbSet("cx_xp",curXp,userId);
-    setSkills(curSkills); await dbSet("cx_skills",curSkills,userId);
+    setXp(curXp); await dbSet("cx_xp",curXp,userId,stampWrite);
+    setSkills(curSkills); await dbSet("cx_skills",curSkills,userId,stampWrite);
     await saveStr(newStr);
     // Float the total awarded
     const totalAmt=skillAwards.reduce((s,a)=>s+(a.xp||0),0);
@@ -490,7 +573,7 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
   };
   const deleteJournalEntry=async(id)=>{
     const next=journal.filter(e=>e.id!==id);
-    setJournal(next); await dbSet("cx_journal",next,userId);
+    setJournal(next); await dbSet("cx_journal",next,userId,stampWrite);
   };
 
   // ── COMMUNITY FUNCTIONS ──────────────────────────────────────────────────
@@ -605,7 +688,7 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
     const streak=primary?(newStr[primary]||{count:0}):{count:0};
     const multiplier=getMultiplier(streak.count);
     const amt=Math.round(d.baseXp*multiplier);
-    const nx=xp+amt; setXp(nx); await dbSet("cx_xp",nx,userId);
+    const nx=xp+amt; setXp(nx); await dbSet("cx_xp",nx,userId,stampWrite);
     for(const sid of skillIds){
       curSkillsState=curSkillsState.map(s=>{
         if(s.id!==sid) return s;
@@ -614,7 +697,7 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
         return {...s,xp:newXp};
       });
     }
-    if(skillIds.length){setSkills(curSkillsState);await dbSet("cx_skills",curSkillsState,userId);}
+    if(skillIds.length){setSkills(curSkillsState);await dbSet("cx_skills",curSkillsState,userId,stampWrite);}
     const sk=curSkillsState.find(s=>s.id===primary);
     const subLabel=subIds.map(sid=>skills.find(s=>s.id===sid)?.name).filter(Boolean).join(", ");
     await saveXpLog({id:uid(),amt,label:d.type+(subLabel?` · ${subLabel}`:""),skill:sk?.name||null,multiplier,created:Date.now()});
@@ -630,7 +713,7 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
       const header=`${questPfx}[${d.type}${skLabel?` · ${skLabel}`:""}${d.dur?` · ${d.dur}min`:""}]`;
       const body=d.note&&d.note.trim()?`${header}\n${d.note.trim()}`:header;
       const next=[{id:uid(),text:body,img:null,source:"practice",questId:d.questId||null,created:sessionCreated},...journal];
-      setJournal(next); await dbSet("cx_journal",next,userId);
+      setJournal(next); await dbSet("cx_journal",next,userId,stampWrite);
     }
     let msg=`+${amt} ${L.xpName}`;
     if(multiplier>1) msg+=` · ${streak.count}d ${L.comboName||"Combo"} ${multiplier}×`;
@@ -667,6 +750,7 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
       if(data.skills){setSkills(data.skills);await dbSet("cx_skills",data.skills,userId);}
       if(data.meds){setMeds(data.meds);await dbSet("cx_meds",data.meds,userId);}
       if(data.practiceTypes){setPracticeTypes(data.practiceTypes);await dbSet("cx_ptypes",data.practiceTypes,userId);}
+      if(data.habits){setHabits(data.habits);await dbSet("cx_habits",data.habits,userId);}
       if(data.xp!=null){setXp(data.xp);await dbSet("cx_xp",data.xp,userId);}
       if(data.streaks){setStreaks(data.streaks);await dbSet("cx_streaks",data.streaks,userId);}
       showToast("Data imported");
@@ -675,7 +759,7 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
   };
 
   const exportData=(fmt="json")=>{
-    const payload={tasks,quests,skills,meds,practiceTypes,xp,streaks,settings,exported:new Date().toISOString()};
+    const payload={tasks,quests,skills,meds,practiceTypes,habits,xp,streaks,settings,exported:new Date().toISOString()};
     if(fmt==="xml"){
       const toXml=(obj,tag)=>{
         if(Array.isArray(obj)) return obj.map(item=>toXml(item,"item")).join("");
@@ -798,7 +882,7 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
             {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest} onReorder={q=>saveQ(q)} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={qid=>setShowBreakdown(qid)}/>}
             {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill} onReorder={reorderSkills} onLink={linkSubskill} onStartFocus={startFocus} onAward={async(skillId,amt,reason)=>{const {leveledUp,milestone:ms}=await award(amt,skillId,xp,skills,streaks,`✦ ${reason}`);spawnFloat(amt);showToast(`+${amt} ${settings.labels.xpName}`);if(leveledUp&&!ms)setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);if(ms)setMilestone(ms);}} onOpenSkillGap={()=>setShowSkillGap(true)}/>}
             {tab==="journal"  && <JournalTab entries={journal} skills={skills} quests={quests} meds={meds} practiceTypes={practiceTypes} streaks={streaks} pending={pendingPractice} subTab={journalSubTab} onSubTab={setJournalSubTab} onAdd={addJournalEntry} onDelete={deleteJournalEntry} onAwardXp={awardFromJournal} onEditQuest={editQuest} onLog={logMed} onDeleteMed={deleteMed} onEditMed={editMed} onAddType={addPracticeType} onDeleteType={deletePracticeType} onClearPending={()=>setPendingPractice(null)} dayGrades={dayGrades} onSaveDayGrades={saveDayGrades} xpLog={xpLog}/>}
-            {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} journal={journal} meds={meds} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest} onDeleteQuest={deleteQuest} onDeleteTask={deleteTask} onAddSkill={addSkill} onDeleteSkill={id=>saveS(skills.filter(s=>s.id!==id))} onAdjustSkillXp={async(skillId,amt,reason)=>{const {leveledUp,milestone:ms}=await award(amt,skillId,xp,skills,streaks,`✦ ${reason}`);spawnFloat(Math.abs(amt));showToast(`${amt>0?"+":""}${amt} ${L.xpName} → ${skills.find(s=>s.id===skillId)?.name||"skill"}`);if(leveledUp&&!ms)setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);if(ms)setMilestone(ms);}} aiMemory={aiMemory} onUpdateMemory={async(m)=>{setAiMemory(m);await dbSet("cx_aimem",m,userId);}} initialMsgs={advisorLog} onSaveMsgs={async(m)=>{setAdvisorLog(m);await dbSet("cx_advisor",m,userId);}}/>}
+            {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} journal={journal} meds={meds} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest} onDeleteQuest={deleteQuest} onDeleteTask={deleteTask} onAddSkill={addSkill} onDeleteSkill={id=>saveS(skills.filter(s=>s.id!==id))} onAdjustSkillXp={async(skillId,amt,reason)=>{const {leveledUp,milestone:ms}=await award(amt,skillId,xp,skills,streaks,`✦ ${reason}`);spawnFloat(Math.abs(amt));showToast(`${amt>0?"+":""}${amt} ${L.xpName} → ${skills.find(s=>s.id===skillId)?.name||"skill"}`);if(leveledUp&&!ms)setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);if(ms)setMilestone(ms);}} aiMemory={aiMemory} onUpdateMemory={async(m)=>{setAiMemory(m);await dbSet("cx_aimem",m,userId,stampWrite);}} initialMsgs={advisorLog} onSaveMsgs={async(m)=>{setAdvisorLog(m);await dbSet("cx_advisor",m,userId,stampWrite);}}/>}
             {tab==="settings" && <SettingsTab showToast={showToast} onExport={exportData} onImport={importData} userId={userId} onSignIn={()=>setShowAuth(true)} onSignOut={handleSignOut}/>}
           </main>
           </div>
@@ -808,7 +892,7 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
           {/* Morning planning ritual */}
           {showMorningRitual&&<MorningRitualOverlay quests={quests} tasks={tasks} skills={skills} streaks={streaks} settings={settings} briefing={dailyBriefing} onClose={()=>{setShowMorningRitual(false);localStorage.setItem("cx_last_ritual",new Date().toDateString());}} onAddTask={addTask} onToggleQuest={toggleQuest} radiantAvailable={radiantAvailable}/>}
           {/* Inline quest completion note */}
-          {inlineNote&&<InlineNotePopup questId={inlineNote.questId} questTitle={inlineNote.questTitle} questType={inlineNote.questType} onClose={()=>setInlineNote(null)} onSave={async(note)=>{if(note.trim()){const next=[{id:uid(),text:`[${inlineNote.questType==="main"?"◆":"◇"} ${inlineNote.questTitle}]\n${note.trim()}`,img:null,source:"quest",questId:inlineNote.questId,created:Date.now()},...journal];setJournal(next);await dbSet("cx_journal",next,userId);}setInlineNote(null);}}/>}
+          {inlineNote&&<InlineNotePopup questId={inlineNote.questId} questTitle={inlineNote.questTitle} questType={inlineNote.questType} onClose={()=>setInlineNote(null)} onSave={async(note)=>{if(note.trim()){const next=[{id:uid(),text:`[${inlineNote.questType==="main"?"◆":"◇"} ${inlineNote.questTitle}]\n${note.trim()}`,img:null,source:"quest",questId:inlineNote.questId,created:Date.now()},...journal];setJournal(next);await dbSet("cx_journal",next,userId,stampWrite);}setInlineNote(null);}}/>}
           {/* Streak Rescue Banner */}
           {streakRescue&&<StreakRescueBanner rescue={streakRescue} onDismiss={()=>{localStorage.setItem(`cx_rescue_${new Date().toDateString()}_${streakRescue.skillId}`,"1");setStreakRescue(null);}} onLog={()=>{setPendingPractice({skillId:streakRescue.skillId});setStreakRescue(null);setTab("journal");setJournalSubTab("log");localStorage.setItem(`cx_rescue_${new Date().toDateString()}_${streakRescue.skillId}`,"1");}}/>}
           {/* Quest Breakdown Modal */}
@@ -1117,6 +1201,238 @@ function QuestPlannerCard({quest,skills,onToggle,radiantAvailable,radiantCooldow
       </div>
     </div>
   );
+}
+
+// ── HABITS TAB ────────────────────────────────────────────────────────────────
+const FREQ_OPTIONS=[
+  {id:"daily",     label:"Every day"},
+  {id:"weekdays",  label:"Weekdays (Mon–Fri)"},
+  {id:"weekends",  label:"Weekends"},
+  {id:"custom",    label:"Custom days"},
+];
+const WDAYS_SHORT=["Mo","Tu","We","Th","Fr","Sa","Su"];
+
+function habitDueToday(habit, dateStr){
+  const d=new Date(dateStr+"T12:00");
+  const dow=(d.getDay()+6)%7; // 0=Mon
+  if(habit.frequency==="daily") return true;
+  if(habit.frequency==="weekdays") return dow<5;
+  if(habit.frequency==="weekends") return dow>=5;
+  if(habit.frequency==="custom") return (habit.frequencyDays||[]).includes(dow);
+  return true;
+}
+
+function habitStreak(habit){
+  // Count consecutive days completed going back from yesterday
+  let streak=0;
+  const today=new Date(); today.setHours(0,0,0,0);
+  for(let i=1;i<=365;i++){
+    const d=new Date(today); d.setDate(today.getDate()-i);
+    const ds=d.toISOString().split("T")[0];
+    if(!habitDueToday(habit,ds)) continue; // skip non-scheduled days
+    if(habit.completions?.[ds]) streak++;
+    else break;
+  }
+  return streak;
+}
+
+function HabitsTab({habits,skills,onAdd,onEdit,onDelete,onLog}){
+  const {settings}=useSettings(); const L=settings.labels;
+  const todayStr=new Date().toISOString().split("T")[0];
+  const todayDow=(new Date().getDay()+6)%7;
+
+  const [showForm,setShowForm]=useState(false);
+  const [editingId,setEditingId]=useState(null);
+  const [showArchived,setShowArchived]=useState(false);
+  const BLANK={name:"",icon:"◎",color:"#7c9ef8",skillId:"",xpVal:10,frequency:"daily",frequencyDays:[],note:""};
+  const [f,setF]=useState(BLANK);
+
+  const openAdd=()=>{setF(BLANK);setEditingId(null);setShowForm(true);};
+  const openEdit=h=>{setF({name:h.name,icon:h.icon,color:h.color,skillId:h.skillId||"",xpVal:h.xpVal||10,frequency:h.frequency||"daily",frequencyDays:h.frequencyDays||[],note:h.note||""});setEditingId(h.id);setShowForm(true);};
+
+  const submit=()=>{
+    if(!f.name.trim()) return;
+    if(editingId) onEdit(editingId,{name:f.name.trim(),icon:f.icon,color:f.color,skillId:f.skillId||null,xpVal:Number(f.xpVal)||10,frequency:f.frequency,frequencyDays:f.frequencyDays,note:f.note});
+    else onAdd({name:f.name.trim(),icon:f.icon,color:f.color,skillId:f.skillId||null,xpVal:Number(f.xpVal)||10,frequency:f.frequency,frequencyDays:f.frequencyDays,note:f.note});
+    setShowForm(false);
+  };
+
+  const active=habits.filter(h=>!h.archived);
+  const archived=habits.filter(h=>h.archived);
+  const dueToday=active.filter(h=>habitDueToday(h,todayStr));
+  const notDueToday=active.filter(h=>!habitDueToday(h,todayStr));
+  const doneToday=dueToday.filter(h=>h.completions?.[todayStr]);
+  const progress=dueToday.length?Math.round(doneToday.length/dueToday.length*100):0;
+
+  // Last 21 days for the mini heatmap
+  const last21=Array.from({length:21},(_,i)=>{
+    const d=new Date(); d.setDate(d.getDate()-(20-i));
+    return d.toISOString().split("T")[0];
+  });
+
+  return(<>
+    {/* Today's progress bar */}
+    {dueToday.length>0&&(
+      <div style={{marginBottom:14}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
+          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,color:"var(--tx3)",textTransform:"uppercase"}}>Today — {doneToday.length}/{dueToday.length}</div>
+          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:progress===100?"var(--success)":"var(--primary)"}}>{progress}%</div>
+        </div>
+        <div style={{height:4,background:"var(--b1)",borderRadius:2,overflow:"hidden"}}>
+          <div style={{height:"100%",width:`${progress}%`,background:progress===100?"var(--success)":"var(--primary)",borderRadius:2,transition:"width .4s ease"}}/>
+        </div>
+      </div>
+    )}
+
+    {/* Add button */}
+    {!showForm&&<button className="addbtn" style={{marginBottom:12}} onClick={openAdd}><span>+</span> New habit</button>}
+
+    {/* Form */}
+    {showForm&&(
+      <div className="fwrap" style={{marginBottom:12}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
+          <div className="label9">{editingId?"Edit habit":"New habit"}</div>
+          <button onClick={()=>setShowForm(false)} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:14}}>✕</button>
+        </div>
+        <input className="fi full" placeholder="Habit name..." autoFocus value={f.name} onChange={e=>setF(v=>({...v,name:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submit()} style={{marginBottom:8}}/>
+        <div className="frow" style={{marginBottom:8}}>
+          {/* Icon picker — small */}
+          <div style={{display:"flex",gap:3,flexWrap:"wrap",flex:1}}>
+            {["◎","◉","◈","◆","✦","◌","⊕","△","○","□","★","⚡","🧘","💪","📚","🎯","🌱","🔥","💎","🏃"].map(ic=>(
+              <button key={ic} onClick={()=>setF(v=>({...v,icon:ic}))}
+                style={{width:26,height:26,border:`1px solid ${f.icon===ic?"var(--primary)":"var(--b1)"}`,borderRadius:4,background:f.icon===ic?"var(--primaryf)":"none",cursor:"pointer",fontSize:13,display:"flex",alignItems:"center",justifyContent:"center"}}>
+                {ic}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="frow" style={{marginBottom:8}}>
+          <select className="fsel" value={f.frequency} onChange={e=>setF(v=>({...v,frequency:e.target.value}))}>
+            {FREQ_OPTIONS.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}
+          </select>
+          <select className="fsel" value={f.skillId} onChange={e=>setF(v=>({...v,skillId:e.target.value}))}>
+            <option value="">No skill</option>
+            {skills.filter(s=>s.type!=="subskill").map(s=><option key={s.id} value={s.id}>{s.icon} {s.name}</option>)}
+          </select>
+          <input type="number" className="fsel" style={{width:64}} min={1} max={999} placeholder="XP" value={f.xpVal} onChange={e=>setF(v=>({...v,xpVal:Math.max(1,Number(e.target.value)||10)}))}/>
+        </div>
+        {f.frequency==="custom"&&(
+          <div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>
+            {WDAYS_SHORT.map((d,i)=>(
+              <button key={i} onClick={()=>setF(v=>({...v,frequencyDays:v.frequencyDays.includes(i)?v.frequencyDays.filter(x=>x!==i):[...v.frequencyDays,i]}))}
+                style={{padding:"3px 9px",borderRadius:4,border:`1px solid ${f.frequencyDays.includes(i)?"var(--primary)":"var(--b2)"}`,background:f.frequencyDays.includes(i)?"var(--primaryf)":"var(--bg)",color:f.frequencyDays.includes(i)?"var(--primary)":"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,cursor:"pointer"}}>
+                {d}
+              </button>
+            ))}
+          </div>
+        )}
+        {/* Color */}
+        <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:8}}>
+          {["#7c9ef8","#a78bfa","#34d399","#f59e0b","#f87171","#60a5fa","#e879f9","#94a3b8"].map(col=>(
+            <div key={col} onClick={()=>setF(v=>({...v,color:col}))}
+              style={{width:18,height:18,borderRadius:"50%",background:col,cursor:"pointer",border:`2px solid ${f.color===col?"white":"transparent"}`,flexShrink:0}}/>
+          ))}
+        </div>
+        <textarea className="fi full" placeholder="Note / intention (optional)" rows={2} value={f.note} onChange={e=>setF(v=>({...v,note:e.target.value}))} style={{resize:"none",marginBottom:8,fontSize:12}}/>
+        <div style={{display:"flex",gap:6}}>
+          <button className="fsbtn primary" style={{flex:1,margin:0}} onClick={submit}>{editingId?"Save":"Add habit"}</button>
+          {editingId&&<button onClick={()=>{onEdit(editingId,{archived:!habits.find(h=>h.id===editingId)?.archived});setShowForm(false);}} style={{background:"none",border:"1px solid var(--b2)",borderRadius:"var(--r)",padding:"8px 12px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)"}}>Archive</button>}
+          {editingId&&<button onClick={()=>{onDelete(editingId);setShowForm(false);}} style={{background:"none",border:"1px solid var(--danger)",borderRadius:"var(--r)",padding:"8px 12px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--danger)"}}>Delete</button>}
+        </div>
+      </div>
+    )}
+
+    {/* Due today */}
+    {dueToday.length>0&&<>
+      <div className="slbl" style={{marginBottom:6}}>Today</div>
+      {dueToday.map(h=>{
+        const done=!!h.completions?.[todayStr];
+        const streak=habitStreak(h);
+        const sk=skills.find(s=>s.id===h.skillId);
+        return(
+          <div key={h.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"var(--s1)",border:`1px solid ${done?h.color+"44":"var(--b1)"}`,borderLeft:`3px solid ${done?h.color:"var(--b2)"}`,borderRadius:"var(--r)",marginBottom:5,transition:"all .15s"}}>
+            <button onClick={()=>onLog(h.id,todayStr)}
+              style={{width:26,height:26,borderRadius:"50%",border:`2px solid ${done?h.color:"var(--b2)"}`,background:done?h.color:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s",fontSize:12,color:done?"white":"var(--tx3)"}}>
+              {done?"✓":h.icon}
+            </button>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:13,color:done?"var(--tx3)":"var(--tx)",textDecoration:done?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.name}</div>
+              <div style={{display:"flex",gap:6,marginTop:2,flexWrap:"wrap"}}>
+                {sk&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:sk.color}}>{sk.icon} {sk.name}</span>}
+                {streak>=2&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--primary)"}}>{streak}d 🔥</span>}
+                <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)"}}>{h.xpVal} XP · {FREQ_OPTIONS.find(o=>o.id===h.frequency)?.label||h.frequency}</span>
+              </div>
+            </div>
+            <button onClick={()=>openEdit(h)} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11,padding:"2px 4px",flexShrink:0}}>✎</button>
+          </div>
+        );
+      })}
+    </>}
+
+    {/* Not scheduled today */}
+    {notDueToday.length>0&&<>
+      <div className="slbl" style={{marginBottom:6,marginTop:10}}>Not today</div>
+      {notDueToday.map(h=>{
+        const streak=habitStreak(h);
+        return(
+          <div key={h.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",marginBottom:4,opacity:.6}}>
+            <span style={{fontSize:14,width:26,textAlign:"center",flexShrink:0}}>{h.icon}</span>
+            <div style={{flex:1}}>
+              <div style={{fontSize:12,color:"var(--tx2)"}}>{h.name}</div>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",marginTop:1}}>{FREQ_OPTIONS.find(o=>o.id===h.frequency)?.label||h.frequency}{streak>=2?` · ${streak}d 🔥`:""}</div>
+            </div>
+            <button onClick={()=>openEdit(h)} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11,padding:"2px 4px"}}>✎</button>
+          </div>
+        );
+      })}
+    </>}
+
+    {/* 21-day heatmap across all habits */}
+    {active.length>0&&<>
+      <div className="slbl" style={{marginBottom:8,marginTop:14}}>21-day history</div>
+      <div style={{overflowX:"auto",paddingBottom:4}}>
+        <div style={{display:"grid",gridTemplateColumns:`repeat(21,1fr)`,gap:2,minWidth:280}}>
+          {last21.map(ds=>{
+            const doneCount=active.filter(h=>habitDueToday(h,ds)&&h.completions?.[ds]).length;
+            const totalDue=active.filter(h=>habitDueToday(h,ds)).length;
+            const ratio=totalDue?doneCount/totalDue:0;
+            const isToday=ds===todayStr;
+            return(
+              <div key={ds} title={`${ds}: ${doneCount}/${totalDue}`}
+                style={{aspectRatio:"1",borderRadius:2,background:totalDue===0?"var(--b1)":ratio===0?"var(--s2)":ratio<0.5?"var(--primaryf)":ratio<1?"var(--primary)66":"var(--primary)",border:isToday?"1px solid var(--primary)":"none",transition:"background .2s"}}/>
+            );
+          })}
+        </div>
+        <div style={{display:"flex",justifyContent:"space-between",marginTop:3}}>
+          <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"var(--tx3)"}}>{last21[0]?.slice(5)}</span>
+          <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"var(--primary)"}}>today</span>
+        </div>
+      </div>
+    </>}
+
+    {/* Archived */}
+    {archived.length>0&&(
+      <button onClick={()=>setShowArchived(v=>!v)} style={{background:"none",border:"none",color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:.8,cursor:"pointer",padding:"8px 0",marginTop:8}}>
+        {showArchived?"▾":"▸"} Archived ({archived.length})
+      </button>
+    )}
+    {showArchived&&archived.map(h=>(
+      <div key={h.id} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 12px",background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",marginBottom:4,opacity:.4}}>
+        <span style={{fontSize:13}}>{h.icon}</span>
+        <span style={{flex:1,fontSize:12,color:"var(--tx3)",textDecoration:"line-through"}}>{h.name}</span>
+        <button onClick={()=>onEdit(h.id,{archived:false})} style={{background:"none",border:"1px solid var(--b2)",borderRadius:3,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:8,cursor:"pointer",padding:"2px 7px"}}>restore</button>
+        <button onClick={()=>onDelete(h.id)} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11,padding:"2px 4px"}}>✕</button>
+      </div>
+    ))}
+
+    {active.length===0&&!showForm&&(
+      <div className="empty-state" style={{marginTop:20}}>
+        <div className="es-icon">◎</div>
+        <div className="es-title">No habits yet</div>
+        <div className="es-desc">Habits are fixed-frequency behaviours — daily meditation, weekday exercise, whatever you want to show up for consistently. Unlike quests, they're just a daily checkbox.</div>
+      </div>
+    )}
+  </>);
 }
 
 function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAddTask,onToggle,onDelete,onEdit,onToggleQuest,radiantAvailable,radiantCooldownLabel,nudge,onDismissNudge,onAcceptNudge,dailyBriefing,onRefreshBriefing,onOpenBreakdown,onOpenSkillGap}){
@@ -1616,15 +1932,15 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
   const [filterPrio,setFilterPrio]=useState("");
   const [sortBy,setSortBy]=useState("manual"); // "manual" | "priority" | "due"
   const [viewMode,setViewMode]=useState("list"); // "list" | "roadmap"
-  const [f,setF]=useState({title:"",skillIds:[],note:"",dueDate:"",type:"main",priority:"med",color:null,cooldown:60*60*1000,customImg:null,banner:null});
+  const [f,setF]=useState({title:"",skillIds:[],note:"",dueDate:"",type:"main",priority:"med",color:null,cooldown:60*60*1000,frequency:"daily",frequencyDays:[],customImg:null,banner:null});
   const [qXpSug,setQXpSug]=useState(null);
   const [qXpLoad,setQXpLoad]=useState(false);
-  const openForm=t=>{ setForm(t); setF({title:"",skillIds:[],note:"",dueDate:"",type:t,priority:"med",color:null,cooldown:60*60*1000,customImg:null,banner:null}); setQXpSug(null); };
+  const openForm=t=>{ setForm(t); setF({title:"",skillIds:[],note:"",dueDate:"",type:t,priority:"med",color:null,cooldown:60*60*1000,frequency:"daily",frequencyDays:[],customImg:null,banner:null}); setQXpSug(null); };
   const toggleQSkill=id=>setF(v=>{const next=v.skillIds.includes(id)?v.skillIds.filter(x=>x!==id):[...v.skillIds,id];const auto=next.length>0?(skills.find(s=>s.id===next[0])?.color)||null:null;return {...v,skillIds:next,color:v.color!==null?v.color:auto};});
   const submit=()=>{
     if(!f.title.trim()) return;
     const due=f.dueDate?new Date(f.dueDate+"T09:00").getTime():null;
-    onAdd({title:f.title.trim(),type:form,skills:f.skillIds,note:f.note.trim(),due,priority:f.priority,color:f.color||null,xpVal:qXpSug?.xp||null,cooldown:f.cooldown,customImg:f.customImg||null,banner:f.banner||null});
+    onAdd({title:f.title.trim(),type:form,skills:f.skillIds,note:f.note.trim(),due,priority:f.priority,color:f.color||null,xpVal:qXpSug?.xp||null,cooldown:f.cooldown,frequency:form==="radiant"?f.frequency:undefined,frequencyDays:form==="radiant"?f.frequencyDays:undefined,customImg:f.customImg||null,banner:f.banner||null});
     setForm(null); setQXpSug(null);
   };
   const handleQuestImg=async e=>{
@@ -1858,7 +2174,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
     </>}
     {questTab==="radiant"&&<>
     <div className="slbl">{L.radiantQuest}s</div>
-    <p style={{fontSize:12,color:"var(--tx2)",fontStyle:"italic",marginBottom:12,lineHeight:1.5}}>{L.radiantDesc}</p>
+    <p style={{fontSize:12,color:"var(--tx2)",fontStyle:"italic",marginBottom:12,lineHeight:1.5}}>Daily habits and repeating practices. Fixed frequency, builds streaks, awards XP every run.</p>
     {form==="radiant"?(<div className="fwrap">
       <div className="frow"><input className="fi full" autoFocus placeholder="Quest title..." value={f.title} onChange={e=>setF(v=>({...v,title:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submit()}/></div>
       {skills.length>0&&<div style={{display:"flex",flexWrap:"wrap",gap:4,marginBottom:8}}>
@@ -1870,14 +2186,36 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
           <option value="med">⬤ Med</option>
           <option value="low">⬤ Low</option>
         </select>
-        <input className="fi" type="date" style={{colorScheme:"dark",width:140}} value={f.dueDate} onChange={e=>setF(v=>({...v,dueDate:e.target.value}))}/>
         <button className="fsbtn" style={{width:"auto",padding:"7px 10px",marginTop:0}} onClick={()=>setForm(null)}>✕</button>
       </div>
-      <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-        <div className="label9" style={{flexShrink:0}}>Resets after</div>
-        <select className="fsel" style={{flex:1}} value={f.cooldown} onChange={e=>setF(v=>({...v,cooldown:Number(e.target.value)}))}>
-          {COOLDOWN_OPTIONS.map(o=><option key={o.ms} value={o.ms}>{o.label}</option>)}
-        </select>
+      {/* Frequency selector */}
+      <div style={{marginBottom:8}}>
+        <div className="label9" style={{marginBottom:5}}>Schedule</div>
+        <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:6}}>
+          {RADIANT_FREQ_OPTIONS.map(o=>(
+            <button key={o.id} onClick={()=>setF(v=>({...v,frequency:o.id}))}
+              style={{padding:"4px 10px",borderRadius:20,border:`1px solid ${(f.frequency||"cooldown")===o.id?"var(--secondary)":"var(--b2)"}`,background:(f.frequency||"cooldown")===o.id?"var(--secondaryf)":"none",color:(f.frequency||"cooldown")===o.id?"var(--secondary)":"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,cursor:"pointer"}}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+        {/* Custom day picker */}
+        {(f.frequency||"cooldown")==="custom"&&(
+          <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:6}}>
+            {WDAY_LABELS.map((d,i)=>(
+              <button key={i} onClick={()=>setF(v=>({...v,frequencyDays:(v.frequencyDays||[]).includes(i)?(v.frequencyDays||[]).filter(x=>x!==i):[...(v.frequencyDays||[]),i]}))}
+                style={{padding:"3px 9px",borderRadius:4,border:`1px solid ${(f.frequencyDays||[]).includes(i)?"var(--secondary)":"var(--b2)"}`,background:(f.frequencyDays||[]).includes(i)?"var(--secondaryf)":"var(--bg)",color:(f.frequencyDays||[]).includes(i)?"var(--secondary)":"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,cursor:"pointer"}}>
+                {d}
+              </button>
+            ))}
+          </div>
+        )}
+        {/* Cooldown picker for legacy/cooldown mode */}
+        {(f.frequency||"cooldown")==="cooldown"&&(
+          <select className="fsel" style={{width:"100%"}} value={f.cooldown} onChange={e=>setF(v=>({...v,cooldown:Number(e.target.value)}))}>
+            {COOLDOWN_OPTIONS.map(o=><option key={o.ms} value={o.ms}>{o.label}</option>)}
+          </select>
+        )}
       </div>
       <textarea className="fi" rows={2} placeholder="Intention (optional)..." value={f.note} onChange={e=>setF(v=>({...v,note:e.target.value}))} style={{resize:"vertical",minHeight:44,fontFamily:"inherit",fontSize:12,marginBottom:4,width:"100%",boxSizing:"border-box"}}/>
       <div style={{marginBottom:6}}>
@@ -1887,37 +2225,13 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
           <div onClick={()=>setF(v=>({...v,color:null}))} style={{width:18,height:18,borderRadius:"50%",background:"var(--bg)",cursor:"pointer",border:!f.color?"2px solid var(--tx)":"2px solid var(--b2)",fontSize:9,display:"flex",alignItems:"center",justifyContent:"center",color:"var(--tx3)"}} title="Auto from skill">∅</div>
         </div>
       </div>
-      <div style={{display:"flex",gap:8,marginBottom:8,alignItems:"flex-start"}}>
-        <div style={{flex:1}}>
-          <div className="label9" style={{marginBottom:5}}>Icon <span style={{opacity:.5,fontWeight:"normal",textTransform:"none",letterSpacing:0}}>(opt)</span></div>
-          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
-            {f.customImg
-              ?<img src={f.customImg} style={{width:36,height:36,borderRadius:4,objectFit:"cover",border:"1px solid var(--b2)"}}/>
-              :<div style={{width:36,height:36,borderRadius:4,background:"var(--bg)",border:"1px dashed var(--b2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:16,color:"var(--tx3)"}}>◆</div>}
-            <input type="file" accept="image/*" style={{display:"none"}} onChange={handleQuestImg}/>
-            <span className="fsbtn" style={{width:"auto",padding:"4px 8px",margin:0,fontSize:9}}>{f.customImg?"Change":"Upload"}</span>
-            {f.customImg&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setF(v=>({...v,customImg:null}))}>✕</button>}
-          </label>
-        </div>
-        <div style={{flex:2}}>
-          <div className="label9" style={{marginBottom:5}}>Banner <span style={{opacity:.5,fontWeight:"normal",textTransform:"none",letterSpacing:0}}>(opt)</span></div>
-          <label style={{display:"flex",alignItems:"center",gap:6,cursor:"pointer"}}>
-            {f.banner
-              ?<img src={f.banner} style={{height:36,maxWidth:100,borderRadius:3,objectFit:"cover",border:"1px solid var(--b2)"}}/>
-              :<div style={{height:36,width:80,borderRadius:3,background:"var(--bg)",border:"1px dashed var(--b2)",display:"flex",alignItems:"center",justifyContent:"center",fontSize:9,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",letterSpacing:.5}}>banner</div>}
-            <input type="file" accept="image/*" style={{display:"none"}} onChange={handleQuestBanner}/>
-            <span className="fsbtn" style={{width:"auto",padding:"4px 8px",margin:0,fontSize:9}}>{f.banner?"Change":"Upload"}</span>
-            {f.banner&&<button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11}} onClick={()=>setF(v=>({...v,banner:null}))}>✕</button>}
-          </label>
-        </div>
-      </div>
-            <button className="fsbtn secondary" style={{marginBottom:4}} onClick={suggestNewQuestXp} disabled={qXpLoad||!f.title.trim()}>
+      <button className="fsbtn secondary" style={{marginBottom:4}} onClick={suggestNewQuestXp} disabled={qXpLoad||!f.title.trim()}>
         {qXpLoad?"thinking...":"⟡ AI XP opinion"}
       </button>
       {qXpSug&&<div style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:4,padding:"8px 10px",marginBottom:6,fontSize:11,color:"var(--tx2)",lineHeight:1.5}}>
         {qXpSug.xp?<><span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",fontWeight:"bold"}}>+{qXpSug.xp} XP</span> — {qXpSug.reason}</>:qXpSug.reason}
       </div>}
-            <button className="fsbtn secondary" onClick={submit}>{qXpSug?.xp?`Commit · +${qXpSug.xp} ${L.xpName} per run (AI)`:`Commit · +${L.radiantXp} ${L.xpName} per run`}</button>
+      <button className="fsbtn secondary" onClick={submit}>{qXpSug?.xp?`Commit · +${qXpSug.xp} ${L.xpName} per run (AI)`:`Commit · +${L.radiantXp} ${L.xpName} per run`}</button>
     </div>)
       :<button className="addbtn" onClick={()=>openForm("radiant")}><span>+</span> New {L.radiantQuest.toLowerCase()}</button>}
     <div className="clist">{radiant.map(q=>(
@@ -1929,7 +2243,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
       <div className="empty-state">
         <div className="es-icon">◉</div>
         <div className="es-title">No {L.radiantQuest.toLowerCase()}s yet</div>
-        <div className="es-desc">Radiant quests repeat. Meditate daily, stretch every morning, drink water. Each completion awards XP and resets after 1 hour.</div>
+        <div className="es-desc">Radiant quests are daily habits and repeating practices — meditate every morning, exercise weekdays, review weekly. Each completion awards XP and builds a streak.</div>
         <button className="fsbtn" style={{width:"auto",padding:"8px 16px",margin:"8px auto 0"}} onClick={()=>openForm("radiant")}>+ Add Radiant Quest</button>
       </div>
     )}
