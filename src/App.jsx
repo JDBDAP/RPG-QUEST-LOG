@@ -2751,15 +2751,16 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
   const [showForm,setShowForm]=useState(false);
   const [showTypeForm,setShowTypeForm]=useState(false);
   const [scoring,setScoring]=useState(false);
-  const openForm=()=>{setScoring(false);setXpPreview(null);setShowForm(true);};
   const [xpPreview,setXpPreview]=useState(null);
   const [xpPrevLoad,setXpPrevLoad]=useState(false);
   const [newType,setNewType]=useState({label:"",icon:"◎"});
   const [timeUnit,setTimeUnit]=useState("min"); // min | hr | day
   const toMin=v=>timeUnit==="hr"?Math.round(v*60):timeUnit==="day"?Math.round(v*1440):v;
   const fromMin=v=>timeUnit==="hr"?+(v/60).toFixed(2):timeUnit==="day"?+(v/1440).toFixed(3):v;
-  const durDisplay=v=>timeUnit==="hr"?`${+(v/60).toFixed(1)}hr`:timeUnit==="day"?`${+(v/1440).toFixed(2)}d`:`${v}min`;
   const [f,setF]=useState({typeId:"",skillIds:[],subskillIds:[],dur:15,note:"",sessionDate:"",sessionTime:"",showDate:false});
+
+  // openForm always resets transient state — scoring MUST be false before form opens
+  const openForm=()=>{ setScoring(false); setXpPreview(null); setShowForm(true); };
 
   const toggleSkill=id=>setF(v=>({...v,skillIds:v.skillIds.includes(id)?v.skillIds.filter(s=>s!==id):[...v.skillIds,id]}));
 
@@ -2770,36 +2771,44 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
   useEffect(()=>{
     if(pending){
       const sids=pending.skillId?[pending.skillId]:[];
-      setF(v=>({...v,skillIds:sids,subskillIds:[]}));
+      // Must reset scoring here — form may open without going through openForm()
+      setScoring(false);
+      setXpPreview(null);
+      setF(v=>({...v,skillIds:sids,subskillIds:[],note:""}));
       setShowForm(true);
     }
   },[pending]);
 
   const submit=async()=>{
+    if(scoring) return; // prevent double-submit
     const ptype=practiceTypes.find(t=>t.id===f.typeId);
     let baseXp=Math.max(1,f.dur*ppm), aiReason=null;
-    if(f.note.trim()&&aiEnabled){
+    const hasNote=typeof f.note==="string"&&f.note.trim().length>0;
+    if(hasNote&&aiEnabled){
       setScoring(true);
+      // Safety: never leave scoring stuck more than 15s
+      const safetyTimer=setTimeout(()=>setScoring(false),15000);
       try{
         const skNames=f.skillIds.map(id=>skills.find(s=>s.id===id)?.name).filter(Boolean).join(", ")||"General";
         const res=await fetch("/api/chat",{
           method:"POST",headers:{"Content-Type":"application/json"},
           body:JSON.stringify({max_tokens:80,
-            messages:[{role:"user",content:`Practice session scoring. XP scale: 6000 XP = 1 level.\nBaseline: ${baseXp} XP (${f.dur}min). Type: ${ptype?.label}, Skills: ${skNames}.\nJournal: "${f.note}"\nJudge quality: routine=~baseline, focused=1.5-3x, breakthrough=3-10x. Never cap at 100.\nJSON only: {"xp":number,"reason":"12 words max"}`}]
+            messages:[{role:"user",content:`Practice session scoring. XP scale: 6000 XP = 1 level.\nBaseline: ${baseXp} XP (${f.dur}min). Type: ${ptype?.label||"session"}, Skills: ${skNames}.\nJournal: "${f.note.trim()}"\nJudge quality: routine=~baseline, focused=1.5-3x, breakthrough=3-10x. Never cap at 100.\nJSON only: {"xp":number,"reason":"12 words max"}`}]
           })
         });
         const data=await res.json();
-        const _ptxt=data.choices?.[0]?.message?.content||"{}";
-        const parsed=JSON.parse(_ptxt.replace(/```json|```/g,"").trim());
-        if(parsed.xp) baseXp=Math.max(1,Math.round(parsed.xp));
+        const raw=(data.choices?.[0]?.message?.content||"{}").replace(/```json|```/g,"").trim();
+        const parsed=JSON.parse(raw);
+        if(parsed.xp&&typeof parsed.xp==="number") baseXp=Math.max(1,Math.round(parsed.xp));
         if(parsed.reason) aiReason=parsed.reason;
-      }catch{}
+      }catch(e){ console.warn("AI scoring failed",e); }
+      clearTimeout(safetyTimer);
       setScoring(false);
     }
     let sessionDate=null;
     if(f.showDate&&f.sessionDate) sessionDate=new Date(`${f.sessionDate}${f.sessionTime?"T"+f.sessionTime:"T12:00"}`).getTime();
     await onLog({type:f.typeId,skillIds:f.skillIds,subskillIds:f.subskillIds,dur:f.dur,note:f.note.trim(),baseXp,aiReason,sessionDate,questId:pending?.questId||null,questTitle:pending?.questTitle||null});
-    setScoring(false); // ensure cleared before form closes
+    setScoring(false);
     setF(v=>({...v,note:"",subskillIds:[],sessionDate:"",sessionTime:"",showDate:false}));
     setShowForm(false);
   };
