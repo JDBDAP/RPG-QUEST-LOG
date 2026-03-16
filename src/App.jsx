@@ -31,6 +31,19 @@ import {
   FocusTimer, ProfileModal, ShareCard, CustomImageUploader,
 } from "./Modals";
 
+// ── SHARED AI FETCH HELPER ────────────────────────────────────────────────────
+// Wraps /api/chat, throws a readable error if Groq returns an error response
+async function aiCall(payload){
+  const res=await fetch("/api/chat",{
+    method:"POST",
+    headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(payload),
+  });
+  const data=await res.json();
+  if(data?.error) throw new Error(data.error.message||`API error ${res.status}`);
+  return data;
+}
+
 export default function App(){
   const [session,setSession]=useState(null);
   const [userId,setUserId]=useState(null);
@@ -230,7 +243,7 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
 **WIN AVAILABLE:** [1 specific quick win from their tasks or radiant quests]`;
       const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({max_tokens:250,messages:[{role:"user",content:prompt}]})});
-      const data=await res.json();
+      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       const text=data.choices?.[0]?.message?.content||"Could not generate briefing.";
       const result={text,date:todayStr,loading:false};
       setDailyBriefing(result);
@@ -256,7 +269,7 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
       const relatedTasks=tasksSnap.filter(t=>t.skill===target.id).map(t=>t.title).slice(0,3);
       const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({max_tokens:80,messages:[{role:"user",content:`A ${target.count}-day streak for "${target.name}" is about to break. Suggest ONE minimal action (2-5 min) to keep it alive. Related tasks: ${relatedTasks.join(", ")||"none"}. Reply in one short sentence, no intro.`}]})});
-      const data=await res.json();
+      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       const suggestion=data.choices?.[0]?.message?.content||`Do one small ${target.name} action to protect your streak.`;
       setStreakRescue({skillId:target.id,skillName:target.name,count:target.count,suggestion});
     }catch{}
@@ -892,7 +905,7 @@ function DailyAIPlan({quests,tasks,skills,onAddTask}){
     const topSkills=skills.filter(s=>s.type!=="subskill").sort((a,b)=>(b.xp||0)-(a.xp||0)).slice(0,6).map(s=>`${s.name} Lv${Math.floor((s.xp||0)/skPerLv)+1}`).join(", ");
     const vibeGuide={grind:"Prioritize main quests and high-XP tasks. Fill morning with hardest items.",focus:"Prioritize skills needing practice. Mix spiritual/ritual radiant quests with skill work. Aim for depth over volume.",light:"Pick quick-win side quests and admin tasks. Nothing requiring deep focus. Under 30 min each.",open:"Balance across all types based on priority and what's been neglected."};
     try{
-      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({max_tokens:500,messages:[{role:"user",content:`Plan today. Vibe: ${vibe} — ${vibeGuide[vibe]}
+      const res=await aiCall({max_tokens:500,messages:[{role:"user",content:`Plan today. Vibe: ${vibe} — ${vibeGuide[vibe]}
 
 Active quests: ${activeQ||"none"}
 Skills: ${topSkills||"none"}
@@ -902,7 +915,7 @@ Generate 4-6 specific tasks for today, assigned to morning/afternoon/evening or 
 Reply ONLY with JSON array, no markdown:
 [{"title":"task","timeBlock":"morning|afternoon|evening|null","skillId":"${skills.slice(0,3).map(s=>s.id).join('|')||"null"} or null","xpVal":number,"reason":"5 words why"}]
 Use actual skill IDs from this list: ${skills.map(s=>s.id+"="+s.name).join(",")||"none"}`}]})});
-      const data=await res.json();
+      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       const raw=(data.choices?.[0]?.message?.content||"").replace(/```json|```/g,"").trim();
       const m=raw.match(/\[[\s\S]*\]/);
       if(m) setPlan(JSON.parse(m[0]));
@@ -965,7 +978,7 @@ function WeeklyAIPlan({quests,tasks,skills,weekDays,onAddTask}){
     const activeQ=quests.filter(q=>!q.done).slice(0,10).map(q=>`[${q.type}] "${q.title}"`).join("; ");
     const topSkills=skills.filter(s=>s.type!=="subskill").sort((a,b)=>(b.xp||0)-(a.xp||0)).slice(0,5).map(s=>`${s.name} Lv${Math.floor((s.xp||0)/skPerLv)+1}`).join(", ");
     try{
-      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({max_tokens:700,messages:[{role:"user",content:`Plan this week. Distribute tasks across 7 days (Mon-Sun index 0-6).
+      const res=await aiCall({max_tokens:700,messages:[{role:"user",content:`Plan this week. Distribute tasks across 7 days (Mon-Sun index 0-6).
 
 Active quests: ${activeQ||"none"}
 Skills: ${topSkills||"none"}
@@ -974,7 +987,7 @@ Generate 1-2 tasks per day, spread across the week. Focus on realistic distribut
 Reply ONLY with JSON array:
 [{"title":"task","dayIndex":0,"skillId":"id or null","xpVal":number}]
 Available skill IDs: ${skills.map(s=>s.id+"="+s.name).join(",")||"none"}`}]})});
-      const data=await res.json();
+      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       const raw=(data.choices?.[0]?.message?.content||"").replace(/```json|```/g,"").trim();
       const m=raw.match(/\[[\s\S]*\]/);
       if(m) setPlan(JSON.parse(m[0]));
@@ -1039,7 +1052,7 @@ function MonthlyAIPlan({quests,tasks,skills,onAddTask}){
     const topSkills=skills.filter(s=>s.type!=="subskill").sort((a,b)=>(b.xp||0)-(a.xp||0)).slice(0,5).map(s=>`${s.name} Lv${Math.floor((s.xp||0)/skPerLv)+1}`).join(", ");
     const month=new Date().toLocaleString("en-US",{month:"long",year:"numeric"});
     try{
-      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({max_tokens:600,messages:[{role:"user",content:`Plan ${month}. Create 6-10 monthly milestones or goals derived from the active quests.
+      const res=await aiCall({max_tokens:600,messages:[{role:"user",content:`Plan ${month}. Create 6-10 monthly milestones or goals derived from the active quests.
 
 Main quests: ${mainQ||"none"}
 Skills: ${topSkills||"none"}
@@ -1048,7 +1061,7 @@ Each item should be a concrete, achievable milestone for this month — not vagu
 Reply ONLY with JSON array:
 [{"title":"milestone","skillId":"id or null","xpVal":number,"note":"why this month"}]
 Skill IDs: ${skills.map(s=>s.id+"="+s.name).join(",")||"none"}`}]})});
-      const data=await res.json();
+      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       const raw=(data.choices?.[0]?.message?.content||"").replace(/```json|```/g,"").trim();
       const m=raw.match(/\[[\s\S]*\]/);
       if(m) setPlan(JSON.parse(m[0]));
@@ -1176,14 +1189,14 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
     if(!nlInput.trim()) return;
     setNlLoading(true);
     try{
-      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({
+      const res=await aiCall({
         max_tokens:200,
         messages:[
           {role:"system",content:`Parse a natural language task into JSON only. Fields: title(string), timeBlock("morning"|"afternoon"|"evening"|null), skillName(string or null, from list: ${skills.map(s=>s.name).join(", ")||"none"}), dayOffset(int, 0=today). Reply only valid JSON.`},
           {role:"user",content:nlInput}
         ]
       })});
-      const data=await res.json();
+      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       const txt=(data.choices?.[0]?.message?.content||"{}").replace(/```json|```/g,"").trim();
       let parsed; try{parsed=JSON.parse(txt);}catch{parsed={};}
       const matchedSkill=skills.find(s=>s.name.toLowerCase()===(parsed.skillName||"").toLowerCase());
@@ -1661,7 +1674,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
         body:JSON.stringify({max_tokens:120,
           messages:[{role:"user",content:_qp}]
         })});
-      const data=await res.json();
+      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       const txt=data.choices?.[0]?.message?.content||"";
       const m=txt.match(/\{[\s\S]*\}/);
       if(m) setQXpSug(JSON.parse(m[0]));
@@ -2155,7 +2168,7 @@ Only include GRANT when you have enough info to be fair. It's fine to take 2-4 t
     try{
       const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({max_tokens:400,messages:[{role:"system",content:buildSys()},...history]})});
-      const data=await res.json();
+      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       const raw=data.choices?.[0]?.message?.content||"";
       const grantMatch=raw.match(/GRANT:({"xp":\s*\d+[^}]*})/);
       let display=raw;
@@ -2246,7 +2259,7 @@ function SkAiCatBtn({name,intention,onAssign}){
       const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({max_tokens:30,
           messages:[{role:"user",content:`Skill: "${name}"${intention?`. Intention: "${intention}"`:""}.\nAssign to exactly one category from: ${catList}.\nReply with ONLY the category id, nothing else.`}]})});
-      const data=await res.json();
+      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       const txt=(data.choices?.[0]?.message?.content||data.content?.[0]?.text||"").trim().toLowerCase();
       const valid=SKILL_CATEGORIES.find(c=>txt.includes(c.id));
       if(valid) onAssign(valid.id);
@@ -2797,7 +2810,7 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
             messages:[{role:"user",content:`Practice session scoring. XP scale: 6000 XP = 1 level.\nBaseline: ${baseXp} XP (${f.dur}min). Type: ${ptype?.label||"session"}, Skills: ${skNames}.\nJournal: "${f.note.trim()}"\nJudge quality: routine=~baseline, focused=1.5-3x, breakthrough=3-10x. Never cap at 100.\nJSON only: {"xp":number,"reason":"12 words max"}`}]
           })
         });
-        const data=await res.json();
+        const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
         const raw=(data.choices?.[0]?.message?.content||"{}").replace(/```json|```/g,"").trim();
         const parsed=JSON.parse(raw);
         if(parsed.xp&&typeof parsed.xp==="number") baseXp=Math.max(1,Math.round(parsed.xp));
@@ -2828,7 +2841,7 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
 Type: ${ptype.label}, Duration: ${f.dur}min, Skills: ${skNames}${f.note.trim()?`
 Journal: "${f.note}"`:""}
 Suggest fair XP and a short reason. Reply ONLY with JSON, no markdown: {"xp": NUMBER, "reason": "max 15 words"}`}]})});
-      const data=await res.json();
+      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       const txt=data.choices?.[0]?.message?.content||"";
       const m=txt.match(/\{[\s\S]*\}/);
       if(m) setXpPreview(JSON.parse(m[0]));
@@ -2862,7 +2875,7 @@ Suggest fair XP and a short reason. Reply ONLY with JSON, no markdown: {"xp": NU
           messages:[{role:"user",content:`Analyze these practice sessions and give honest, direct feedback in 3-4 sentences. Note patterns, gaps, what's working, and one concrete suggestion. Be specific, not generic.\n\nTotal: ${recent.length} sessions, ${totalMinsA} minutes\n\n${summary}`}]
         })
       });
-      const data=await res.json();
+      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       setAnalysis(data.choices?.[0]?.message?.content||"No analysis returned.");
     }catch{ setAnalysis("Analysis failed — check your connection."); }
     setAnalysing(false);
@@ -3052,7 +3065,7 @@ function MedCard({med,ptype,mSkills,skills,onDelete,onEdit}){
       const baseXp=med.dur*ppm;
       const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({max_tokens:80,messages:[{role:"user",content:`Practice session scoring. XP scale: 6000 XP = 1 level.\nBaseline: ${baseXp} XP (${med.dur} min).\nType: ${ptype?.label}, Skills: ${skNames}\nJournal: "${ef.note}"\nScore for quality/depth: routine=~baseline, focused=1.5-3x, breakthrough=3-10x. Never cap at 100.\nJSON only: {"xp":number,"reason":"12 words max"}`}]})});
-      const data=await res.json();
+      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       const txt=data.choices?.[0]?.message?.content||"{}";
       const parsed=JSON.parse(txt.replace(/```json|```/g,"").trim());
       if(parsed.xp) setEf(v=>({...v,xpAwarded:Math.max(1,Math.round(parsed.xp)),aiReason:parsed.reason||""}));
@@ -3166,7 +3179,7 @@ function JarvisOverlay({tasks,quests,skills,onAddQuest,onAddTask,onClose,onLogMe
         method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({max_tokens:600,messages:[{role:"system",content:sys},...history],tools})
       });
-      const data=await res.json();
+      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       const msg=data.choices?.[0]?.message||{};
       const toolCalls=msg.tool_calls||[];
       const replyText=msg.content||"";
@@ -3324,7 +3337,7 @@ Be direct. Reference actual task/quest names and IDs. 3–5 sentences unless bre
           messages:[{role:"system",content:buildCtx()},...history],
           tools:advisorTools}),
       });
-      const data=await res.json();
+      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       // Groq returns OpenAI format; tool_calls in message if tools used
       const msg=data.choices?.[0]?.message||{};
       const toolCalls=msg.tool_calls||[];
@@ -3527,7 +3540,7 @@ Rules: bg=darkest background, s1 slightly lighter (cards), s2 slightly lighter t
           ]
         })
       });
-      const data=await res.json();
+      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       if(data.error) throw new Error(data.error.message||"API error");
       const raw=(data.choices?.[0]?.message?.content||"").replace(/```json|```/g,"").trim();
       let parsed;
@@ -3972,7 +3985,7 @@ function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,o
         body:JSON.stringify({max_tokens:120,
           messages:[{role:"user",content:_eqp}]
         })});
-      const data=await res.json();
+      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       const txt=data.choices?.[0]?.message?.content||"";
       const parsed=JSON.parse(txt.match(/\{[\s\S]*\}/)?.[0]||"{}");
       if(parsed.xp) setXpSuggestion(parsed);
@@ -3987,7 +4000,7 @@ function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,o
         headers:{"Content-Type":"application/json"},
         body:JSON.stringify({max_tokens:80,
           messages:[{role:"user",content:`Subquest/step in a gamified life tracker. Parent quest: "${quest.title}" (${quest.type}). Subquest: "${title}". Suggest fair XP for completing this one step (range 5-40). Reply ONLY with JSON: {"xp": NUMBER, "reason": "max 8 words"}`}]})});
-      const data=await res.json();
+      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       const txt=data.choices?.[0]?.message?.content||"";
       const m=txt.match(/\{[\s\S]*\}/);
       if(m) setSubXpSug(JSON.parse(m[0]));
@@ -4260,7 +4273,7 @@ function DayJournalTab({meds,quests,skills,xpLog,dayGrades,onSaveDayGrades,onAdd
     setReflecting(true); setAiReflect(null);
     const skPerLv=settings.xp?.skillPerLevel||6000;
     try{
-      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({max_tokens:200,messages:[{role:"user",content:`Daily reflection for ${new Date().toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}.
+      const res=await aiCall({max_tokens:200,messages:[{role:"user",content:`Daily reflection for ${new Date().toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}.
 
 Completed quests: ${todayDone.map(q=>q.title).join(", ")||"none"}
 Sessions logged: ${todaySessions.map(m=>m.dur+"min").join(", ")||"none"}
@@ -4269,7 +4282,7 @@ Self-grades (1-5): Output ${draft.output||"?"}/5, Practice ${draft.practice||"?"
 Note: ${draft.note||"none"}
 
 Write one honest observation (2-3 sentences). Notice any gap between grades and actual activity. No cheerleading.`}]})});
-      const data=await res.json();
+      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       setAiReflect(data.choices?.[0]?.message?.content||"");
     }catch{}
     setReflecting(false);
@@ -4575,7 +4588,7 @@ function JournalEntries({entries,skills,quests,onAdd,onDelete,onAwardXp,onEditQu
             ]}]
           })
         });
-        const data=await res.json();
+        const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
         const extracted=data?.choices?.[0]?.message?.content||data?.content?.[0]?.text||"";
         if(extracted) setText(prev=>prev+(prev?"\n\n":"")+extracted.trim());
       }catch{ /* OCR failed silently */ }
@@ -4605,7 +4618,7 @@ function JournalEntries({entries,skills,quests,onAdd,onDelete,onAwardXp,onEditQu
       const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({max_tokens:400,messages:[{role:"user",content:prompt}]})
       });
-      const data=await res.json();
+      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       const raw=data.choices?.[0]?.message?.content||"{}";
       const m=raw.match(/\{[\s\S]*\}/);
       const parsed=m?JSON.parse(m[0]):{skills:[],quests:[],summary:""};
@@ -4651,7 +4664,7 @@ function JournalEntries({entries,skills,quests,onAdd,onDelete,onAwardXp,onEditQu
           messages:[{role:"user",content:`You are a mystical chronicler. Based on the following practice journal entries, write a cohesive, evocative narrative (3-4 paragraphs) that weaves together the practitioner's journey — the patterns, the breakthroughs, the texture of their practice. Write in second person ("you"), present tense, like a living story. Make it feel meaningful and earned, not generic.\n\nJournal entries:\n${corpus}\n\nWrite the narrative now:`}]
         })
       });
-      const data=await res.json();
+      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       const msg=data?.choices?.[0]?.message?.content||data?.content?.[0]?.text||"";
       setStory(msg);
     }catch{ setStory("Couldn't reach the advisor. Try again when connected."); }
