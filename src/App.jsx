@@ -902,20 +902,11 @@ function DailyAIPlan({quests,tasks,skills,onAddTask}){
     setLoading(true); setPlan(null);
     const skPerLv=settings.xp?.skillPerLevel||6000;
     const activeQ=quests.filter(q=>!q.done).slice(0,12).map(q=>`${q.type}: "${q.title}" [skills:${(q.skills||[]).map(id=>skills.find(s=>s.id===id)?.name).filter(Boolean).join(",")||"none"}]`).join("; ");
-    const topSkills=skills.filter(s=>s.type!=="subskill").sort((a,b)=>(b.xp||0)-(a.xp||0)).slice(0,6).map(s=>`${s.name} Lv${Math.floor((s.xp||0)/skPerLv)+1}`).join(", ");
+    const topSkills=skills.filter(s=>s.type!=="subskill").sort((a,b)=>(b.xp||0)-(a.xp||0)).slice(0,6).map(s=>s.name+" Lv"+(Math.floor((s.xp||0)/skPerLv)+1)).join(", ");
+    const skillIdList=skills.map(s=>s.id+"="+s.name).join(",")||"none";
     const vibeGuide={grind:"Prioritize main quests and high-XP tasks. Fill morning with hardest items.",focus:"Prioritize skills needing practice. Mix spiritual/ritual radiant quests with skill work. Aim for depth over volume.",light:"Pick quick-win side quests and admin tasks. Nothing requiring deep focus. Under 30 min each.",open:"Balance across all types based on priority and what's been neglected."};
     try{
-      const res=await aiCall({max_tokens:500,messages:[{role:"user",content:`Plan today. Vibe: ${vibe} — ${vibeGuide[vibe]}
-
-Active quests: ${activeQ||"none"}
-Skills: ${topSkills||"none"}
-Today's existing tasks: ${tasks.filter(t=>t.period==="daily"&&!t.done).length} already scheduled
-
-Generate 4-6 specific tasks for today, assigned to morning/afternoon/evening or flexible.
-Reply ONLY with JSON array, no markdown:
-[{"title":"task","timeBlock":"morning|afternoon|evening|null","skillId":"${skills.slice(0,3).map(s=>s.id).join('|')||"null"} or null","xpVal":number,"reason":"5 words why"}]
-Use actual skill IDs from this list: ${skills.map(s=>s.id+"="+s.name).join(",")||"none"}`}]})});
-      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
+      const data=await aiCall({max_tokens:500,messages:[{role:"user",content:"Plan today. Vibe: "+vibe+" — "+vibeGuide[vibe]+"\n\nActive quests: "+(activeQ||"none")+"\nSkills: "+(topSkills||"none")+"\nToday's existing tasks: "+tasks.filter(t=>t.period==="daily"&&!t.done).length+" already scheduled\n\nGenerate 4-6 specific tasks for today, assigned to morning/afternoon/evening or flexible.\nReply ONLY with JSON array, no markdown:\n[{\"title\":\"task\",\"timeBlock\":\"morning|afternoon|evening|null\",\"skillId\":\"skill_id or null\",\"xpVal\":number,\"reason\":\"5 words why\"}]\nUse actual skill IDs from this list: "+skillIdList}]});
       const raw=(data.choices?.[0]?.message?.content||"").replace(/```json|```/g,"").trim();
       const m=raw.match(/\[[\s\S]*\]/);
       if(m) setPlan(JSON.parse(m[0]));
@@ -975,19 +966,11 @@ function WeeklyAIPlan({quests,tasks,skills,weekDays,onAddTask}){
   const generate=async()=>{
     setLoading(true); setPlan(null);
     const skPerLv=settings.xp?.skillPerLevel||6000;
-    const activeQ=quests.filter(q=>!q.done).slice(0,10).map(q=>`[${q.type}] "${q.title}"`).join("; ");
-    const topSkills=skills.filter(s=>s.type!=="subskill").sort((a,b)=>(b.xp||0)-(a.xp||0)).slice(0,5).map(s=>`${s.name} Lv${Math.floor((s.xp||0)/skPerLv)+1}`).join(", ");
+    const activeQ=quests.filter(q=>!q.done).slice(0,10).map(q=>"["+q.type+'] "'+q.title+'"').join("; ");
+    const topSkills=skills.filter(s=>s.type!=="subskill").sort((a,b)=>(b.xp||0)-(a.xp||0)).slice(0,5).map(s=>s.name+" Lv"+(Math.floor((s.xp||0)/skPerLv)+1)).join(", ");
+    const skillIdList=skills.map(s=>s.id+"="+s.name).join(",")||"none";
     try{
-      const res=await aiCall({max_tokens:700,messages:[{role:"user",content:`Plan this week. Distribute tasks across 7 days (Mon-Sun index 0-6).
-
-Active quests: ${activeQ||"none"}
-Skills: ${topSkills||"none"}
-
-Generate 1-2 tasks per day, spread across the week. Focus on realistic distribution — don't pile everything on Monday.
-Reply ONLY with JSON array:
-[{"title":"task","dayIndex":0,"skillId":"id or null","xpVal":number}]
-Available skill IDs: ${skills.map(s=>s.id+"="+s.name).join(",")||"none"}`}]})});
-      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
+      const data=await aiCall({max_tokens:700,messages:[{role:"user",content:"Plan this week. Distribute tasks across 7 days (Mon-Sun index 0-6).\n\nActive quests: "+(activeQ||"none")+"\nSkills: "+(topSkills||"none")+"\n\nGenerate 1-2 tasks per day, spread across the week. Focus on realistic distribution.\nReply ONLY with JSON array:\n[{\"title\":\"task\",\"dayIndex\":0,\"skillId\":\"id or null\",\"xpVal\":number}]\nAvailable skill IDs: "+skillIdList}]});
       const raw=(data.choices?.[0]?.message?.content||"").replace(/```json|```/g,"").trim();
       const m=raw.match(/\[[\s\S]*\]/);
       if(m) setPlan(JSON.parse(m[0]));
@@ -1048,20 +1031,12 @@ function MonthlyAIPlan({quests,tasks,skills,onAddTask}){
   const generate=async()=>{
     setLoading(true); setPlan(null);
     const skPerLv=settings.xp?.skillPerLevel||6000;
-    const mainQ=quests.filter(q=>!q.done&&q.type==="main").slice(0,8).map(q=>`"${q.title}"`).join(", ");
-    const topSkills=skills.filter(s=>s.type!=="subskill").sort((a,b)=>(b.xp||0)-(a.xp||0)).slice(0,5).map(s=>`${s.name} Lv${Math.floor((s.xp||0)/skPerLv)+1}`).join(", ");
+    const mainQ=quests.filter(q=>!q.done&&q.type==="main").slice(0,8).map(q=>'"'+q.title+'"').join(", ");
+    const topSkills=skills.filter(s=>s.type!=="subskill").sort((a,b)=>(b.xp||0)-(a.xp||0)).slice(0,5).map(s=>s.name+" Lv"+(Math.floor((s.xp||0)/skPerLv)+1)).join(", ");
     const month=new Date().toLocaleString("en-US",{month:"long",year:"numeric"});
+    const skillIdList=skills.map(s=>s.id+"="+s.name).join(",")||"none";
     try{
-      const res=await aiCall({max_tokens:600,messages:[{role:"user",content:`Plan ${month}. Create 6-10 monthly milestones or goals derived from the active quests.
-
-Main quests: ${mainQ||"none"}
-Skills: ${topSkills||"none"}
-
-Each item should be a concrete, achievable milestone for this month — not vague.
-Reply ONLY with JSON array:
-[{"title":"milestone","skillId":"id or null","xpVal":number,"note":"why this month"}]
-Skill IDs: ${skills.map(s=>s.id+"="+s.name).join(",")||"none"}`}]})});
-      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
+      const data=await aiCall({max_tokens:600,messages:[{role:"user",content:"Plan "+month+". Create 6-10 monthly milestones or goals derived from the active quests.\n\nMain quests: "+(mainQ||"none")+"\nSkills: "+(topSkills||"none")+"\n\nEach item should be a concrete, achievable milestone for this month — not vague.\nReply ONLY with JSON array:\n[{\"title\":\"milestone\",\"skillId\":\"id or null\",\"xpVal\":number,\"note\":\"why this month\"}]\nSkill IDs: "+skillIdList}]});
       const raw=(data.choices?.[0]?.message?.content||"").replace(/```json|```/g,"").trim();
       const m=raw.match(/\[[\s\S]*\]/);
       if(m) setPlan(JSON.parse(m[0]));
@@ -1189,14 +1164,13 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
     if(!nlInput.trim()) return;
     setNlLoading(true);
     try{
-      const res=await aiCall({
+      const data=await aiCall({
         max_tokens:200,
         messages:[
           {role:"system",content:`Parse a natural language task into JSON only. Fields: title(string), timeBlock("morning"|"afternoon"|"evening"|null), skillName(string or null, from list: ${skills.map(s=>s.name).join(", ")||"none"}), dayOffset(int, 0=today). Reply only valid JSON.`},
           {role:"user",content:nlInput}
         ]
       })});
-      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       const txt=(data.choices?.[0]?.message?.content||"{}").replace(/```json|```/g,"").trim();
       let parsed; try{parsed=JSON.parse(txt);}catch{parsed={};}
       const matchedSkill=skills.find(s=>s.name.toLowerCase()===(parsed.skillName||"").toLowerCase());
@@ -4273,7 +4247,7 @@ function DayJournalTab({meds,quests,skills,xpLog,dayGrades,onSaveDayGrades,onAdd
     setReflecting(true); setAiReflect(null);
     const skPerLv=settings.xp?.skillPerLevel||6000;
     try{
-      const res=await aiCall({max_tokens:200,messages:[{role:"user",content:`Daily reflection for ${new Date().toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}.
+      const data=await aiCall({max_tokens:200,messages:[{role:"user",content:`Daily reflection for ${new Date().toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}.
 
 Completed quests: ${todayDone.map(q=>q.title).join(", ")||"none"}
 Sessions logged: ${todaySessions.map(m=>m.dur+"min").join(", ")||"none"}
