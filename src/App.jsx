@@ -603,7 +603,8 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
     }
     if(skillIds.length){setSkills(curSkillsState);await dbSet("cx_skills",curSkillsState,userId);}
     const sk=curSkillsState.find(s=>s.id===primary);
-    await saveXpLog({id:uid(),amt,label:d.type+(sub?` · ${sub.name}`:""),skill:sk?.name||null,multiplier,created:Date.now()});
+    const subLabel=subIds.map(sid=>skills.find(s=>s.id===sid)?.name).filter(Boolean).join(", ");
+    await saveXpLog({id:uid(),amt,label:d.type+(subLabel?` · ${subLabel}`:""),skill:sk?.name||null,multiplier,created:Date.now()});
     const sessionCreated=d.sessionDate||Date.now();
     const session={id:uid(),type:d.type||"session",dur:d.dur,skillIds,subskillIds:subIds,note:d.note,
       aiReason:d.aiReason,xpAwarded:amt,multiplier,created:sessionCreated};
