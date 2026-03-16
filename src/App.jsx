@@ -1170,7 +1170,7 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
           {role:"system",content:`Parse a natural language task into JSON only. Fields: title(string), timeBlock("morning"|"afternoon"|"evening"|null), skillName(string or null, from list: ${skills.map(s=>s.name).join(", ")||"none"}), dayOffset(int, 0=today). Reply only valid JSON.`},
           {role:"user",content:nlInput}
         ]
-      })});
+      });
       const txt=(data.choices?.[0]?.message?.content||"{}").replace(/```json|```/g,"").trim();
       let parsed; try{parsed=JSON.parse(txt);}catch{parsed={};}
       const matchedSkill=skills.find(s=>s.name.toLowerCase()===(parsed.skillName||"").toLowerCase());
@@ -4255,8 +4255,7 @@ XP earned: ${todayXp}
 Self-grades (1-5): Output ${draft.output||"?"}/5, Practice ${draft.practice||"?"}/5, Body ${draft.body||"?"}/5, Mind ${draft.mind||"?"}/5
 Note: ${draft.note||"none"}
 
-Write one honest observation (2-3 sentences). Notice any gap between grades and actual activity. No cheerleading.`}]})});
-      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
+Write one honest observation (2-3 sentences). Notice any gap between grades and actual activity. No cheerleading.`}]});
       setAiReflect(data.choices?.[0]?.message?.content||"");
     }catch{}
     setReflecting(false);
