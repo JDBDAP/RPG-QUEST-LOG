@@ -72,6 +72,9 @@ export default function App(){
   const [streakRescue,setStreakRescue]=useState(null); // {skillId, skillName, streak, suggestion}
   const [showBreakdown,setShowBreakdown]=useState(null); // questId to break down
   const [showSkillGap,setShowSkillGap]=useState(false);
+  const [showMorningRitual,setShowMorningRitual]=useState(false); // morning planning overlay
+  const [dayGrades,setDayGrades]=useState({}); // {[dateStr]: {output,practice,body,mind,note}}
+  const [inlineNote,setInlineNote]=useState(null); // {questId, questTitle} for post-completion note
   const toastRef=useRef(null);
 
   // Load data from Supabase if logged in, otherwise localStorage
@@ -110,6 +113,7 @@ export default function App(){
     const fr=await sget("cx_friends"); if(fr) setFriends(fr);
     const am=await sget("cx_aimem");   if(am) setAiMemory(am);
     const al=await sget("cx_advisor"); if(al) setAdvisorLog(al);
+    const dg=await sget("cx_grades");  if(dg) setDayGrades(dg);
     setLoaded(true);
   };
 
@@ -138,7 +142,18 @@ export default function App(){
     if(!loaded||!skills.length) return;
     generateBriefing(tasks,quests,skills,streaks,settings);
     checkStreakRescue(skills,streaks,tasks);
+    // Show morning ritual if first open today and setup done
+    if(settings.profile.setup){
+      const todayStr=new Date().toDateString();
+      const lastRitual=localStorage.getItem("cx_last_ritual");
+      if(lastRitual!==todayStr) setShowMorningRitual(true);
+    }
   },[loaded]); // only on initial load
+
+  const saveDayGrades=async(grades)=>{
+    setDayGrades(grades);
+    await dbSet("cx_grades",grades,userId);
+  };
 
   useEffect(()=>{
     // Check for existing session on mount
@@ -390,8 +405,8 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
       showToast(`+${amt} ${L.xpName}`);
       if(leveledUp&&!ms) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);
       if(ms) setMilestone(ms);
-      setPendingPractice({skillId:primary,questTitle:q.title,questType:q.type});
-      setTab("journal"); setJournalSubTab("log");
+      // Show inline note instead of redirecting to log tab
+      setInlineNote({questId:id,questTitle:q.title,questType:q.type});
     }
   };
   const deleteQuest=async id=>saveQ(quests.filter(q=>q.id!==id));
@@ -559,12 +574,13 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
   };
 
   const logMed=async d=>{
-    // If a subskill was selected, expand skillIds to include all parent skills
-    const subId=d.subskillId||null;
-    const sub=subId?skills.find(s=>s.id===subId&&s.type==="subskill"):null;
+    // Handle both subskillId (singular legacy) and subskillIds (array from form)
+    const subIds=d.subskillIds?.length?d.subskillIds:(d.subskillId?[d.subskillId]:[]);
     let skillIds=d.skillIds||[];
-    if(sub&&sub.parentIds?.length){
-      skillIds=[...new Set([...skillIds,...sub.parentIds])];
+    // Expand subskill parentIds into skillIds
+    for(const subId of subIds){
+      const sub=skills.find(s=>s.id===subId&&s.type==="subskill");
+      if(sub?.parentIds?.length) skillIds=[...new Set([...skillIds,...sub.parentIds])];
     }
     const primary=skillIds[0]||null;
     let newStr=streaks;
@@ -589,7 +605,7 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
     const sk=curSkillsState.find(s=>s.id===primary);
     await saveXpLog({id:uid(),amt,label:d.type+(sub?` · ${sub.name}`:""),skill:sk?.name||null,multiplier,created:Date.now()});
     const sessionCreated=d.sessionDate||Date.now();
-    const session={id:uid(),type:d.type,dur:d.dur,skillIds,subskillId:subId,note:d.note,
+    const session={id:uid(),type:d.type||"session",dur:d.dur,skillIds,subskillIds:subIds,note:d.note,
       aiReason:d.aiReason,xpAwarded:amt,multiplier,created:sessionCreated};
     await saveM([session,...meds]);
     // Auto-save to journal: always if quest, only if note otherwise
@@ -636,6 +652,7 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
       if(data.quests){setQuests(data.quests);await dbSet("cx_quests",data.quests,userId);}
       if(data.skills){setSkills(data.skills);await dbSet("cx_skills",data.skills,userId);}
       if(data.meds){setMeds(data.meds);await dbSet("cx_meds",data.meds,userId);}
+      if(data.practiceTypes){setPracticeTypes(data.practiceTypes);await dbSet("cx_ptypes",data.practiceTypes,userId);}
       if(data.xp!=null){setXp(data.xp);await dbSet("cx_xp",data.xp,userId);}
       if(data.streaks){setStreaks(data.streaks);await dbSet("cx_streaks",data.streaks,userId);}
       showToast("Data imported");
@@ -644,7 +661,7 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
   };
 
   const exportData=(fmt="json")=>{
-    const payload={tasks,quests,skills,meds,xp,streaks,settings,exported:new Date().toISOString()};
+    const payload={tasks,quests,skills,meds,practiceTypes,xp,streaks,settings,exported:new Date().toISOString()};
     if(fmt==="xml"){
       const toXml=(obj,tag)=>{
         if(Array.isArray(obj)) return obj.map(item=>toXml(item,"item")).join("");
@@ -766,7 +783,7 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
             }} onDelete={deleteTask} onEdit={editTask} onToggleQuest={toggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} nudge={nudge} onDismissNudge={()=>setNudge(null)} onAcceptNudge={()=>{if(nudge){setPendingPractice({skillId:nudge.skillId});setNudge(null);setTab("journal");setJournalSubTab("log");}}} dailyBriefing={dailyBriefing} onRefreshBriefing={()=>{localStorage.removeItem("cx_briefing");generateBriefing(tasks,quests,skills,streaks,settings);}} onOpenBreakdown={qid=>setShowBreakdown(qid)} onOpenSkillGap={()=>setShowSkillGap(true)}/>}
             {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest} onReorder={q=>saveQ(q)} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={qid=>setShowBreakdown(qid)}/>}
             {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill} onReorder={reorderSkills} onLink={linkSubskill} onStartFocus={startFocus} onAward={async(skillId,amt,reason)=>{const {leveledUp,milestone:ms}=await award(amt,skillId,xp,skills,streaks,`✦ ${reason}`);spawnFloat(amt);showToast(`+${amt} ${settings.labels.xpName}`);if(leveledUp&&!ms)setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);if(ms)setMilestone(ms);}} onOpenSkillGap={()=>setShowSkillGap(true)}/>}
-            {tab==="journal"  && <JournalTab entries={journal} skills={skills} quests={quests} meds={meds} practiceTypes={practiceTypes} streaks={streaks} pending={pendingPractice} subTab={journalSubTab} onSubTab={setJournalSubTab} onAdd={addJournalEntry} onDelete={deleteJournalEntry} onAwardXp={awardFromJournal} onEditQuest={editQuest} onLog={logMed} onDeleteMed={deleteMed} onEditMed={editMed} onAddType={addPracticeType} onDeleteType={deletePracticeType} onClearPending={()=>setPendingPractice(null)}/>}
+            {tab==="journal"  && <JournalTab entries={journal} skills={skills} quests={quests} meds={meds} practiceTypes={practiceTypes} streaks={streaks} pending={pendingPractice} subTab={journalSubTab} onSubTab={setJournalSubTab} onAdd={addJournalEntry} onDelete={deleteJournalEntry} onAwardXp={awardFromJournal} onEditQuest={editQuest} onLog={logMed} onDeleteMed={deleteMed} onEditMed={editMed} onAddType={addPracticeType} onDeleteType={deletePracticeType} onClearPending={()=>setPendingPractice(null)} dayGrades={dayGrades} onSaveDayGrades={saveDayGrades} xpLog={xpLog}/>}
             {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} journal={journal} meds={meds} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest} onDeleteQuest={deleteQuest} onDeleteTask={deleteTask} onAddSkill={addSkill} onDeleteSkill={id=>saveS(skills.filter(s=>s.id!==id))} onAdjustSkillXp={async(skillId,amt,reason)=>{const {leveledUp,milestone:ms}=await award(amt,skillId,xp,skills,streaks,`✦ ${reason}`);spawnFloat(Math.abs(amt));showToast(`${amt>0?"+":""}${amt} ${L.xpName} → ${skills.find(s=>s.id===skillId)?.name||"skill"}`);if(leveledUp&&!ms)setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);if(ms)setMilestone(ms);}} aiMemory={aiMemory} onUpdateMemory={async(m)=>{setAiMemory(m);await dbSet("cx_aimem",m,userId);}} initialMsgs={advisorLog} onSaveMsgs={async(m)=>{setAdvisorLog(m);await dbSet("cx_advisor",m,userId);}}/>}
             {tab==="settings" && <SettingsTab showToast={showToast} onExport={exportData} onImport={importData} userId={userId} onSignIn={()=>setShowAuth(true)} onSignOut={handleSignOut}/>}
           </main>
@@ -774,6 +791,10 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
           {/* Weekly Review floating button */}
           <button className="review-btn" onClick={()=>setShowReview(true)} title="Weekly Review">◈ Review</button>
           {showReview&&<WeeklyReview tasks={tasks} quests={quests} skills={skills} meds={meds} xpLog={xpLog} journal={journal} settings={settings} onClose={()=>setShowReview(false)} onNavigate={id=>{setShowReview(false);handleTabChange(id);}} onAddTask={addTask}/>}
+          {/* Morning planning ritual */}
+          {showMorningRitual&&<MorningRitualOverlay quests={quests} tasks={tasks} skills={skills} streaks={streaks} settings={settings} briefing={dailyBriefing} onClose={()=>{setShowMorningRitual(false);localStorage.setItem("cx_last_ritual",new Date().toDateString());}} onAddTask={addTask} onToggleQuest={toggleQuest} radiantAvailable={radiantAvailable}/>}
+          {/* Inline quest completion note */}
+          {inlineNote&&<InlineNotePopup questId={inlineNote.questId} questTitle={inlineNote.questTitle} questType={inlineNote.questType} onClose={()=>setInlineNote(null)} onSave={async(note)=>{if(note.trim()){const next=[{id:uid(),text:`[${inlineNote.questType==="main"?"◆":"◇"} ${inlineNote.questTitle}]\n${note.trim()}`,img:null,source:"quest",questId:inlineNote.questId,created:Date.now()},...journal];setJournal(next);await dbSet("cx_journal",next,userId);}setInlineNote(null);}}/>}
           {/* Streak Rescue Banner */}
           {streakRescue&&<StreakRescueBanner rescue={streakRescue} onDismiss={()=>{localStorage.setItem(`cx_rescue_${new Date().toDateString()}_${streakRescue.skillId}`,"1");setStreakRescue(null);}} onLog={()=>{setPendingPractice({skillId:streakRescue.skillId});setStreakRescue(null);setTab("journal");setJournalSubTab("log");localStorage.setItem(`cx_rescue_${new Date().toDateString()}_${streakRescue.skillId}`,"1");}}/>}
           {/* Quest Breakdown Modal */}
@@ -2755,9 +2776,8 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
   },[pending]);
 
   const submit=async()=>{
-    if(!f.typeId) return;
     const ptype=practiceTypes.find(t=>t.id===f.typeId);
-    let baseXp=f.dur*ppm, aiReason=null;
+    let baseXp=Math.max(1,f.dur*ppm), aiReason=null;
     if(f.note.trim()&&aiEnabled){
       setScoring(true);
       try{
@@ -2957,13 +2977,13 @@ Suggest fair XP and a short reason. Reply ONLY with JSON, no markdown: {"xp": NU
             <input className="fi" type="time" style={{colorScheme:"dark",maxWidth:100}} value={f.sessionTime} onChange={e=>setF(v=>({...v,sessionTime:e.target.value}))}/>
           </div>
         )}
-        <button className="fsbtn secondary" style={{marginTop:6,marginBottom:2}} onClick={previewXp} disabled={xpPrevLoad||!f.typeId}>
+        <button className="fsbtn secondary" style={{marginTop:6,marginBottom:2}} onClick={previewXp} disabled={xpPrevLoad}>
           {xpPrevLoad?"thinking...":"⟡ AI XP preview"}
         </button>
         {xpPreview&&<div style={{background:"var(--s2)",border:"1px solid var(--b1)",borderRadius:4,padding:"8px 10px",marginBottom:6,fontSize:11,color:"var(--tx2)",lineHeight:1.5}}>
           {xpPreview.xp?<><span style={{color:"var(--primary)",fontFamily:"'DM Mono',monospace",fontWeight:"bold"}}>~{xpPreview.xp} XP</span> — {xpPreview.reason}<br/><span style={{fontSize:10,color:"var(--tx3)"}}>Final XP calculated on log (journal scoring may adjust)</span></>:xpPreview.reason}
         </div>}
-        <button className="fsbtn secondary" style={{marginTop:4}} onClick={submit} disabled={scoring||!f.typeId}
+        <button className="fsbtn secondary" style={{marginTop:4}} onClick={submit} disabled={scoring}
           key={scoring?"scoring":"idle"}>
           {scoring?"✦ Scoring...":"Log Session"}
         </button>
@@ -4195,15 +4215,299 @@ function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,o
   );
 }
 
-// ─── JOURNAL TAB ────────────────────────────────────────────────────────────
-function JournalTab({entries,skills,quests,meds,practiceTypes,streaks,pending,subTab,onSubTab,onAdd,onDelete,onAwardXp,onEditQuest,onLog,onDeleteMed,onEditMed,onAddType,onDeleteType,onClearPending}){
+// ─── DAY JOURNAL ─────────────────────────────────────────────────────────────
+const GRADE_DIMS=[
+  {id:"output", label:"Output",  desc:"Did I move things forward?",    color:"var(--primary)"},
+  {id:"practice",label:"Practice",desc:"Did I do my inner work?",       color:"var(--secondary)"},
+  {id:"body",   label:"Body",    desc:"Sleep, food, movement",          color:"var(--success)"},
+  {id:"mind",   label:"Mind",    desc:"Focus, clarity, mental state",   color:"#9e6ab5"},
+];
+
+function DayJournalTab({meds,quests,skills,xpLog,dayGrades,onSaveDayGrades,onAdd}){
+  const {settings}=useSettings();
+  const todayStr=new Date().toDateString();
+  const todayKey2=`${new Date().getFullYear()}-${new Date().getMonth()}-${new Date().getDate()}`;
+  const grades=dayGrades||{};
+  const today=grades[todayStr]||{output:0,practice:0,body:0,mind:0,note:""};
+  const [draft,setDraft]=useState(today);
+  const [saved,setSaved]=useState(false);
+  const [aiReflect,setAiReflect]=useState(null);
+  const [reflecting,setReflecting]=useState(false);
+
+  // Auto-populate today's activity context
+  const todayDone=quests.filter(q=>q.done&&q.lastDone&&new Date(q.lastDone).toDateString()===todayStr);
+  const todaySessions=meds.filter(m=>new Date(m.created).toDateString()===todayStr);
+  const todayXp=(xpLog||[]).filter(e=>new Date(e.created).toDateString()===todayStr).reduce((a,e)=>a+e.amt,0);
+
+  const save=async()=>{
+    const next={...grades,[todayStr]:draft};
+    await onSaveDayGrades(next);
+    if(draft.note?.trim()) onAdd({text:draft.note.trim(),img:null,source:"day_grade",created:Date.now()});
+    setSaved(true); setTimeout(()=>setSaved(false),2000);
+  };
+
+  const getAIReflection=async()=>{
+    setReflecting(true); setAiReflect(null);
+    const skPerLv=settings.xp?.skillPerLevel||6000;
+    try{
+      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({max_tokens:200,messages:[{role:"user",content:`Daily reflection for ${new Date().toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}.
+
+Completed quests: ${todayDone.map(q=>q.title).join(", ")||"none"}
+Sessions logged: ${todaySessions.map(m=>m.dur+"min").join(", ")||"none"}
+XP earned: ${todayXp}
+Self-grades (1-5): Output ${draft.output||"?"}/5, Practice ${draft.practice||"?"}/5, Body ${draft.body||"?"}/5, Mind ${draft.mind||"?"}/5
+Note: ${draft.note||"none"}
+
+Write one honest observation (2-3 sentences). Notice any gap between grades and actual activity. No cheerleading.`}]})});
+      const data=await res.json();
+      setAiReflect(data.choices?.[0]?.message?.content||"");
+    }catch{}
+    setReflecting(false);
+  };
+
+  // Past 7 days grade history
+  const last7=Array.from({length:7},(_,i)=>{
+    const d=new Date(); d.setDate(d.getDate()-i);
+    const ds=d.toDateString();
+    return {dateStr:ds,label:i===0?"Today":i===1?"Yesterday":d.toLocaleDateString("en-US",{weekday:"short"}),grade:grades[ds]};
+  }).reverse();
+
+  return(<>
+    {/* Today's context — auto-populated */}
+    {(todayDone.length>0||todaySessions.length>0)&&(
+      <div style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"10px 14px",marginBottom:12}}>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,color:"var(--tx3)",textTransform:"uppercase",marginBottom:6}}>Today's activity</div>
+        {todayDone.map(q=><div key={q.id} style={{fontSize:11,color:"var(--tx2)",marginBottom:2}}>
+          {q.type==="main"?"◆":q.type==="radiant"?"◉":"◇"} {q.title}
+        </div>)}
+        {todaySessions.map(m=>{const pt=m.type;const sk=skills.find(s=>m.skillIds?.includes(s.id));return(<div key={m.id} style={{fontSize:11,color:"var(--tx2)",marginBottom:2}}>◉ {m.dur}min{sk?` · ${sk.name}`:""}</div>);})}
+        {todayXp>0&&<div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--primary)",marginTop:4}}>+{todayXp} XP today</div>}
+      </div>
+    )}
+
+    {/* Grade sliders */}
+    <div style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"12px 14px",marginBottom:12}}>
+      <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,color:"var(--primary)",textTransform:"uppercase",marginBottom:10}}>Today's grades</div>
+      {GRADE_DIMS.map(dim=>(
+        <div key={dim.id} style={{marginBottom:10}}>
+          <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:4}}>
+            <div>
+              <span style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"var(--tx)"}}>{dim.label}</span>
+              <span style={{fontSize:9,color:"var(--tx3)",marginLeft:6}}>{dim.desc}</span>
+            </div>
+            <div style={{display:"flex",gap:4}}>
+              {[1,2,3,4,5].map(n=>(
+                <button key={n} onClick={()=>setDraft(v=>({...v,[dim.id]:n}))}
+                  style={{width:24,height:24,borderRadius:4,border:`1px solid ${draft[dim.id]>=n?dim.color+"66":"var(--b2)"}`,background:draft[dim.id]>=n?dim.color+"22":"none",color:draft[dim.id]>=n?dim.color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:10,cursor:"pointer",transition:"all .1s"}}>
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      ))}
+      <textarea className="fi full" placeholder="How did it actually go? (optional)" rows={2}
+        style={{resize:"vertical",marginBottom:8,fontSize:12}}
+        value={draft.note||""} onChange={e=>setDraft(v=>({...v,note:e.target.value}))}/>
+      <div style={{display:"flex",gap:6}}>
+        <button className="fsbtn primary" style={{flex:1,margin:0}} onClick={save}>
+          {saved?"✓ Saved":"Save day"}
+        </button>
+        <button onClick={getAIReflection} disabled={reflecting}
+          style={{background:"none",border:"1px solid var(--secondaryb)",borderRadius:"var(--r)",padding:"8px 12px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:reflecting?"var(--tx3)":"var(--secondary)",letterSpacing:.5}}>
+          {reflecting?"◌":"⟡"} reflect
+        </button>
+      </div>
+      {aiReflect&&<div style={{marginTop:8,padding:"10px 12px",background:"var(--bg)",border:"1px solid var(--secondaryb)",borderRadius:"var(--r)",fontSize:12,color:"var(--tx2)",lineHeight:1.6}}>{aiReflect}</div>}
+    </div>
+
+    {/* 7-day grade history */}
+    <div style={{marginBottom:12}}>
+      <div className="slbl" style={{marginBottom:8}}>past 7 days</div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",gap:4}}>
+        {last7.map(({dateStr,label,grade})=>{
+          const avg=grade?Math.round((grade.output+grade.practice+grade.body+grade.mind)/4*10)/10:null;
+          return(
+            <div key={dateStr} style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"6px 4px",textAlign:"center"}}>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"var(--tx3)",marginBottom:3}}>{label}</div>
+              {avg!==null
+                ?<div style={{fontFamily:"'DM Mono',monospace",fontSize:13,color:avg>=4?"var(--success)":avg>=3?"var(--primary)":avg>=2?"var(--secondary)":"var(--danger)",fontWeight:"bold"}}>{avg}</div>
+                :<div style={{fontSize:10,color:"var(--b2)"}}>—</div>
+              }
+              {grade&&<div style={{display:"flex",gap:1,justifyContent:"center",marginTop:3}}>
+                {GRADE_DIMS.map(d=><div key={d.id} style={{width:4,height:grade[d.id]*3,background:d.color,borderRadius:1,opacity:.7}}/>)}
+              </div>}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  </>);
+}
+
+// ─── MORNING RITUAL OVERLAY ───────────────────────────────────────────────────
+function MorningRitualOverlay({quests,tasks,skills,streaks,settings,briefing,onClose,onAddTask,onToggleQuest,radiantAvailable}){
+  const {settings:s}=useSettings();
+  const [step,setStep]=useState(0); // 0=briefing, 1=radiant picks, 2=priority picks, 3=confirm
+  const [selectedRadiant,setSelectedRadiant]=useState([]);
+  const [selectedPriority,setSelectedPriority]=useState([]);
+  const [vibe,setVibe]=useState("open");
+  const VIBES=[{id:"grind",label:"⚔ Grind"},{id:"focus",label:"◉ Focus"},{id:"light",label:"◇ Light"},{id:"open",label:"✦ Open"}];
+
+  const availableRadiant=quests.filter(q=>q.type==="radiant"&&!q.done&&(radiantAvailable?radiantAvailable(q):true)).slice(0,8);
+  const activeMains=quests.filter(q=>!q.done&&(q.type==="main"||q.type==="side")).slice(0,6);
+
+  const confirm=()=>{
+    // Pin selected priority items as today's tasks
+    selectedPriority.forEach(qId=>{
+      const q=quests.find(x=>x.id===qId);
+      if(q) onAddTask({title:q.title,period:"daily",skill:(q.skills||[])[0]||null,xpVal:Math.min(80,Math.round(q.xpVal*0.05)),questId:qId,timeBlock:null,priority:"high"});
+    });
+    onClose();
+  };
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.9)",backdropFilter:"blur(6px)",zIndex:700,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div style={{width:"min(500px,100vw)",background:"var(--s1)",borderTop:"1px solid var(--b2)",borderRadius:"12px 12px 0 0",maxHeight:"85vh",overflow:"hidden",display:"flex",flexDirection:"column"}}>
+        {/* Header */}
+        <div style={{padding:"16px 18px 12px",borderBottom:"1px solid var(--b1)",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
+          <div>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,color:"var(--primary)",textTransform:"uppercase",marginBottom:3}}>✦ {new Date().toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}</div>
+            <div style={{fontSize:13,color:"var(--tx)"}}>{step===0?"Morning briefing":step===1?"What are you practicing today?":step===2?"What must move forward?":"Ready"}</div>
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:18,padding:"4px"}}>✕</button>
+        </div>
+
+        <div style={{flex:1,overflowY:"auto",padding:"16px 18px"}}>
+          {step===0&&<>
+            {/* Vibe selector */}
+            <div style={{display:"flex",gap:5,marginBottom:12,flexWrap:"wrap"}}>
+              {VIBES.map(v=><button key={v.id} onClick={()=>setVibe(v.id)}
+                style={{padding:"5px 12px",borderRadius:20,border:`1px solid ${vibe===v.id?"var(--primary)":"var(--b2)"}`,background:vibe===v.id?"var(--primaryf)":"none",color:vibe===v.id?"var(--primary)":"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,cursor:"pointer"}}>
+                {v.label}
+              </button>)}
+            </div>
+            {/* Briefing */}
+            {briefing&&(
+              <div style={{fontSize:12,color:"var(--tx2)",lineHeight:1.7,whiteSpace:"pre-wrap",marginBottom:8}}>
+                {briefing.loading?"Generating briefing…":briefing.text}
+              </div>
+            )}
+          </>}
+
+          {step===1&&<>
+            <div style={{fontSize:11,color:"var(--tx3)",marginBottom:10}}>Tap what you plan to practice today. These stay in the Quest tab — no tasks created.</div>
+            {availableRadiant.length===0&&<div style={{fontSize:12,color:"var(--tx3)",fontStyle:"italic"}}>No radiant quests available right now.</div>}
+            {availableRadiant.map(q=>{
+              const on=selectedRadiant.includes(q.id);
+              const sk=skills.find(s=>(q.skills||[]).includes(s.id));
+              return(
+                <button key={q.id} onClick={()=>setSelectedRadiant(prev=>on?prev.filter(x=>x!==q.id):[...prev,q.id])}
+                  style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"10px 12px",marginBottom:6,background:on?"var(--secondaryf)":"var(--s2)",border:`1px solid ${on?"var(--secondaryb)":"var(--b1)"}`,borderRadius:"var(--r)",cursor:"pointer",textAlign:"left",transition:"all .15s"}}>
+                  <span style={{fontSize:16,color:on?"var(--secondary)":"var(--tx3)"}}>◉</span>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:12,color:"var(--tx)"}}>{q.title}</div>
+                    {sk&&<div style={{fontSize:9,color:sk.color,fontFamily:"'DM Mono',monospace",marginTop:2}}>{sk.icon} {sk.name}</div>}
+                  </div>
+                  {on&&<span style={{color:"var(--secondary)",fontSize:14}}>✓</span>}
+                </button>
+              );
+            })}
+          </>}
+
+          {step===2&&<>
+            <div style={{fontSize:11,color:"var(--tx3)",marginBottom:10}}>Pick up to 3 quests to make today's priority. They'll be pinned to your planner.</div>
+            {activeMains.map(q=>{
+              const on=selectedPriority.includes(q.id);
+              const canAdd=on||selectedPriority.length<3;
+              return(
+                <button key={q.id} onClick={()=>{if(!canAdd&&!on)return;setSelectedPriority(prev=>on?prev.filter(x=>x!==q.id):[...prev,q.id]);}}
+                  style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"10px 12px",marginBottom:6,background:on?"var(--primaryf)":"var(--s2)",border:`1px solid ${on?"var(--primaryb)":"var(--b1)"}`,borderRadius:"var(--r)",cursor:canAdd||on?"pointer":"default",opacity:!canAdd&&!on?.4:1,textAlign:"left",transition:"all .15s"}}>
+                  <span style={{fontSize:14,color:on?"var(--primary)":"var(--tx3)"}}>{q.type==="main"?"◆":"◇"}</span>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:12,color:"var(--tx)"}}>{q.title}</div>
+                    <div style={{fontSize:9,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",marginTop:2}}>{q.type} · +{q.xpVal} XP</div>
+                  </div>
+                  {on&&<span style={{color:"var(--primary)",fontSize:14}}>✓</span>}
+                </button>
+              );
+            })}
+          </>}
+
+          {step===3&&<>
+            <div style={{fontSize:12,color:"var(--tx2)",lineHeight:1.7,marginBottom:12}}>
+              {selectedPriority.length>0?`${selectedPriority.length} quest${selectedPriority.length>1?"s":""} pinned to today.`:"No quests pinned — your day is open."}
+              {selectedRadiant.length>0&&` ${selectedRadiant.length} practice${selectedRadiant.length>1?"s":""} intended.`}
+            </div>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"var(--tx3)",textAlign:"center",paddingTop:8}}>
+              {vibe==="grind"&&"⚔ Grind day. Make it count."}
+              {vibe==="focus"&&"◉ Focus day. Go deep."}
+              {vibe==="light"&&"◇ Light day. Small wins."}
+              {vibe==="open"&&"✦ Open day. Follow what calls."}
+            </div>
+          </>}
+        </div>
+
+        {/* Footer nav */}
+        <div style={{padding:"12px 18px",borderTop:"1px solid var(--b1)",display:"flex",gap:8,flexShrink:0}}>
+          {step>0&&<button onClick={()=>setStep(s=>s-1)} style={{background:"none",border:"1px solid var(--b2)",borderRadius:"var(--r)",padding:"10px 16px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)"}}>← Back</button>}
+          {step<3
+            ?<button onClick={()=>setStep(s=>s+1)} style={{flex:1,background:"var(--primaryf)",border:"1px solid var(--primaryb)",borderRadius:"var(--r)",padding:"10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1,color:"var(--primary)",textTransform:"uppercase"}}>
+               {step===0?"Set today's vibe →":step===1?"Choose priorities →":"Review →"}
+             </button>
+            :<button onClick={confirm} style={{flex:1,background:"var(--primary)",border:"none",borderRadius:"var(--r)",padding:"10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1,color:"var(--bg)",textTransform:"uppercase"}}>
+               ✦ Start the day
+             </button>
+          }
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── INLINE QUEST NOTE POPUP ──────────────────────────────────────────────────
+function InlineNotePopup({questTitle,questType,onClose,onSave}){
+  const [note,setNote]=useState("");
+  const ref=useRef(null);
+  useEffect(()=>{ref.current?.focus();},[]);
+  const save=()=>onSave(note);
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.6)",backdropFilter:"blur(3px)",zIndex:600,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
+      <div style={{width:"min(480px,100vw)",background:"var(--s1)",borderTop:"1px solid var(--b2)",borderRadius:"10px 10px 0 0",padding:"16px 18px 24px"}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:10}}>
+          <span style={{fontSize:14}}>{questType==="main"?"◆":"◇"}</span>
+          <div style={{flex:1}}>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:1.5,color:"var(--success)",textTransform:"uppercase",marginBottom:2}}>Quest complete</div>
+            <div style={{fontSize:12,color:"var(--tx2)",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{questTitle}</div>
+          </div>
+          <button onClick={onClose} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:14}}>✕</button>
+        </div>
+        <textarea ref={ref} className="fi full" placeholder="How did it go? (optional)" rows={2}
+          style={{resize:"none",marginBottom:8,fontSize:13}}
+          value={note} onChange={e=>setNote(e.target.value)}
+          onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();save();}}}/>
+        <div style={{display:"flex",gap:6}}>
+          <button className="fsbtn primary" style={{flex:1,margin:0}} onClick={save}>
+            {note.trim()?"✓ Save note":"✓ Done"}
+          </button>
+          <button onClick={onClose} style={{background:"none",border:"1px solid var(--b2)",borderRadius:"var(--r)",padding:"8px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)"}}>Skip</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── JOURNAL TAB ─────────────────────────────────────────────────────────────
+function JournalTab({entries,skills,quests,meds,practiceTypes,streaks,pending,subTab,onSubTab,onAdd,onDelete,onAwardXp,onEditQuest,onLog,onDeleteMed,onEditMed,onAddType,onDeleteType,onClearPending,dayGrades,onSaveDayGrades,xpLog}){
   const {settings}=useSettings(); const L=settings.labels;
   return(<>
     <div className="jtab-row">
+      <button className={`jtab ${subTab==="day"?"on":""}`} onClick={()=>onSubTab("day")}>◈ Day</button>
       <button className={`jtab ${subTab==="log"?"on":""}`} onClick={()=>onSubTab("log")}>◉ Log</button>
       <button className={`jtab ${subTab==="entries"?"on":""}`} onClick={()=>onSubTab("entries")}>✦ Entries</button>
-      <button className={`jtab ${subTab==="history"?"on":""}`} onClick={()=>onSubTab("history")}>◈ History</button>
+      <button className={`jtab ${subTab==="history"?"on":""}`} onClick={()=>onSubTab("history")}>⊞ History</button>
     </div>
+    {subTab==="day"&&<DayJournalTab meds={meds} quests={quests} skills={skills} xpLog={xpLog} dayGrades={dayGrades} onSaveDayGrades={onSaveDayGrades} onAdd={onAdd}/>}
     {subTab==="log"&&<PracticeTab meds={meds} skills={skills} streaks={streaks} pending={pending} practiceTypes={practiceTypes} onAddType={onAddType} onDeleteType={onDeleteType} onLog={onLog} onDelete={onDeleteMed} onEdit={onEditMed} onClearPending={onClearPending}/>}
     {subTab==="entries"&&<JournalEntries entries={entries} skills={skills} quests={quests} onAdd={onAdd} onDelete={onDelete} onAwardXp={onAwardXp} onEditQuest={onEditQuest}/>}
     {subTab==="history"&&<PracticeHistory meds={meds} skills={skills}/>}

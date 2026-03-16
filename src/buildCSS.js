@@ -168,6 +168,34 @@ button,input,textarea,select{font-family:'DM Sans',sans-serif;}
 .topt{display:flex;align-items:center;gap:8px;padding:8px 10px;background:var(--s2);border:1px solid var(--b1);border-radius:var(--r);cursor:pointer;font-size:12px;color:var(--tx2);transition:all .15s;text-align:left;}
 .topt:hover{border-color:var(--b2);}
 .topt.on{background:var(--secondaryf);border-color:var(--secondaryb);color:var(--tx);}
+.dur-hdr{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px;padding:4px 0;}
+.dur-val{font-family:'DM Mono',monospace;font-size:10px;color:var(--tx3);}
+.ai-lbl{font-family:'DM Mono',monospace;font-size:9px;letter-spacing:1px;color:var(--secondary);margin-bottom:6px;}
+.exp-tog{display:flex;align-items:center;gap:6px;background:none;border:none;color:var(--tx3);cursor:pointer;font-family:'DM Mono',monospace;font-size:9px;padding:4px 0;margin-bottom:4px;}
+.exp-arr{display:inline-block;transition:transform .2s;font-size:8px;}
+.exp-arr.open{transform:rotate(180deg);}
+/* ── MED/SESSION CARDS ── */
+.med-card{background:var(--s1);border:1px solid var(--b1);border-left:3px solid var(--secondaryb);border-radius:var(--r);padding:10px 12px;display:flex;align-items:flex-start;gap:10px;margin-bottom:6px;transition:border-color .15s;}
+.med-card:hover{border-color:var(--b2);}
+.med-icon{font-size:18px;line-height:1;flex-shrink:0;margin-top:1px;}
+.med-body{flex:1;min-width:0;}
+.med-name{font-size:13px;color:var(--tx);font-weight:400;margin-bottom:3px;}
+.med-sub{font-family:'DM Mono',monospace;font-size:9px;color:var(--tx3);letter-spacing:.3px;display:flex;flex-wrap:wrap;gap:4px;align-items:center;margin-bottom:3px;}
+.med-reason{font-family:'DM Mono',monospace;font-size:9px;color:var(--secondary);margin-top:3px;font-style:italic;}
+.med-journal{font-size:12px;color:var(--tx2);line-height:1.6;margin-top:6px;overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
+.med-journal.exp{-webkit-line-clamp:unset;display:block;}
+.jrnl-btn{background:none;border:none;color:var(--tx3);font-family:'DM Mono',monospace;font-size:8px;cursor:pointer;padding:2px 0;letter-spacing:.5px;}
+/* ── EMPTY STATES ── */
+.empty-state{text-align:center;padding:40px 16px;color:var(--tx3);}
+.es-icon{font-size:32px;margin-bottom:10px;opacity:.4;}
+.es-title{font-size:14px;color:var(--tx2);margin-bottom:6px;font-weight:400;}
+.es-desc{font-size:12px;color:var(--tx3);line-height:1.6;max-width:280px;margin:0 auto;}
+/* ── PRACTICE NUDGE ── */
+.practice-nudge{display:flex;align-items:center;gap:6px;padding:6px 8px;background:var(--secondaryf);border:1px solid var(--secondaryb);border-radius:var(--r);margin-top:4px;margin-bottom:2px;}
+.nudge-text{flex:1;font-family:'DM Mono',monospace;font-size:9px;color:var(--secondary);letter-spacing:.5px;}
+.nudge-btn{background:none;border:1px solid var(--secondaryb);border-radius:3px;cursor:pointer;font-family:'DM Mono',monospace;font-size:8px;padding:2px 8px;transition:all .15s;}
+.nudge-btn.nudge-yes{color:var(--secondary);}.nudge-btn.nudge-yes:hover{background:var(--secondary);color:var(--bg);}
+.nudge-btn.nudge-no{color:var(--tx3);}
 /* ── AI / ADVISOR ── */
 .ai-intro{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);padding:14px 16px;margin-bottom:10px;}
 .ai-intro-title{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:1.5px;text-transform:uppercase;color:var(--primary);margin-bottom:5px;}
