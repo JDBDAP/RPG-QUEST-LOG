@@ -179,7 +179,7 @@ export default function App(){
   useEffect(()=>{
     if(!loaded||!skills.length) return;
     generateBriefing(tasks,quests,skills,streaks,settings);
-    checkStreakRescue(skills,streaks,tasks);
+    checkStreakRescue(skills,streaks,tasks,quests);
     if(settings.profile.setup){
       const todayStr=new Date().toDateString();
       const lastRitual=localStorage.getItem("cx_last_ritual");
@@ -308,24 +308,59 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
   },[]);
 
   // ── STREAK RESCUE ────────────────────────────────────────────────────────
-  const checkStreakRescue=useCallback(async(skillsSnap,streaksSnap,tasksSnap)=>{
+  const checkStreakRescue=useCallback(async(skillsSnap,streaksSnap,tasksSnap,questsSnap)=>{
     const hour=new Date().getHours();
     if(hour<18) return; // only after 6pm
     const todayStr=new Date().toDateString();
-    const endangered=Object.entries(streaksSnap||{})
+    const todayIso=new Date().toISOString().split("T")[0];
+
+    // Check skills with streaks about to break
+    const endangeredSkills=Object.entries(streaksSnap||{})
       .filter(([id,s])=>s.count>=3&&s.lastDate&&new Date(s.lastDate).toDateString()!==todayStr)
-      .map(([id,s])=>({id,name:skillsSnap.find(sk=>sk.id===id)?.name||id,count:s.count}));
-    if(!endangered.length) return;
-    const target=endangered.sort((a,b)=>b.count-a.count)[0];
+      .map(([id,s])=>({id,name:skillsSnap.find(sk=>sk.id===id)?.name||id,count:s.count,type:"skill"}));
+
+    // Check radiant quests due today that haven't been done
+    const endangeredRadiants=(questsSnap||[])
+      .filter(q=>{
+        if(q.type!=="radiant"||q.done) return false;
+        if(!radiantDueToday(q)) return false;
+        if(!q.lastDone) return false;
+        // Has a streak (done yesterday or within last scheduled period)
+        const lastDoneDate=new Date(q.lastDone).toDateString();
+        if(lastDoneDate===todayStr) return false; // already done today
+        // Check it was done recently enough to have a streak worth rescuing
+        const daysSince=Math.floor((Date.now()-q.lastDone)/86400000);
+        return daysSince<=2; // streak endangered within 2 days
+      })
+      .map(q=>{
+        // Estimate streak length
+        let streak=0;
+        const today2=new Date(); today2.setHours(0,0,0,0);
+        for(let i=1;i<=90;i++){
+          const d=new Date(today2); d.setDate(today2.getDate()-i);
+          const ds=d.toISOString().split("T")[0];
+          if(!radiantDueToday({...q})) continue;
+          if(q.completions?.[ds]||new Date(q.lastDone).toISOString().split("T")[0]===ds) streak++;
+          else break;
+        }
+        return {id:q.id,name:q.title,count:Math.max(streak,1),type:"radiant",skillId:(q.skills||[])[0]||null};
+      })
+      .filter(q=>q.count>=2);
+
+    const allEndangered=[...endangeredSkills,...endangeredRadiants];
+    if(!allEndangered.length) return;
+
+    const target=allEndangered.sort((a,b)=>b.count-a.count)[0];
     const alreadyRescued=localStorage.getItem(`cx_rescue_${todayStr}_${target.id}`);
     if(alreadyRescued) return;
+
     try{
-      const relatedTasks=tasksSnap.filter(t=>t.skill===target.id).map(t=>t.title).slice(0,3);
+      const relatedTasks=tasksSnap.filter(t=>t.skill===target.skillId||t.skill===target.id).map(t=>t.title).slice(0,3);
       const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
         body:JSON.stringify({max_tokens:80,messages:[{role:"user",content:`A ${target.count}-day streak for "${target.name}" is about to break. Suggest ONE minimal action (2-5 min) to keep it alive. Related tasks: ${relatedTasks.join(", ")||"none"}. Reply in one short sentence, no intro.`}]})});
       const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
       const suggestion=data.choices?.[0]?.message?.content||`Do one small ${target.name} action to protect your streak.`;
-      setStreakRescue({skillId:target.id,skillName:target.name,count:target.count,suggestion});
+      setStreakRescue({skillId:target.type==="skill"?target.id:target.skillId,questId:target.type==="radiant"?target.id:null,skillName:target.name,count:target.count,suggestion});
     }catch{}
   },[]);
 
@@ -433,8 +468,9 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
   },[]);
 
   const addTask=async d=>{
-    const newTask={id:uid(),...d,done:false,dayKey:d.period==="daily"?todayKey():null,created:Date.now()};
-    setTasks(prev=>{const next=[newTask,...prev];dbSet("cx_tasks",next,userId);return next;});
+    const dk = d.dayKey ?? (d.period==="daily" ? todayKey() : null);
+    const newTask={id:uid(),...d,done:false,dayKey:dk,created:Date.now()};
+    setTasks(prev=>{const next=[newTask,...prev];dbSet("cx_tasks",next,userId,stampWrite);return next;});
     showToast("Task added");
   };
   const toggleTask=async id=>{
@@ -574,6 +610,32 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
   const deleteJournalEntry=async(id)=>{
     const next=journal.filter(e=>e.id!==id);
     setJournal(next); await dbSet("cx_journal",next,userId,stampWrite);
+  };
+
+  // Award XP from a quest conversation (questId, amount, label)
+  const awardFromQuest=async(questId,amt,label)=>{
+    if(!amt||amt<=0) return;
+    const q=quests.find(x=>x.id===questId); if(!q) return;
+    const primary=(q.skills||[])[0]||null;
+    const skPerLvLocal=settings.xp.skillPerLevel||6000;
+    let newStr=streaks;
+    if(primary){ newStr=updateStreak(streaks,primary); await saveStr(newStr); }
+    const streak=primary?(newStr[primary]||{count:0}):{count:0};
+    const mult=getMultiplier(streak.count);
+    const finalAmt=Math.round(amt*mult);
+    const nx=xp+finalAmt; setXp(nx); await dbSet("cx_xp",nx,userId,stampWrite);
+    if(primary){
+      const newSkills=skills.map(s=>{
+        if(s.id!==primary) return s;
+        const oldLv=skillLv(s.xp,skPerLvLocal),newXp=s.xp+finalAmt,newLv=skillLv(newXp,skPerLvLocal);
+        if(newLv>oldLv) setTimeout(()=>showToast(`◆ ${s.name} Level ${newLv}`),500);
+        return {...s,xp:newXp};
+      });
+      setSkills(newSkills); await dbSet("cx_skills",newSkills,userId,stampWrite);
+    }
+    await saveXpLog({id:uid(),amt:finalAmt,label,skill:skills.find(s=>s.id===primary)?.name||null,multiplier:mult,created:Date.now()});
+    spawnFloat(finalAmt);
+    showToast(`+${finalAmt} ${L.xpName}${mult>1?` · ${streak.count}d ${mult}×`:""}`);
   };
 
   // ── COMMUNITY FUNCTIONS ──────────────────────────────────────────────────
@@ -879,7 +941,7 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
                 if(sk) setNudge({taskId:id,skillId:t.skill,skillName:sk.name});
               }
             }} onDelete={deleteTask} onEdit={editTask} onToggleQuest={toggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} nudge={nudge} onDismissNudge={()=>setNudge(null)} onAcceptNudge={()=>{if(nudge){setPendingPractice({skillId:nudge.skillId});setNudge(null);setTab("journal");setJournalSubTab("log");}}} dailyBriefing={dailyBriefing} onRefreshBriefing={()=>{localStorage.removeItem("cx_briefing");generateBriefing(tasks,quests,skills,streaks,settings);}} onOpenBreakdown={qid=>setShowBreakdown(qid)} onOpenSkillGap={()=>setShowSkillGap(true)}/>}
-            {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest} onReorder={q=>saveQ(q)} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={qid=>setShowBreakdown(qid)}/>}
+            {tab==="quests"   && <QuestsTab quests={quests} skills={skills} onAdd={addQuest} onToggle={toggleQuest} onDelete={deleteQuest} onEdit={editQuest} onAddSubquest={addSubquest} onToggleSubquest={toggleSubquest} onDeleteSubquest={deleteSubquest} onReorder={q=>saveQ(q)} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={qid=>setShowBreakdown(qid)} onAwardXp={awardFromQuest}/>}
             {tab==="skills"   && <SkillsTab skills={skills} skPerLv={skPerLv} streaks={streaks} meds={meds} xpLog={xpLog} onAdd={addSkill} onAddBatch={addSkillBatch} onDelete={deleteSkill} onEdit={editSkill} onReorder={reorderSkills} onLink={linkSubskill} onStartFocus={startFocus} onAward={async(skillId,amt,reason)=>{const {leveledUp,milestone:ms}=await award(amt,skillId,xp,skills,streaks,`✦ ${reason}`);spawnFloat(amt);showToast(`+${amt} ${settings.labels.xpName}`);if(leveledUp&&!ms)setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);if(ms)setMilestone(ms);}} onOpenSkillGap={()=>setShowSkillGap(true)}/>}
             {tab==="journal"  && <JournalTab entries={journal} skills={skills} quests={quests} meds={meds} practiceTypes={practiceTypes} streaks={streaks} pending={pendingPractice} subTab={journalSubTab} onSubTab={setJournalSubTab} onAdd={addJournalEntry} onDelete={deleteJournalEntry} onAwardXp={awardFromJournal} onEditQuest={editQuest} onLog={logMed} onDeleteMed={deleteMed} onEditMed={editMed} onAddType={addPracticeType} onDeleteType={deletePracticeType} onClearPending={()=>setPendingPractice(null)} dayGrades={dayGrades} onSaveDayGrades={saveDayGrades} xpLog={xpLog}/>}
             {tab==="advisor"  && <AdvisorTab tasks={tasks} quests={quests} skills={skills} xp={xp} level={level} streaks={streaks} journal={journal} meds={meds} onAddQuest={addQuest} onAddTask={addTask} onLogMed={logMed} onEditQuest={editQuest} onDeleteQuest={deleteQuest} onDeleteTask={deleteTask} onAddSkill={addSkill} onDeleteSkill={id=>saveS(skills.filter(s=>s.id!==id))} onAdjustSkillXp={async(skillId,amt,reason)=>{const {leveledUp,milestone:ms}=await award(amt,skillId,xp,skills,streaks,`✦ ${reason}`);spawnFloat(Math.abs(amt));showToast(`${amt>0?"+":""}${amt} ${L.xpName} → ${skills.find(s=>s.id===skillId)?.name||"skill"}`);if(leveledUp&&!ms)setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);if(ms)setMilestone(ms);}} aiMemory={aiMemory} onUpdateMemory={async(m)=>{setAiMemory(m);await dbSet("cx_aimem",m,userId,stampWrite);}} initialMsgs={advisorLog} onSaveMsgs={async(m)=>{setAdvisorLog(m);await dbSet("cx_advisor",m,userId,stampWrite);}}/>}
@@ -894,7 +956,7 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
           {/* Inline quest completion note */}
           {inlineNote&&<InlineNotePopup questId={inlineNote.questId} questTitle={inlineNote.questTitle} questType={inlineNote.questType} onClose={()=>setInlineNote(null)} onSave={async(note)=>{if(note.trim()){const next=[{id:uid(),text:`[${inlineNote.questType==="main"?"◆":"◇"} ${inlineNote.questTitle}]\n${note.trim()}`,img:null,source:"quest",questId:inlineNote.questId,created:Date.now()},...journal];setJournal(next);await dbSet("cx_journal",next,userId,stampWrite);}setInlineNote(null);}}/>}
           {/* Streak Rescue Banner */}
-          {streakRescue&&<StreakRescueBanner rescue={streakRescue} onDismiss={()=>{localStorage.setItem(`cx_rescue_${new Date().toDateString()}_${streakRescue.skillId}`,"1");setStreakRescue(null);}} onLog={()=>{setPendingPractice({skillId:streakRescue.skillId});setStreakRescue(null);setTab("journal");setJournalSubTab("log");localStorage.setItem(`cx_rescue_${new Date().toDateString()}_${streakRescue.skillId}`,"1");}}/>}
+          {streakRescue&&<StreakRescueBanner rescue={streakRescue} onDismiss={()=>{localStorage.setItem(`cx_rescue_${new Date().toDateString()}_${streakRescue.questId||streakRescue.skillId}`,"1");setStreakRescue(null);}} onLog={()=>{if(streakRescue.questId){toggleQuest(streakRescue.questId);}else{setPendingPractice({skillId:streakRescue.skillId});setTab("journal");setJournalSubTab("log");}setStreakRescue(null);localStorage.setItem(`cx_rescue_${new Date().toDateString()}_${streakRescue.questId||streakRescue.skillId}`,"1");}}/>}
           {/* Quest Breakdown Modal */}
           {showBreakdown&&<QuestBreakdownModal questId={showBreakdown} quests={quests} skills={skills} settings={settings} onClose={()=>setShowBreakdown(null)} onAddSubquest={addSubquest} onAddQuest={addQuest} showToast={showToast}/>}
           {/* Skill Gap Modal */}
@@ -975,10 +1037,11 @@ function ProfileSetup({onComplete}){
 }
 
 // ── AI DAY PLANNER ────────────────────────────────────────────────────────────
-function DailyAIPlan({quests,tasks,skills,onAddTask}){
+function DailyAIPlan({quests,tasks,skills,onAddTask,hasBlocks}){
   const {settings}=useSettings();
+  const [open,setOpen]=useState(!hasBlocks); // collapsed when blocks already populated
   const [loading,setLoading]=useState(false);
-  const [plan,setPlan]=useState(null); // [{title,timeBlock,skillId,xpVal,reason}]
+  const [plan,setPlan]=useState(null);
   const [vibe,setVibe]=useState("grind");
   const VIBES=[{id:"grind",label:"⚔ Grind",sub:"Main quests, high XP"},{id:"focus",label:"◉ Focus",sub:"Skill practice, depth"},{id:"light",label:"◇ Light",sub:"Quick wins, admin"},{id:"open",label:"✦ Open",sub:"AI decides"}];
 
@@ -1005,10 +1068,18 @@ function DailyAIPlan({quests,tasks,skills,onAddTask}){
   const acceptAll=()=>{ plan.forEach(accept); };
 
   return(
-    <div style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"12px 14px",marginBottom:12}}>
+    <>
+    {!open
+      ? <button onClick={()=>setOpen(true)} style={{display:"flex",alignItems:"center",gap:6,background:"none",border:"1px dashed var(--b2)",borderRadius:"var(--r)",padding:"6px 12px",cursor:"pointer",color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:.8,marginBottom:10,transition:"all .15s"}}>
+          ⟡ AI day plan
+        </button>
+      : <div style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"12px 14px",marginBottom:12}}>
       <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
         <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,color:"var(--primary)",textTransform:"uppercase"}}>⟡ AI Day Plan</div>
-        {plan&&<button onClick={acceptAll} style={{background:"var(--primaryf)",border:"1px solid var(--primaryb)",borderRadius:3,padding:"3px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--primary)",letterSpacing:.5}}>+ Add all</button>}
+        <div style={{display:"flex",gap:6}}>
+          {plan&&<button onClick={acceptAll} style={{background:"var(--primaryf)",border:"1px solid var(--primaryb)",borderRadius:3,padding:"3px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--primary)",letterSpacing:.5}}>+ Add all</button>}
+          <button onClick={()=>setOpen(false)} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:12,padding:"0 2px"}}>✕</button>
+        </div>
       </div>
       <div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>
         {VIBES.map(v=><button key={v.id} onClick={()=>setVibe(v.id)}
@@ -1035,7 +1106,8 @@ function DailyAIPlan({quests,tasks,skills,onAddTask}){
         </div>
       ))}
       {plan&&plan.length===0&&<div style={{fontSize:11,color:"var(--success)",fontFamily:"'DM Mono',monospace",padding:"4px 0"}}>✓ All tasks added</div>}
-    </div>
+    </div>}
+    </>
   );
 }
 
@@ -1163,6 +1235,87 @@ function MonthlyAIPlan({quests,tasks,skills,onAddTask}){
             <button onClick={()=>setPlan(prev=>prev.filter(p=>p!==item))} style={{background:"none",border:"none",cursor:"pointer",color:"var(--tx3)",fontSize:11,padding:"2px"}}>✕</button>
           </div>
         ))}
+        {plan.length===0&&<div style={{fontSize:11,color:"var(--success)",fontFamily:"'DM Mono',monospace"}}>✓ All milestones added</div>}
+        <button onClick={generate} style={{marginTop:8,background:"none",border:"1px solid var(--b2)",borderRadius:4,padding:"5px 12px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)"}}>↺ Regenerate</button>
+      </>}
+    </div>
+  );
+}
+
+// ── AI YEAR PLANNER ───────────────────────────────────────────────────────────
+function YearlyAIPlan({quests,tasks,skills,onAddTask}){
+  const {settings}=useSettings();
+  const [loading,setLoading]=useState(false);
+  const [plan,setPlan]=useState(null);
+  const [open,setOpen]=useState(false);
+  const yr=new Date().getFullYear();
+  const months=["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+
+  const generate=async()=>{
+    setLoading(true); setPlan(null);
+    const skPerLv=settings.xp?.skillPerLevel||6000;
+    const mainQ=quests.filter(q=>!q.done&&q.type==="main").slice(0,8).map(q=>`"${q.title}"`).join(", ");
+    const topSkills=skills.filter(s=>s.type!=="subskill").sort((a,b)=>(b.xp||0)-(a.xp||0)).slice(0,5).map(s=>`${s.name} Lv${Math.floor((s.xp||0)/skPerLv)+1}`).join(", ");
+    try{
+      const data=await aiCall({max_tokens:600,messages:[{role:"user",content:`Create an annual roadmap for ${yr}.
+
+Main quests: ${mainQ||"none"}
+Top skills: ${topSkills||"none"}
+
+Generate 8-12 milestones spread across the year. Assign each a month (0=Jan, 11=Dec). Be realistic — spread ambitious goals, don't pile everything into one month.
+Reply ONLY with JSON array:
+[{"title":"milestone","month":0,"skillId":"id or null","xpVal":number,"note":"brief why"}]
+Skill IDs: ${skills.map(s=>s.id+"="+s.name).join(",")||"none"}`}]});
+      const raw=(data.choices?.[0]?.message?.content||"").replace(/```json|```/g,"").trim();
+      const m=raw.match(/\[[\s\S]*\]/);
+      if(m) setPlan(JSON.parse(m[0]));
+    }catch{}
+    setLoading(false);
+  };
+
+  const accept=(item)=>{
+    const targetDate=new Date(yr,item.month||0,15);
+    onAddTask({title:item.title,period:"yearly",skill:item.skillId||null,xpVal:item.xpVal||200,questId:null,timeBlock:null,priority:"med",dayKey:targetDate.toISOString().split("T")[0]});
+    setPlan(prev=>prev.filter(p=>p!==item));
+  };
+
+  if(!open) return(
+    <button onClick={()=>setOpen(true)} style={{display:"flex",alignItems:"center",gap:6,background:"none",border:"1px dashed var(--b2)",borderRadius:"var(--r)",padding:"8px 14px",cursor:"pointer",color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:.8,width:"100%",marginBottom:10}}>
+      <span>⟡</span> AI plan this year
+    </button>
+  );
+
+  return(
+    <div style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"12px 14px",marginBottom:12}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:8}}>
+        <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,color:"var(--primary)",textTransform:"uppercase"}}>⟡ {yr} Roadmap</div>
+        <button onClick={()=>setOpen(false)} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:12}}>✕</button>
+      </div>
+      {!plan&&<button onClick={generate} disabled={loading} style={{background:"none",border:"1px solid var(--b2)",borderRadius:4,padding:"7px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:loading?"var(--tx3)":"var(--tx2)",width:"100%"}}>
+        {loading?"⟡ Planning the year…":"⟡ Generate year roadmap"}
+      </button>}
+      {plan&&<>
+        {months.map((m,mi)=>{
+          const mItems=plan.filter(p=>(p.month??0)===mi);
+          if(!mItems.length) return null;
+          return(<div key={mi} style={{marginBottom:8}}>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",letterSpacing:1,marginBottom:4}}>{m}</div>
+            {mItems.map((item,j)=>(
+              <div key={j} style={{display:"flex",alignItems:"flex-start",gap:8,padding:"5px 0",borderBottom:"1px solid var(--b1)"}}>
+                <div style={{flex:1,minWidth:0}}>
+                  <div style={{fontSize:12,color:"var(--tx)"}}>{item.title}</div>
+                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",display:"flex",gap:8,marginTop:2}}>
+                    {item.skillId&&<span>{skills.find(s=>s.id===item.skillId)?.name}</span>}
+                    <span>+{item.xpVal} XP</span>
+                    {item.note&&<span style={{fontStyle:"italic"}}>— {item.note}</span>}
+                  </div>
+                </div>
+                <button onClick={()=>accept(item)} style={{background:"var(--primaryf)",border:"1px solid var(--primaryb)",borderRadius:3,padding:"2px 8px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--primary)",flexShrink:0}}>+</button>
+                <button onClick={()=>setPlan(prev=>prev.filter(p=>p!==item))} style={{background:"none",border:"none",cursor:"pointer",color:"var(--tx3)",fontSize:11,padding:"2px",flexShrink:0}}>✕</button>
+              </div>
+            ))}
+          </div>);
+        })}
         {plan.length===0&&<div style={{fontSize:11,color:"var(--success)",fontFamily:"'DM Mono',monospace"}}>✓ All milestones added</div>}
         <button onClick={generate} style={{marginTop:8,background:"none",border:"1px solid var(--b2)",borderRadius:4,padding:"5px 12px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)"}}>↺ Regenerate</button>
       </>}
@@ -1435,6 +1588,52 @@ function HabitsTab({habits,skills,onAdd,onEdit,onDelete,onLog}){
   </>);
 }
 
+// ── WEEKLY DAY ROW ────────────────────────────────────────────────────────────
+function WkDayRow({d,dk,isToday,dayIdx,dayLabel,dt,dq,skills,quests,onAddTask,onToggle,onDelete,onEdit,onToggleQuest,radiantAvailable,radiantCooldownLabel,onOpenBreakdown,onDragStart,onDrop}){
+  const [adding,setAdding]=useState(false);
+  const [val,setVal]=useState("");
+  const inputRef=useRef(null);
+  useEffect(()=>{if(adding) inputRef.current?.focus();},[adding]);
+
+  const commit=()=>{
+    if(val.trim()) onAddTask({title:val.trim(),period:"daily",skill:null,xpVal:20,questId:null,timeBlock:null,priority:"med",dayKey:dk});
+    setVal(""); setAdding(false);
+  };
+
+  return(
+    <div className="wk-day"
+      onDragOver={e=>{e.preventDefault();e.currentTarget.style.outline="1px dashed var(--primaryb)";}}
+      onDragLeave={e=>{e.currentTarget.style.outline="none";}}
+      onDrop={e=>{e.currentTarget.style.outline="none";onDrop(e,dk);}}>
+      <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+        <div className={`wk-day-lbl ${isToday?"today":""}`} style={{marginBottom:0}}>
+          {dayLabel} {d.getDate()}{isToday?" · today":""}
+        </div>
+        <button onClick={()=>setAdding(v=>!v)}
+          style={{background:"none",border:"none",color:adding?"var(--primary)":"var(--tx3)",cursor:"pointer",fontSize:14,padding:"0 4px",lineHeight:1,fontFamily:"'DM Mono',monospace",transition:"color .15s"}}
+          title={`Add task to ${dayLabel}`}>+</button>
+      </div>
+      {adding&&(
+        <div style={{display:"flex",gap:4,marginBottom:6}}>
+          <input ref={inputRef} className="fi" placeholder="Task name…" value={val}
+            onChange={e=>setVal(e.target.value)}
+            onKeyDown={e=>{if(e.key==="Enter")commit();if(e.key==="Escape"){setAdding(false);setVal("");}}}
+            style={{flex:1,fontSize:11,padding:"4px 8px"}}/>
+          <button onClick={commit} style={{background:"var(--primaryf)",border:"1px solid var(--primaryb)",borderRadius:"var(--r)",padding:"4px 10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--primary)"}}>+</button>
+          <button onClick={()=>{setAdding(false);setVal("");}} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:12,padding:"2px 4px"}}>✕</button>
+        </div>
+      )}
+      {dt.length===0&&dq.length===0&&!adding
+        ?<div style={{fontSize:12,color:"var(--tx3)",paddingLeft:2}}>—</div>
+        :<>
+          {dq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>)}
+          <div className="clist">{dt.map(t=><div key={t.id} draggable onDragStart={e=>onDragStart(e,t.id)} style={{cursor:"grab"}}><TaskCard task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/></div>)}</div>
+        </>
+      }
+    </div>
+  );
+}
+
 function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAddTask,onToggle,onDelete,onEdit,onToggleQuest,radiantAvailable,radiantCooldownLabel,nudge,onDismissNudge,onAcceptNudge,dailyBriefing,onRefreshBriefing,onOpenBreakdown,onOpenSkillGap}){
   const {settings}=useSettings(); const L=settings.labels;
   const [showForm,setShowForm]=useState(false);
@@ -1673,10 +1872,8 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
       <Block id="afternoon" label="☀️ Afternoon" items={byBlock("afternoon")}/>
       <Block id="evening"   label="🌙 Evening"   items={byBlock("evening")}/>
 
-      {/* AI day planner — shown when blocks are empty to encourage use */}
-      {byBlock("morning").length===0&&byBlock("afternoon").length===0&&byBlock("evening").length===0&&(
-        <DailyAIPlan quests={quests} tasks={allTasks} skills={skills} onAddTask={onAddTask}/>
-      )}
+      {/* AI day planner — always accessible */}
+      <DailyAIPlan quests={quests} tasks={allTasks} skills={skills} onAddTask={onAddTask} hasBlocks={byBlock("morning").length>0||byBlock("afternoon").length>0||byBlock("evening").length>0}/>
 
       <Block id="flexible" label="◈ Flexible / Unscheduled" items={[...tasks.filter(t=>!t.done&&!t.timeBlock).sort(sortByPrio),...availableRadiant]}/>
 
@@ -1773,18 +1970,11 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
         const dt=[...new Map([...allTasks.filter(t=>t.dayKey===dk),...allTasks.filter(t=>t.period==="weekly"&&(t.recurrenceDays||[]).includes(dayIdx))].map(t=>[t.id,t])).values()];
         const dq=questsForDay(dk);
         return (
-          <div key={i} className="wk-day" onDragOver={e=>{e.preventDefault();e.currentTarget.style.outline="1px dashed var(--primaryb)";}} onDragLeave={e=>{e.currentTarget.style.outline="none";}} onDrop={e=>{e.currentTarget.style.outline="none";handleDrop(e,dk);}}>
-            <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
-              <div className={`wk-day-lbl ${isToday?"today":""}`} style={{marginBottom:0}}>{["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][i]} {d.getDate()}{isToday?" · today":""}</div>
-              <button onClick={()=>onAddTask({title:"",period:"daily",skill:null,xpVal:20,questId:null,timeBlock:null,priority:"med",dayKey:dk})}
-                style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:14,padding:"0 4px",lineHeight:1,fontFamily:"'DM Mono',monospace"}}
-                title={`Add task to ${["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][i]}`}>+</button>
-            </div>
-            {dt.length===0&&dq.length===0?<div style={{fontSize:12,color:"var(--tx3)",paddingLeft:2}}>—</div>:<>
-              {dq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>)}
-              <div className="clist">{dt.map(t=><div key={t.id} draggable onDragStart={e=>handleDragStart(e,t.id)} style={{cursor:"grab"}}><TaskCard task={t} skills={skills} quests={quests||[]} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}/></div>)}</div>
-            </>}
-          </div>
+          <WkDayRow key={i} d={d} dk={dk} isToday={isToday} dayIdx={dayIdx} dayLabel={["Mon","Tue","Wed","Thu","Fri","Sat","Sun"][i]}
+            dt={dt} dq={dq} skills={skills} quests={quests} onAddTask={onAddTask}
+            onToggle={onToggle} onDelete={onDelete} onEdit={onEdit}
+            onToggleQuest={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel}
+            onOpenBreakdown={onOpenBreakdown} onDragStart={handleDragStart} onDrop={handleDrop}/>
         );
       })}
     </>}
@@ -1869,18 +2059,50 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
       const questsByMonth={};
       yearQuests.forEach(q=>{const m=new Date(q.due).getMonth();(questsByMonth[m]=questsByMonth[m]||[]).push(q);});
       const curMo=new Date().getMonth();
+      const doneThisYear=yearQuests.filter(q=>q.done).length;
+      const totalThisYear=yearQuests.length;
+      const yearPct=totalThisYear?Math.round(doneThisYear/totalThisYear*100):0;
+      const monthsElapsed=curMo+1;
+      const yearProgress=Math.round(monthsElapsed/12*100);
+
       return(<>
+        {/* Year overview row */}
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8,marginBottom:14}}>
+          <div className="sbox">
+            <div className="snum">{doneThisYear}/{totalThisYear}</div>
+            <div className="slb2">Quests done</div>
+          </div>
+          <div className="sbox">
+            <div className="snum">{yearPct}%</div>
+            <div className="slb2">Complete</div>
+          </div>
+          <div className="sbox">
+            <div className="snum">{yearProgress}%</div>
+            <div className="slb2">Year elapsed</div>
+          </div>
+        </div>
         {/* Year calendar - month strip */}
         <div style={{display:"grid",gridTemplateColumns:"repeat(6,1fr)",gap:4,marginBottom:14}}>
           {months.map((m,i)=>{
             const cnt=(questsByMonth[i]||[]).length;
+            const done=(questsByMonth[i]||[]).filter(q=>q.done).length;
             const isPast=i<curMo, isCur=i===curMo;
-            return <div key={i} style={{borderRadius:4,border:`1px solid ${isCur?"var(--primary)":cnt>0?"var(--b2)":"var(--b1)"}`,background:isCur?"var(--primaryf)":"var(--s1)",padding:"5px 4px",textAlign:"center"}}>
-              <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:isCur?"var(--primary)":isPast?"var(--tx3)":"var(--tx2)",fontWeight:isCur?"bold":"normal"}}>{m}</div>
-              {cnt>0&&<div style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"var(--primary)",marginTop:2}}>◆{cnt}</div>}
+            return <div key={i} style={{borderRadius:4,border:`1px solid ${isCur?"var(--primary)":cnt>0?"var(--b2)":"var(--b1)"}`,background:isCur?"var(--primaryf)":"var(--s1)",padding:"6px 4px",textAlign:"center",cursor:"default"}}>
+              <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:isCur?"var(--primary)":isPast?"var(--tx3)":"var(--tx2)",fontWeight:isCur?"bold":"normal",marginBottom:3}}>{m}</div>
+              {cnt>0&&<>
+                <div style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:done===cnt?"var(--success)":"var(--primary)"}}>{done}/{cnt}</div>
+                <div style={{height:2,background:"var(--b1)",borderRadius:1,margin:"2px 2px 0",overflow:"hidden"}}>
+                  <div style={{width:`${cnt?done/cnt*100:0}%`,height:"100%",background:"var(--success)",borderRadius:1}}/>
+                </div>
+              </>}
+              {cnt===0&&<div style={{fontSize:8,color:"var(--b2)"}}>—</div>}
             </div>;
           })}
         </div>
+
+        {/* AI year planner */}
+        <YearlyAIPlan quests={quests} tasks={allTasks} skills={skills} onAddTask={onAddTask}/>
+
         {/* Add task */}
         {showSubForm?(
           <div className="fwrap" style={{marginBottom:10}}>
@@ -1898,13 +2120,23 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
             <button className="fsbtn" onClick={submitSub}>Add annual goal</button>
           </div>
         ):<button className="addbtn" style={{marginBottom:10}} onClick={()=>setShowSubForm(true)}><span>+</span> Add annual goal</button>}
-        {yearQuests.length>0&&<>
-          <div className="slbl" style={{marginBottom:6}}>◆ Quests due this year</div>
-          {yearQuests.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>)}
-          <div style={{height:16}}/>
-        </>}
+
+        {/* Quests grouped by month */}
+        {months.map((m,i)=>{
+          const mq=(questsByMonth[i]||[]);
+          if(!mq.length) return null;
+          return(<div key={i} style={{marginBottom:12}}>
+            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1,color:i===curMo?"var(--primary)":"var(--tx3)",textTransform:"uppercase",marginBottom:5,display:"flex",alignItems:"center",gap:6}}>
+              {m}
+              {i<curMo&&<span style={{color:"var(--tx3)",fontSize:8}}>past</span>}
+              {i===curMo&&<span style={{color:"var(--primary)",fontSize:8}}>← now</span>}
+            </div>
+            {mq.map(q=><QuestPlannerCard key={q.id} quest={q} skills={skills} onToggle={onToggleQuest} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>)}
+          </div>);
+        })}
+
         {tasks.length>0&&<>
-          <div className="slbl" style={{marginBottom:8}}>◎ Annual Goals</div>
+          <div className="slbl" style={{marginBottom:8,marginTop:4}}>◎ Annual Tasks</div>
           {tasks.map(t=>(
             <div key={t.id} className={`card${t.done?" done":""}`} style={{marginBottom:4,opacity:t.done?.5:1}}>
               <div style={{display:"flex",alignItems:"center",gap:8}}>
@@ -1918,14 +2150,20 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
             </div>
           ))}
         </>}
-        {tasks.length===0&&yearQuests.length===0&&<div style={{fontSize:12,color:"var(--tx3)",fontStyle:"italic",padding:"8px 0",textAlign:"center"}}>No annual goals — add one above.</div>}
+        {tasks.length===0&&yearQuests.length===0&&(
+          <div className="empty-state">
+            <div className="es-icon">◆</div>
+            <div className="es-title">No annual goals yet</div>
+            <div className="es-desc">Add quests with due dates in {yr}, or use the AI planner to generate year-level milestones from your active main quests.</div>
+          </div>
+        )}
       </>);
     })()}
   </>);
 }
 
 
-function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,onToggleSubquest,onDeleteSubquest,onReorder,radiantAvailable,radiantCooldownLabel,onOpenBreakdown}){
+function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,onToggleSubquest,onDeleteSubquest,onReorder,radiantAvailable,radiantCooldownLabel,onOpenBreakdown,onAwardXp}){
   const {settings}=useSettings(); const L=settings.labels;
   const [form,setForm]=useState(null);
   const [search,setSearch]=useState("");
@@ -2082,13 +2320,13 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
       :<button className="addbtn" onClick={()=>openForm("main")}><span>+</span> New {L.mainQuest.toLowerCase()}</button>}
     <div className="clist">{mainA.map(q=>(
       <div key={q.id} {...getQDragProps(q.id)}>
-        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} quests={quests} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>
+        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} quests={quests} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown} onAwardXp={onAwardXp}/>
       </div>
     ))}</div>
     {mainD.length>0&&<><div className="gap"/><div className="slbl">{L.completed}</div>
       <div className="clist">{mainD.map(q=>(
       <div key={q.id} {...getQDragProps(q.id)}>
-        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} quests={quests} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>
+        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} quests={quests} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown} onAwardXp={onAwardXp}/>
       </div>
     ))}</div></>}
     {quests.filter(q=>q.type==="main").length===0&&form!=="main"&&(
@@ -2160,7 +2398,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
       :<button className="addbtn" onClick={()=>openForm("side")}><span>+</span> New {L.sideQuest.toLowerCase()}</button>}
     <div className="clist">{side.map(q=>(
       <div key={q.id} {...getQDragProps(q.id)}>
-        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} quests={quests} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>
+        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} quests={quests} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown} onAwardXp={onAwardXp}/>
       </div>
     ))}</div>
     {side.length===0&&form!=="side"&&(
@@ -2236,7 +2474,7 @@ function QuestsTab({quests,skills,onAdd,onToggle,onDelete,onEdit,onAddSubquest,o
       :<button className="addbtn" onClick={()=>openForm("radiant")}><span>+</span> New {L.radiantQuest.toLowerCase()}</button>}
     <div className="clist">{radiant.map(q=>(
       <div key={q.id} {...getQDragProps(q.id)}>
-        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} quests={quests} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown}/>
+        <QuestCard quest={q} skills={skills} onToggle={onToggle} onDelete={onDelete} onEdit={onEdit} onAddSubquest={onAddSubquest} onToggleSubquest={onToggleSubquest} onDeleteSubquest={onDeleteSubquest} quests={quests} radiantAvailable={radiantAvailable} radiantCooldownLabel={radiantCooldownLabel} onOpenBreakdown={onOpenBreakdown} onAwardXp={onAwardXp}/>
       </div>
     ))}</div>
     {radiant.length===0&&form!=="radiant"&&(
@@ -2840,6 +3078,7 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
         {...getSkDragProps(s.id,section)}>
         <div className="skill-card" style={{
           borderColor:isLinkHover?s.color:isReorderHover?s.color+"44":"",
+          borderLeftColor:s.color,
           borderStyle:isLinkHover?"dashed":"solid",
           cursor:"default",
           ...(s.cardBg?{
@@ -2856,7 +3095,7 @@ function SkillsTab({skills,skPerLv,streaks,meds,xpLog,onAdd,onAddBatch,onDelete,
             </div>
             <div className="sk-meta">
               {streak.count>=3&&<span className="sk-streak">{streak.count}d{mult>1?` ${mult}×`:""}</span>}
-              {(()=>{const lastMed=meds.filter(m=>(m.skills||[m.skillId]).includes(s.id)).sort((a,b)=>b.ts-a.ts)[0];const daysSince=lastMed?Math.floor((Date.now()-lastMed.ts)/86400000):999;return daysSince>=7?<span className="stale-label" title={`${daysSince}d since last practice`}>·{daysSince}d ago</span>:null;})()}
+              {(()=>{const lastMed=meds.filter(m=>(m.skillIds||m.skills||[m.skillId]).includes(s.id)).sort((a,b)=>(b.created||b.ts||0)-(a.created||a.ts||0))[0];const daysSince=lastMed?Math.floor((Date.now()-(lastMed.created||lastMed.ts||0))/86400000):999;return daysSince>=7?<span className="stale-label" title={`${daysSince}d since last practice`}>·{daysSince}d ago</span>:null;})()}
               <div className="sk-lv">{L.levelName} <span>{lv}</span></div>
               {onStartFocus&&<button className="sk-delbtn" onClick={()=>onStartFocus(s.id)} title="Start focus timer" style={{fontSize:10}}>◉</button>}
               <button className="sk-delbtn" style={{marginLeft:2}} onClick={()=>openEdit(s)}>✎</button>
@@ -4224,7 +4463,7 @@ function TaskCard({task,skills,quests,onToggle,onDelete,onEdit}){
   );
 }
 
-function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,onToggleSubquest,onDeleteSubquest,radiantAvailable,radiantCooldownLabel,onOpenBreakdown}){
+function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,onToggleSubquest,onDeleteSubquest,radiantAvailable,radiantCooldownLabel,onOpenBreakdown,onAwardXp}){
   const {settings}=useSettings(); const L=settings.labels;
   const qSkills=(quest.skills||[]).map(id=>skills.find(s=>s.id===id)).filter(Boolean);
   const prereq=(quests||[]).find(q=>q.id===quest.unlocksAfter)||null;
@@ -4232,8 +4471,14 @@ function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,o
   const [editing,setEditing]=useState(false);
   const [showSubs,setShowSubs]=useState(false);
   const [newSub,setNewSub]=useState("");
+  const [aiSubsLoading,setAiSubsLoading]=useState(false);
+  const [aiSubsSuggestions,setAiSubsSuggestions]=useState([]); // [{title, xpVal, reason}]
+  const [showConvo,setShowConvo]=useState(false);
+  const [convoInput,setConvoInput]=useState("");
+  const [convoLoading,setConvoLoading]=useState(false);
+  const [convoResult,setConvoResult]=useState(null); // {xp, reason, msg}
   const defaultQColor=(sIds)=>{ const s=skills.find(sk=>sk.id===(sIds||[])[0]); return s?s.color:null; };
-  const [ef,setEf]=useState({title:quest.title,note:quest.note||"",dueDate:quest.due?new Date(quest.due).toISOString().split("T")[0]:"",skillIds:quest.skills||[],color:quest.color||defaultQColor(quest.skills)||null,priority:quest.priority||"med",cooldown:quest.cooldown??60*60*1000,published:quest.published||false,notesPublic:quest.notesPublic||false,xpVal:quest.xpVal??null,type:quest.type,unlocksAfter:quest.unlocksAfter||"",customImg:quest.customImg||null,banner:quest.banner||null});
+  const [ef,setEf]=useState({title:quest.title,note:quest.note||"",dueDate:quest.due?new Date(quest.due).toISOString().split("T")[0]:"",skillIds:quest.skills||[],color:quest.color||defaultQColor(quest.skills)||null,priority:quest.priority||"med",cooldown:quest.cooldown??60*60*1000,frequency:quest.frequency||"cooldown",frequencyDays:quest.frequencyDays||[],published:quest.published||false,notesPublic:quest.notesPublic||false,xpVal:quest.xpVal??null,type:quest.type,unlocksAfter:quest.unlocksAfter||"",customImg:quest.customImg||null,banner:quest.banner||null});
   const [xpSuggestion,setXpSuggestion]=useState(null);
   const [xpLoading,setXpLoading]=useState(false);
   const [subXpSug,setSubXpSug]=useState(null);
@@ -4250,7 +4495,7 @@ function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,o
     const due=ef.dueDate?new Date(ef.dueDate+"T09:00").getTime():null;
     const newXp=xpSuggestion?.xp??(ef.xpVal!==null?ef.xpVal:quest.xpVal);
     const wasMain=quest.type!=="radiant"; const nowRadiant=ef.type==="radiant";
-    onEdit(quest.id,{title:ef.title.trim(),note:ef.note.trim(),due,skills:ef.skillIds,color:ef.color||null,priority:ef.priority,cooldown:ef.type==="radiant"?ef.cooldown:undefined,published:ef.published||false,notesPublic:ef.notesPublic||false,xpVal:newXp,type:ef.type,unlocksAfter:ef.unlocksAfter||null,customImg:ef.customImg||null,banner:ef.banner||null,...(wasMain&&nowRadiant?{done:false,lastDone:null}:{})});
+    onEdit(quest.id,{title:ef.title.trim(),note:ef.note.trim(),due,skills:ef.skillIds,color:ef.color||null,priority:ef.priority,cooldown:ef.type==="radiant"?ef.cooldown:undefined,frequency:ef.type==="radiant"?ef.frequency:undefined,frequencyDays:ef.type==="radiant"?ef.frequencyDays:undefined,published:ef.published||false,notesPublic:ef.notesPublic||false,xpVal:newXp,type:ef.type,unlocksAfter:ef.unlocksAfter||null,customImg:ef.customImg||null,banner:ef.banner||null,...(wasMain&&nowRadiant?{done:false,lastDone:null}:{})});
     setEditing(false); setXpSuggestion(null);
   };
   const handleQuestEditImg=async e=>{
@@ -4300,6 +4545,56 @@ function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,o
     onAddSubquest(quest.id,newSub.trim(),subXpSug?.xp||10);
     setNewSub(""); setSubXpSug(null);
   };
+
+  const generateAiSubquests=async()=>{
+    setAiSubsLoading(true); setAiSubsSuggestions([]);
+    try{
+      const data=await aiCall({max_tokens:400,messages:[{role:"user",content:`Break this quest into 4-6 concrete steps. Quest: "${quest.title}"${quest.note?`. Context: "${quest.note}"`:""}. Type: ${quest.type}.
+
+XP per step: 10-80 depending on effort (main quest steps 30-80, side quest steps 10-40).
+Reply ONLY with JSON array:
+[{"title":"step name","xpVal":number,"reason":"why this step matters in 5 words"}]`}]});
+      const raw=(data.choices?.[0]?.message?.content||"").replace(/```json|```/g,"").trim();
+      const m=raw.match(/\[[\s\S]*\]/);
+      if(m) setAiSubsSuggestions(JSON.parse(m[0]));
+    }catch(e){setAiSubsSuggestions([{title:"Couldn't reach AI — add manually",xpVal:10,reason:""}]);}
+    setAiSubsLoading(false);
+  };
+
+  const acceptAiSub=(sub)=>{
+    onAddSubquest(quest.id,sub.title,sub.xpVal);
+    setAiSubsSuggestions(prev=>prev.filter(s=>s!==sub));
+  };
+
+  const submitConvo=async()=>{
+    if(!convoInput.trim()||convoLoading) return;
+    setConvoLoading(true); setConvoResult(null);
+    const skPerLv=settings?.xp?.skillPerLevel||6000;
+    const questSkills=(quest.skills||[]).map(id=>skills.find(s=>s.id===id)?.name).filter(Boolean).join(", ")||"none";
+    try{
+      const data=await aiCall({max_tokens:150,messages:[{role:"user",content:`Quest XP award in a gamified life tracker.
+Quest: "${quest.title}" (${quest.type})
+Linked skills: ${questSkills}
+XP scale: 6000 XP = 1 level ≈ 100 real hours.
+Radiant/daily: 10-150 per session. Side quest: 50-300 per session. Main quest: 100-800 per session.
+
+Player reports: "${convoInput.trim()}"
+
+Award fair XP for this specific session based on what they described. Be generous for genuine insight or breakthrough. Be honest about routine work.
+Reply ONLY with JSON: {"xp":number,"reason":"one sentence max 15 words","reaction":"one short encouraging sentence"}`}]});
+      const raw=(data.choices?.[0]?.message?.content||"").replace(/```json|```/g,"").trim();
+      const parsed=JSON.parse(raw.match(/\{[\s\S]*\}/)?.[0]||"{}");
+      if(parsed.xp) setConvoResult(parsed);
+      else setConvoResult({xp:null,reason:"Couldn't parse response",reaction:""});
+    }catch(e){setConvoResult({xp:null,reason:"Connection failed — try again",reaction:""});}
+    setConvoLoading(false);
+  };
+
+  const confirmConvoXp=async()=>{
+    if(!convoResult?.xp||!onAwardXp) return;
+    await onAwardXp(quest.id,convoResult.xp,`◉ ${quest.title}: ${convoInput.slice(0,40)}`);
+    setConvoResult(null); setConvoInput(""); setShowConvo(false);
+  };
   const subs=quest.subquests||[];
   const subsDone=subs.filter(s=>s.done).length;
   const isRadiant=quest.type==="radiant";
@@ -4337,11 +4632,31 @@ function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,o
         <input className="fi" type="date" style={{colorScheme:"dark"}} value={ef.dueDate} onChange={e=>setEf(v=>({...v,dueDate:e.target.value}))}/>
       </div>
       {ef.dueDate&&quest.type!=="radiant"&&<NotifPrompt dueDate={ef.dueDate} title={ef.title}/>}
-      {quest.type==="radiant"&&<div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
-        <div className="label9" style={{flexShrink:0}}>Resets after</div>
-        <select className="fsel" style={{flex:1}} value={ef.cooldown} onChange={e=>setEf(v=>({...v,cooldown:Number(e.target.value)}))}>
-          {COOLDOWN_OPTIONS.map(o=><option key={o.ms} value={o.ms}>{o.label}</option>)}
-        </select>
+      {quest.type==="radiant"&&<div style={{marginBottom:8}}>
+        <div className="label9" style={{marginBottom:5}}>Schedule</div>
+        <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:6}}>
+          {RADIANT_FREQ_OPTIONS.map(o=>(
+            <button key={o.id} onClick={()=>setEf(v=>({...v,frequency:o.id}))}
+              style={{padding:"4px 10px",borderRadius:20,border:`1px solid ${ef.frequency===o.id?"var(--secondary)":"var(--b2)"}`,background:ef.frequency===o.id?"var(--secondaryf)":"none",color:ef.frequency===o.id?"var(--secondary)":"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,cursor:"pointer"}}>
+              {o.label}
+            </button>
+          ))}
+        </div>
+        {ef.frequency==="custom"&&(
+          <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:6}}>
+            {WDAY_LABELS.map((d,i)=>(
+              <button key={i} onClick={()=>setEf(v=>({...v,frequencyDays:(v.frequencyDays||[]).includes(i)?(v.frequencyDays||[]).filter(x=>x!==i):[...(v.frequencyDays||[]),i]}))}
+                style={{padding:"3px 9px",borderRadius:4,border:`1px solid ${(ef.frequencyDays||[]).includes(i)?"var(--secondary)":"var(--b2)"}`,background:(ef.frequencyDays||[]).includes(i)?"var(--secondaryf)":"var(--bg)",color:(ef.frequencyDays||[]).includes(i)?"var(--secondary)":"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,cursor:"pointer"}}>
+                {d}
+              </button>
+            ))}
+          </div>
+        )}
+        {ef.frequency==="cooldown"&&(
+          <select className="fsel" style={{width:"100%"}} value={ef.cooldown} onChange={e=>setEf(v=>({...v,cooldown:Number(e.target.value)}))}>
+            {COOLDOWN_OPTIONS.map(o=><option key={o.ms} value={o.ms}>{o.label}</option>)}
+          </select>
+        )}
       </div>}
       {(quests||[]).filter(q=>q.id!==quest.id&&q.type!=="radiant"&&!q.done).length>0&&(
         <div style={{marginBottom:8}}>
@@ -4470,6 +4785,10 @@ function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,o
           </div>
         </div>
         <button className="delbtn" onClick={()=>setEditing(true)} title="Edit">✎</button>
+        {onAwardXp&&!quest.done&&(
+          <button className="delbtn" title="Log progress & earn XP" onClick={()=>setShowConvo(v=>!v)}
+            style={{color:showConvo?"var(--secondary)":"var(--tx3)",fontSize:11}}>◉</button>
+        )}
         {onOpenBreakdown&&(quest.type==="main"||quest.type==="side")&&!quest.done&&(
           <button className="delbtn" title="AI: Break into steps" onClick={()=>onOpenBreakdown(quest.id)} style={{color:"var(--primary)",opacity:.7}}>⟡</button>
         )}
@@ -4519,7 +4838,72 @@ function QuestCard({quest,skills,quests,onToggle,onDelete,onEdit,onAddSubquest,o
               <span>{subXpSug.reason}</span>
               <button style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:9,padding:0}} onClick={()=>setSubXpSug(null)}>✕</button>
             </div>}
+            {/* AI subquest generator */}
+            {subs.length===0&&aiSubsSuggestions.length===0&&(
+              <button onClick={generateAiSubquests} disabled={aiSubsLoading}
+                style={{background:"none",border:"1px dashed var(--b2)",borderRadius:"var(--r)",padding:"6px 12px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:aiSubsLoading?"var(--tx3)":"var(--secondary)",letterSpacing:.5,textAlign:"center",transition:"all .15s"}}>
+                {aiSubsLoading?"⟡ Generating steps…":"⟡ AI: Generate steps"}
+              </button>
+            )}
+            {aiSubsSuggestions.length>0&&(
+              <div style={{background:"var(--bg)",border:"1px solid var(--secondaryb)",borderRadius:"var(--r)",padding:"8px 10px",marginTop:2}}>
+                <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",marginBottom:6}}>
+                  <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:1.5,color:"var(--secondary)",textTransform:"uppercase"}}>⟡ Suggested steps</div>
+                  <button onClick={()=>{aiSubsSuggestions.forEach(s=>onAddSubquest(quest.id,s.title,s.xpVal));setAiSubsSuggestions([]);}} style={{background:"var(--secondaryf)",border:"1px solid var(--secondaryb)",borderRadius:3,padding:"2px 8px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--secondary)"}}>+ Add all</button>
+                </div>
+                {aiSubsSuggestions.map((s,i)=>(
+                  <div key={i} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 0",borderBottom:"1px solid var(--b1)"}}>
+                    <div style={{flex:1,minWidth:0}}>
+                      <div style={{fontSize:11,color:"var(--tx)"}}>{s.title}</div>
+                      {s.reason&&<div style={{fontSize:9,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontStyle:"italic"}}>{s.reason}</div>}
+                    </div>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--primary)",flexShrink:0}}>+{s.xpVal}</span>
+                    <button onClick={()=>acceptAiSub(s)} style={{background:"var(--primaryf)",border:"1px solid var(--primaryb)",borderRadius:3,padding:"2px 7px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--primary)",flexShrink:0}}>+</button>
+                    <button onClick={()=>setAiSubsSuggestions(prev=>prev.filter((_,j)=>j!==i))} style={{background:"none",border:"none",cursor:"pointer",color:"var(--tx3)",fontSize:10,padding:"1px 2px",flexShrink:0}}>✕</button>
+                  </div>
+                ))}
+                {aiSubsSuggestions.length===0&&<div style={{fontSize:10,color:"var(--success)",fontFamily:"'DM Mono',monospace"}}>✓ All added</div>}
+              </div>
+            )}
           </div>
+        </div>
+      )}
+      {/* AI XP conversation panel */}
+      {showConvo&&(
+        <div style={{margin:"6px 0 2px",padding:"10px 12px",background:"var(--bg)",border:"1px solid var(--secondaryb)",borderRadius:"var(--r)"}}>
+          <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:1.5,color:"var(--secondary)",textTransform:"uppercase",marginBottom:6}}>⟡ What did you work on?</div>
+          <textarea className="fi full"
+            placeholder={`Describe what you did on "${quest.title}" — how long, what happened, any breakthroughs or blocks…`}
+            rows={2} value={convoInput} onChange={e=>{setConvoInput(e.target.value);setConvoResult(null);}}
+            style={{resize:"none",fontSize:12,marginBottom:6}}
+            onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey&&convoInput.trim()){e.preventDefault();submitConvo();}}}
+          />
+          {!convoResult&&<button onClick={submitConvo} disabled={convoLoading||!convoInput.trim()}
+            style={{background:"var(--secondaryf)",border:"1px solid var(--secondaryb)",borderRadius:"var(--r)",padding:"7px 14px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:convoLoading?"var(--tx3)":"var(--secondary)",letterSpacing:.5,width:"100%"}}>
+            {convoLoading?"⟡ Scoring…":"⟡ Score this session"}
+          </button>}
+          {convoResult&&(
+            <div style={{background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",padding:"8px 10px",marginBottom:6}}>
+              {convoResult.xp
+                ?<>
+                  <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:4}}>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:16,color:"var(--primary)",fontWeight:"bold"}}>+{convoResult.xp}</span>
+                    <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",letterSpacing:.5}}>XP</span>
+                    <span style={{fontSize:11,color:"var(--tx2)",flex:1}}>{convoResult.reason}</span>
+                  </div>
+                  {convoResult.reaction&&<div style={{fontSize:12,color:"var(--secondary)",fontStyle:"italic",marginBottom:6}}>{convoResult.reaction}</div>}
+                  <div style={{display:"flex",gap:6}}>
+                    <button onClick={confirmConvoXp} style={{flex:1,background:"var(--primary)",border:"none",borderRadius:"var(--r)",padding:"8px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--bg)",letterSpacing:1,textTransform:"uppercase"}}>
+                      ✓ Accept +{convoResult.xp} XP
+                    </button>
+                    <button onClick={()=>{setConvoResult(null);setConvoInput("");}} style={{background:"none",border:"1px solid var(--b2)",borderRadius:"var(--r)",padding:"8px 12px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)"}}>✕</button>
+                  </div>
+                </>
+                :<div style={{fontSize:11,color:"var(--danger)"}}>{convoResult.reason}</div>
+              }
+            </div>
+          )}
+          <button onClick={()=>{setShowConvo(false);setConvoInput("");setConvoResult(null);}} style={{background:"none",border:"none",color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:8,cursor:"pointer",padding:"2px 0",letterSpacing:.5}}>close</button>
         </div>
       )}
     </div>
@@ -4825,7 +5209,7 @@ function JournalTab({entries,skills,quests,meds,practiceTypes,streaks,pending,su
 }
 
 function PracticeHistory({meds,skills}){
-  const sorted=[...(meds||[])].sort((a,b)=>b.ts-a.ts);
+  const sorted=[...(meds||[])].sort((a,b)=>(b.created||b.ts||0)-(a.created||a.ts||0));
   if(!sorted.length) return <div className="empty">No sessions logged yet</div>;
   return(<div className="clist">{sorted.map(m=>{
     const sk=skills.find(s=>s.id===m.skillId||(m.skills||[]).includes(s.id));
@@ -4835,7 +5219,7 @@ function PracticeHistory({meds,skills}){
       <div className="med-body">
         <div className="med-name">{sk?.name||"Practice"}</div>
         <div className="med-sub">{display} · {m.type||"session"}</div>
-        <div className="med-sub" style={{color:"var(--tx3)"}}>{fmtDate(m.ts)}</div>
+        <div className="med-sub" style={{color:"var(--tx3)"}}>{fmtDate(m.created||m.ts)}</div>
         {m.note&&<div className="med-journal">{m.note}</div>}
       </div>
     </div>);

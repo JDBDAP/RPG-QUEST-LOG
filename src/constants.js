@@ -157,6 +157,14 @@ export const COOLDOWN_OPTIONS = [
   {label:"24 hr",    ms:24*60*60*1000},
 ];
 
+export const RADIANT_FREQ_OPTIONS = [
+  {id:"daily",    label:"Every day",      cd:24*60*60*1000},
+  {id:"weekdays", label:"Weekdays",       cd:24*60*60*1000},
+  {id:"weekends", label:"Weekends",       cd:24*60*60*1000},
+  {id:"custom",   label:"Custom days",    cd:24*60*60*1000},
+  {id:"cooldown", label:"After cooldown", cd:null}, // legacy — uses cooldown field
+];
+
 // ── SKILL MILESTONES ──────────────────────────────────────────────────────────
 // Fires a special overlay at these skill levels
 export const SKILL_MILESTONES = {
@@ -178,9 +186,4 @@ export const TAB_EXPLAINERS = {
 
 // ── SUPABASE KEY MAP ───────────────────────────────────────────────────────────
 // Maps localStorage cx_ keys → Supabase column names
-export const KEY_MAP = {
-  cx_settings:"settings", cx_tasks:"tasks", cx_quests:"quests",
-  cx_skills:"skills", cx_meds:"meds", cx_ptypes:"practice_types",
-  cx_xp:"xp", cx_streaks:"streaks", cx_seen:"seen_tabs",
-  cx_journal:"journal", cx_xplog:"xp_log",
-};
+// KEY_MAP lives in supabase.js — import from there, not here

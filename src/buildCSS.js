@@ -144,7 +144,7 @@ button,input,textarea,select{font-family:'DM Sans',sans-serif;}
 .xp-float{position:fixed;top:44px;left:50%;transform:translateX(calc(-50% + var(--fx)));font-family:'DM Mono',monospace;font-size:14px;color:var(--primary);font-weight:bold;pointer-events:none;z-index:9999;animation:floatUp .9s ease forwards;}
 @keyframes floatUp{0%{opacity:1;transform:translateX(calc(-50% + var(--fx))) translateY(0);}100%{opacity:0;transform:translateX(calc(-50% + var(--fx))) translateY(-32px);}}
 /* ── SKILL CARDS ── */
-.sk-card,.skill-card{background:var(--s1);border:1px solid var(--b1);border-radius:var(--r);overflow:hidden;transition:border-color .15s;margin-bottom:6px;}
+.sk-card,.skill-card{background:var(--s1);border:1px solid var(--b1);border-left:3px solid var(--b2);border-radius:var(--r);overflow:hidden;transition:border-color .15s,border-left-color .15s;margin-bottom:6px;}
 .sk-card:hover,.skill-card:hover{border-color:var(--b2);}
 .sk-hdr{display:flex;align-items:center;gap:8px;padding:10px 12px 6px;}
 .sk-icon{font-size:18px;line-height:1;flex-shrink:0;}

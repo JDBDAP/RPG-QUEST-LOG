@@ -1,6 +1,6 @@
 import { useState, useRef, useCallback } from "react";
 import { saveField } from "./supabase";
-import { KEY_MAP } from "./constants";
+import { KEY_MAP } from "./supabase";
 
 // ── ID & DATE UTILS ───────────────────────────────────────────────────────────
 export function uid(){ return Date.now().toString(36)+Math.random().toString(36).slice(2,5); }
