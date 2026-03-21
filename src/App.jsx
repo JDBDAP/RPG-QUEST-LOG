@@ -210,7 +210,7 @@ export default function App(){
         tasks:setTasks, quests:setQuests, skills:setSkills,
         meds:setMeds, practice_types:setPracticeTypes,
         streaks:setStreaks, journal:setJournal, xp_log:setXpLog,
-        habits:setHabits, day_grades:setDayGrades,
+        day_grades:setDayGrades,
         ai_memory:setAiMemory, advisor_log:setAdvisorLog,
       };
       Object.entries(COL_MAP).forEach(([col,setter])=>{
@@ -425,17 +425,6 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
     await dbSet("cx_meds",m,userId);
   },[userId]);
   const savePT=useCallback(async t=>{setPracticeTypes(t);await dbSet("cx_ptypes",t,userId,stampWrite);},[userId]);
-    // Award XP if skill linked
-    if(habit.skillId&&habit.xpVal){
-      const {leveledUp,milestone:ms}=await award(habit.xpVal,habit.skillId,xp,skills,streaks,`◎ ${habit.name}`);
-      spawnFloat(habit.xpVal);
-      showToast(`+${habit.xpVal} ${L.xpName} · ${habit.name}`);
-      if(leveledUp&&!ms) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);
-      if(ms) setMilestone(ms);
-    } else {
-      showToast(`◎ ${habit.name} done`);
-    }
-  };
   const addPracticeType=useCallback(async d=>{await savePT([...practiceTypes,{id:uid(),label:d.label,icon:d.icon||"◎"}]);},[savePT,practiceTypes]);
   const deletePracticeType=useCallback(async id=>{await savePT(practiceTypes.filter(t=>t.id!==id));},[savePT,practiceTypes]);
   const saveS=useCallback(async s=>{setSkills(s);await dbSet("cx_skills",s,userId,stampWrite);},[userId]);
