@@ -840,10 +840,14 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
   // periodTasks filters tasks array — memoize on actual deps
   const periodTasks=useMemo(()=>{
     if(period==="daily") return tasks.filter(t=>t.period==="daily"&&t.dayKey===todayKey());
-    if(period==="weekly") return tasks.filter(t=>t.period==="weekly");
-    if(period==="monthly") return tasks.filter(t=>t.period==="monthly");
+    if(period==="weekly"){
+      // Include both recurring weekly tasks AND daily tasks that fall in this week
+      const weekKeys=new Set(weekDays.map(d=>dayKey(d)));
+      return tasks.filter(t=>t.period==="weekly"||(t.period==="daily"&&t.dayKey&&weekKeys.has(t.dayKey)));
+    }
+    if(period==="monthly") return tasks.filter(t=>t.period==="monthly"||(t.period==="daily"&&t.dayKey));
     return tasks.filter(t=>t.period==="yearly");
-  },[tasks,period]);
+  },[tasks,period,weekDays]);
   // Must be before any conditional returns — hooks cannot be after early returns
   const ctxValue=useMemo(()=>({settings,saveSettings}),[settings,saveSettings]);
 
@@ -1412,7 +1416,11 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
 
   const submit=()=>{
     if(!f.title.trim()) return;
-    onAddTask({title:f.title.trim(),period,skill:f.skill||null,xpVal:f.xpVal,questId:f.questId||null,recurrenceDays:period==="weekly"&&f.recurrenceDays.length?f.recurrenceDays:null,timeBlock:f.timeBlock||null,priority:f.priority||"med"});
+    // For non-recurring adds: always use daily + today's dayKey so it lands in the right day column
+    const isRecurring=period==="weekly"&&f.recurrenceDays.length>0;
+    const taskPeriod=isRecurring?"weekly":"daily";
+    const taskDayKey=isRecurring?null:todayKey();
+    onAddTask({title:f.title.trim(),period:taskPeriod,skill:f.skill||null,xpVal:f.xpVal,questId:f.questId||null,recurrenceDays:isRecurring?f.recurrenceDays:null,timeBlock:f.timeBlock||null,priority:f.priority||"med",dayKey:taskDayKey});
     setF(v=>({...v,title:"",questId:"",recurrenceDays:[],timeBlock:""})); setShowForm(false);
   };
 
