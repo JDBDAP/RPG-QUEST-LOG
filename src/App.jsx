@@ -100,10 +100,8 @@ export default function App(){
   const [streakRescue,setStreakRescue]=useState(null); // {skillId, skillName, streak, suggestion}
   const [showBreakdown,setShowBreakdown]=useState(null); // questId to break down
   const [showSkillGap,setShowSkillGap]=useState(false);
-  const [showMorningRitual,setShowMorningRitual]=useState(false);
   const [dayGrades,setDayGrades]=useState({});
   const [inlineNote,setInlineNote]=useState(null);
-  const [habits,setHabits]=useState([]);
   const toastRef=useRef(null);
   const localWriteTs=useRef(0); // timestamp of last local write — used to ignore our own realtime echoes
 
@@ -144,7 +142,6 @@ export default function App(){
     const am=await sget("cx_aimem");   if(am) setAiMemory(am);
     const al=await sget("cx_advisor"); if(al) setAdvisorLog(al);
     const dg=await sget("cx_grades");  if(dg) setDayGrades(dg);
-    const hb=await sget("cx_habits");  if(hb) setHabits(hb);
     setLoaded(true);
   };
 
@@ -165,7 +162,6 @@ export default function App(){
     if(db.seen_tabs)      setSeenTabs(db.seen_tabs);
     if(db.journal)        setJournal(db.journal);
     if(db.xp_log)         setXpLog(db.xp_log);
-    if(db.habits)         setHabits(db.habits);
     if(db.day_grades)     setDayGrades(db.day_grades);
     if(db.ai_memory)      setAiMemory(db.ai_memory);
     if(db.advisor_log)    setAdvisorLog(db.advisor_log);
@@ -180,11 +176,7 @@ export default function App(){
     if(!loaded||!skills.length) return;
     generateBriefing(tasks,quests,skills,streaks,settings);
     checkStreakRescue(skills,streaks,tasks,quests);
-    if(settings.profile.setup){
-      const todayStr=new Date().toDateString();
-      const lastRitual=localStorage.getItem("cx_last_ritual");
-      if(lastRitual!==todayStr) setShowMorningRitual(true);
-    }
+
   },[loaded]);
 
   const saveDayGrades=async(grades)=>{
@@ -295,11 +287,15 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
 **TODAY'S FOCUS:** [1 sentence — the single most important thing]
 **WATCH OUT:** [1 thing at risk — overdue quest, streak, or blocked task. Skip if nothing critical]
 **WIN AVAILABLE:** [1 specific quick win from their tasks or radiant quests]`;
-      const res=await fetch("/api/chat",{method:"POST",headers:{"Content-Type":"application/json"},
-        body:JSON.stringify({max_tokens:250,messages:[{role:"user",content:prompt}]})});
-      const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
+      const data=await aiCall({max_tokens:250,messages:[{role:"user",content:prompt}]});
       const text=data.choices?.[0]?.message?.content||"Could not generate briefing.";
-      const result={text,date:todayStr,loading:false};
+      const context={
+        overdue:overdue.length,
+        dueToday:dueToday.length,
+        streaksAtRisk:atRisk.length,
+        topSkill:topSkills[0]||null,
+      };
+      const result={text,date:todayStr,loading:false,context};
       setDailyBriefing(result);
       localStorage.setItem("cx_briefing",JSON.stringify(result));
     }catch{
@@ -397,9 +393,10 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
 
   const award=useCallback(async(baseAmt,skillId,curXp,curSkills,curStreaks,label,questId)=>{
     const skPerLv=settings.xp.skillPerLevel||6000;
+    const safeBase=Math.max(1,Number(baseAmt)||1); // never 0 or NaN
     const streak=skillId?(curStreaks[skillId]||{count:0}):{count:0};
     const multiplier=getMultiplier(streak.count);
-    const amt=Math.round(baseAmt*multiplier);
+    const amt=Math.round(safeBase*multiplier);
     const nx=curXp+amt; setXp(nx); await dbSet("cx_xp",nx,userId,stampWrite);
     setXpFlash(true); setTimeout(()=>setXpFlash(false),500);
     let leveledUp=null, skillMilestone=null, newSkills=curSkills;
@@ -422,26 +419,12 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
 
   const saveT=useCallback(async t=>{setTasks(t);await dbSet("cx_tasks",t,userId,stampWrite);},[userId]);
   const saveQ=useCallback(async q=>{setQuests(q);await dbSet("cx_quests",q,userId,stampWrite);},[userId]);
-  const saveM=useCallback(async m=>{setMeds(m);await dbSet("cx_meds",m,userId,stampWrite);},[userId]);
+  const saveM=useCallback(async m=>{
+    setMeds(m);
+    localWriteTs.current=Date.now(); // stamp before async write
+    await dbSet("cx_meds",m,userId);
+  },[userId]);
   const savePT=useCallback(async t=>{setPracticeTypes(t);await dbSet("cx_ptypes",t,userId,stampWrite);},[userId]);
-  const saveHabits=useCallback(async h=>{setHabits(h);await dbSet("cx_habits",h,userId,stampWrite);},[userId]);
-
-  const addHabit=async d=>saveHabits([...habits,{id:uid(),name:d.name,icon:d.icon||"◎",color:d.color||"#7c9ef8",skillId:d.skillId||null,xpVal:d.xpVal||10,frequency:d.frequency||"daily",frequencyDays:d.frequencyDays||[],completions:{},note:d.note||"",archived:false,created:Date.now()}]);
-  const editHabit=async(id,updates)=>saveHabits(habits.map(h=>h.id===id?{...h,...updates}:h));
-  const deleteHabit=async id=>saveHabits(habits.filter(h=>h.id!==id));
-
-  const logHabit=async(habitId,dateStr)=>{
-    const habit=habits.find(h=>h.id===habitId); if(!habit) return;
-    const already=habit.completions?.[dateStr];
-    if(already){
-      // toggle off
-      const next={...habit.completions}; delete next[dateStr];
-      await saveHabits(habits.map(h=>h.id===habitId?{...h,completions:next}:h));
-      return;
-    }
-    // Mark complete
-    const next={...habit.completions,[dateStr]:Date.now()};
-    await saveHabits(habits.map(h=>h.id===habitId?{...h,completions:next}:h));
     // Award XP if skill linked
     if(habit.skillId&&habit.xpVal){
       const {leveledUp,milestone:ms}=await award(habit.xpVal,habit.skillId,xp,skills,streaks,`◎ ${habit.name}`);
@@ -514,7 +497,10 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
       const qSkills=q.skills||[]; const primary=qSkills[0]||null;
       let newStr=streaks;
       if(primary){ newStr=updateStreak(streaks,primary); await saveStr(newStr); }
-      const {amt,multiplier,leveledUp,milestone:ms}=await award(q.xpVal,primary,xp,skills,newStr,`◉ ${q.title}`,q.id);
+      // Fallback xpVal: use settings default if quest has null/0 xpVal
+      const radiantXpDefault=Number(L.radiantXp)||30;
+      const radiantXpVal=q.xpVal&&q.xpVal>0?q.xpVal:radiantXpDefault;
+      const {amt,multiplier,leveledUp,milestone:ms}=await award(radiantXpVal,primary,xp,skills,newStr,`◉ ${q.title}`,q.id);
       const streak=newStr[primary]||{count:0};
       // Store lastDone timestamp on the quest
       await saveQ(quests.map(qq=>qq.id===id?{...qq,lastDone:Date.now()}:qq));
@@ -532,13 +518,16 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
     if(!q.done){
       const primary=(q.skills||[])[0]||null;
       const prefix=q.type==="main"?"◆":q.type==="side"?"◇":"";
-      const {amt,leveledUp,milestone:ms}=await award(q.xpVal,primary,xp,skills,streaks,`${prefix} ${q.title}`,q.id);
+      const xpFallback=q.type==="main"?Number(L.mainXp)||80:Number(L.sideXp)||50;
+      const questXpVal=q.xpVal&&q.xpVal>0?q.xpVal:xpFallback;
+      const {amt,leveledUp,milestone:ms}=await award(questXpVal,primary,xp,skills,streaks,`${prefix} ${q.title}`,q.id);
       spawnFloat(amt);
       showToast(`+${amt} ${L.xpName}`);
       if(leveledUp&&!ms) setTimeout(()=>showToast(`◆ ${leveledUp.name} Level ${leveledUp.level}`),500);
       if(ms) setMilestone(ms);
       // Show inline note instead of redirecting to log tab
-      setInlineNote({questId:id,questTitle:q.title,questType:q.type});
+      // Show inline note if enabled in settings
+      if(settings.ui?.showQuestNote!==false) setInlineNote({questId:id,questTitle:q.title,questType:q.type});
     }
   };
   const deleteQuest=async id=>saveQ(quests.filter(q=>q.id!==id));
@@ -766,7 +755,12 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
     const sessionCreated=d.sessionDate||Date.now();
     const session={id:uid(),type:d.type||"session",dur:d.dur,skillIds,subskillIds:subIds,note:d.note,
       aiReason:d.aiReason,xpAwarded:amt,multiplier,created:sessionCreated};
-    await saveM([session,...meds]);
+    // Use functional update to avoid stale meds closure
+    const updatedMeds=await new Promise(resolve=>{
+      setMeds(prev=>{const next=[session,...prev];resolve(next);return next;});
+    });
+    localWriteTs.current=Date.now();
+    await dbSet("cx_meds",updatedMeds,userId);
     // Auto-save to journal: always if quest, only if note otherwise
     if(d.note&&d.note.trim()||d.questId){
       const sk=curSkillsState.filter(s=>skillIds.includes(s.id));
@@ -812,7 +806,6 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
       if(data.skills){setSkills(data.skills);await dbSet("cx_skills",data.skills,userId);}
       if(data.meds){setMeds(data.meds);await dbSet("cx_meds",data.meds,userId);}
       if(data.practiceTypes){setPracticeTypes(data.practiceTypes);await dbSet("cx_ptypes",data.practiceTypes,userId);}
-      if(data.habits){setHabits(data.habits);await dbSet("cx_habits",data.habits,userId);}
       if(data.xp!=null){setXp(data.xp);await dbSet("cx_xp",data.xp,userId);}
       if(data.streaks){setStreaks(data.streaks);await dbSet("cx_streaks",data.streaks,userId);}
       showToast("Data imported");
@@ -821,7 +814,7 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
   };
 
   const exportData=(fmt="json")=>{
-    const payload={tasks,quests,skills,meds,practiceTypes,habits,xp,streaks,settings,exported:new Date().toISOString()};
+    const payload={tasks,quests,skills,meds,practiceTypes,xp,streaks,settings,exported:new Date().toISOString()};
     if(fmt==="xml"){
       const toXml=(obj,tag)=>{
         if(Array.isArray(obj)) return obj.map(item=>toXml(item,"item")).join("");
@@ -952,7 +945,6 @@ Write a sharp, useful morning briefing in exactly this format (under 120 words t
           <button className="review-btn" onClick={()=>setShowReview(true)} title="Weekly Review">◈ Review</button>
           {showReview&&<WeeklyReview tasks={tasks} quests={quests} skills={skills} meds={meds} xpLog={xpLog} journal={journal} settings={settings} onClose={()=>setShowReview(false)} onNavigate={id=>{setShowReview(false);handleTabChange(id);}} onAddTask={addTask}/>}
           {/* Morning planning ritual */}
-          {showMorningRitual&&<MorningRitualOverlay quests={quests} tasks={tasks} skills={skills} streaks={streaks} settings={settings} briefing={dailyBriefing} onClose={()=>{setShowMorningRitual(false);localStorage.setItem("cx_last_ritual",new Date().toDateString());}} onAddTask={addTask} onToggleQuest={toggleQuest} radiantAvailable={radiantAvailable}/>}
           {/* Inline quest completion note */}
           {inlineNote&&<InlineNotePopup questId={inlineNote.questId} questTitle={inlineNote.questTitle} questType={inlineNote.questType} onClose={()=>setInlineNote(null)} onSave={async(note)=>{if(note.trim()){const next=[{id:uid(),text:`[${inlineNote.questType==="main"?"◆":"◇"} ${inlineNote.questTitle}]\n${note.trim()}`,img:null,source:"quest",questId:inlineNote.questId,created:Date.now()},...journal];setJournal(next);await dbSet("cx_journal",next,userId,stampWrite);}setInlineNote(null);}}/>}
           {/* Streak Rescue Banner */}
@@ -1098,7 +1090,7 @@ function DailyAIPlan({quests,tasks,skills,onAddTask,hasBlocks}){
               {item.timeBlock&&<span>{item.timeBlock}</span>}
               {item.skillId&&<span>{skills.find(s=>s.id===item.skillId)?.name}</span>}
               <span>+{item.xpVal} XP</span>
-              {item.reason&&<span style={{fontStyle:"italic"}}>— {item.reason}</span>}
+              {item.reason&&settings.ui?.showAiWhy!==false&&<span style={{fontStyle:"italic",color:"var(--tx3)"}}>— {item.reason}</span>}
             </div>
           </div>
           <button onClick={()=>accept(item)} style={{background:"var(--primaryf)",border:"1px solid var(--primaryb)",borderRadius:3,padding:"3px 8px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--primary)",flexShrink:0}}>+</button>
@@ -1356,239 +1348,6 @@ function QuestPlannerCard({quest,skills,onToggle,radiantAvailable,radiantCooldow
   );
 }
 
-// ── HABITS TAB ────────────────────────────────────────────────────────────────
-const FREQ_OPTIONS=[
-  {id:"daily",     label:"Every day"},
-  {id:"weekdays",  label:"Weekdays (Mon–Fri)"},
-  {id:"weekends",  label:"Weekends"},
-  {id:"custom",    label:"Custom days"},
-];
-const WDAYS_SHORT=["Mo","Tu","We","Th","Fr","Sa","Su"];
-
-function habitDueToday(habit, dateStr){
-  const d=new Date(dateStr+"T12:00");
-  const dow=(d.getDay()+6)%7; // 0=Mon
-  if(habit.frequency==="daily") return true;
-  if(habit.frequency==="weekdays") return dow<5;
-  if(habit.frequency==="weekends") return dow>=5;
-  if(habit.frequency==="custom") return (habit.frequencyDays||[]).includes(dow);
-  return true;
-}
-
-function habitStreak(habit){
-  // Count consecutive days completed going back from yesterday
-  let streak=0;
-  const today=new Date(); today.setHours(0,0,0,0);
-  for(let i=1;i<=365;i++){
-    const d=new Date(today); d.setDate(today.getDate()-i);
-    const ds=d.toISOString().split("T")[0];
-    if(!habitDueToday(habit,ds)) continue; // skip non-scheduled days
-    if(habit.completions?.[ds]) streak++;
-    else break;
-  }
-  return streak;
-}
-
-function HabitsTab({habits,skills,onAdd,onEdit,onDelete,onLog}){
-  const {settings}=useSettings(); const L=settings.labels;
-  const todayStr=new Date().toISOString().split("T")[0];
-  const todayDow=(new Date().getDay()+6)%7;
-
-  const [showForm,setShowForm]=useState(false);
-  const [editingId,setEditingId]=useState(null);
-  const [showArchived,setShowArchived]=useState(false);
-  const BLANK={name:"",icon:"◎",color:"#7c9ef8",skillId:"",xpVal:10,frequency:"daily",frequencyDays:[],note:""};
-  const [f,setF]=useState(BLANK);
-
-  const openAdd=()=>{setF(BLANK);setEditingId(null);setShowForm(true);};
-  const openEdit=h=>{setF({name:h.name,icon:h.icon,color:h.color,skillId:h.skillId||"",xpVal:h.xpVal||10,frequency:h.frequency||"daily",frequencyDays:h.frequencyDays||[],note:h.note||""});setEditingId(h.id);setShowForm(true);};
-
-  const submit=()=>{
-    if(!f.name.trim()) return;
-    if(editingId) onEdit(editingId,{name:f.name.trim(),icon:f.icon,color:f.color,skillId:f.skillId||null,xpVal:Number(f.xpVal)||10,frequency:f.frequency,frequencyDays:f.frequencyDays,note:f.note});
-    else onAdd({name:f.name.trim(),icon:f.icon,color:f.color,skillId:f.skillId||null,xpVal:Number(f.xpVal)||10,frequency:f.frequency,frequencyDays:f.frequencyDays,note:f.note});
-    setShowForm(false);
-  };
-
-  const active=habits.filter(h=>!h.archived);
-  const archived=habits.filter(h=>h.archived);
-  const dueToday=active.filter(h=>habitDueToday(h,todayStr));
-  const notDueToday=active.filter(h=>!habitDueToday(h,todayStr));
-  const doneToday=dueToday.filter(h=>h.completions?.[todayStr]);
-  const progress=dueToday.length?Math.round(doneToday.length/dueToday.length*100):0;
-
-  // Last 21 days for the mini heatmap
-  const last21=Array.from({length:21},(_,i)=>{
-    const d=new Date(); d.setDate(d.getDate()-(20-i));
-    return d.toISOString().split("T")[0];
-  });
-
-  return(<>
-    {/* Today's progress bar */}
-    {dueToday.length>0&&(
-      <div style={{marginBottom:14}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:5}}>
-          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1.5,color:"var(--tx3)",textTransform:"uppercase"}}>Today — {doneToday.length}/{dueToday.length}</div>
-          <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:progress===100?"var(--success)":"var(--primary)"}}>{progress}%</div>
-        </div>
-        <div style={{height:4,background:"var(--b1)",borderRadius:2,overflow:"hidden"}}>
-          <div style={{height:"100%",width:`${progress}%`,background:progress===100?"var(--success)":"var(--primary)",borderRadius:2,transition:"width .4s ease"}}/>
-        </div>
-      </div>
-    )}
-
-    {/* Add button */}
-    {!showForm&&<button className="addbtn" style={{marginBottom:12}} onClick={openAdd}><span>+</span> New habit</button>}
-
-    {/* Form */}
-    {showForm&&(
-      <div className="fwrap" style={{marginBottom:12}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:8}}>
-          <div className="label9">{editingId?"Edit habit":"New habit"}</div>
-          <button onClick={()=>setShowForm(false)} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:14}}>✕</button>
-        </div>
-        <input className="fi full" placeholder="Habit name..." autoFocus value={f.name} onChange={e=>setF(v=>({...v,name:e.target.value}))} onKeyDown={e=>e.key==="Enter"&&submit()} style={{marginBottom:8}}/>
-        <div className="frow" style={{marginBottom:8}}>
-          {/* Icon picker — small */}
-          <div style={{display:"flex",gap:3,flexWrap:"wrap",flex:1}}>
-            {["◎","◉","◈","◆","✦","◌","⊕","△","○","□","★","⚡","🧘","💪","📚","🎯","🌱","🔥","💎","🏃"].map(ic=>(
-              <button key={ic} onClick={()=>setF(v=>({...v,icon:ic}))}
-                style={{width:26,height:26,border:`1px solid ${f.icon===ic?"var(--primary)":"var(--b1)"}`,borderRadius:4,background:f.icon===ic?"var(--primaryf)":"none",cursor:"pointer",fontSize:13,display:"flex",alignItems:"center",justifyContent:"center"}}>
-                {ic}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="frow" style={{marginBottom:8}}>
-          <select className="fsel" value={f.frequency} onChange={e=>setF(v=>({...v,frequency:e.target.value}))}>
-            {FREQ_OPTIONS.map(o=><option key={o.id} value={o.id}>{o.label}</option>)}
-          </select>
-          <select className="fsel" value={f.skillId} onChange={e=>setF(v=>({...v,skillId:e.target.value}))}>
-            <option value="">No skill</option>
-            {skills.filter(s=>s.type!=="subskill").map(s=><option key={s.id} value={s.id}>{s.icon} {s.name}</option>)}
-          </select>
-          <input type="number" className="fsel" style={{width:64}} min={1} max={999} placeholder="XP" value={f.xpVal} onChange={e=>setF(v=>({...v,xpVal:Math.max(1,Number(e.target.value)||10)}))}/>
-        </div>
-        {f.frequency==="custom"&&(
-          <div style={{display:"flex",gap:4,marginBottom:8,flexWrap:"wrap"}}>
-            {WDAYS_SHORT.map((d,i)=>(
-              <button key={i} onClick={()=>setF(v=>({...v,frequencyDays:v.frequencyDays.includes(i)?v.frequencyDays.filter(x=>x!==i):[...v.frequencyDays,i]}))}
-                style={{padding:"3px 9px",borderRadius:4,border:`1px solid ${f.frequencyDays.includes(i)?"var(--primary)":"var(--b2)"}`,background:f.frequencyDays.includes(i)?"var(--primaryf)":"var(--bg)",color:f.frequencyDays.includes(i)?"var(--primary)":"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,cursor:"pointer"}}>
-                {d}
-              </button>
-            ))}
-          </div>
-        )}
-        {/* Color */}
-        <div style={{display:"flex",gap:4,flexWrap:"wrap",marginBottom:8}}>
-          {["#7c9ef8","#a78bfa","#34d399","#f59e0b","#f87171","#60a5fa","#e879f9","#94a3b8"].map(col=>(
-            <div key={col} onClick={()=>setF(v=>({...v,color:col}))}
-              style={{width:18,height:18,borderRadius:"50%",background:col,cursor:"pointer",border:`2px solid ${f.color===col?"white":"transparent"}`,flexShrink:0}}/>
-          ))}
-        </div>
-        <textarea className="fi full" placeholder="Note / intention (optional)" rows={2} value={f.note} onChange={e=>setF(v=>({...v,note:e.target.value}))} style={{resize:"none",marginBottom:8,fontSize:12}}/>
-        <div style={{display:"flex",gap:6}}>
-          <button className="fsbtn primary" style={{flex:1,margin:0}} onClick={submit}>{editingId?"Save":"Add habit"}</button>
-          {editingId&&<button onClick={()=>{onEdit(editingId,{archived:!habits.find(h=>h.id===editingId)?.archived});setShowForm(false);}} style={{background:"none",border:"1px solid var(--b2)",borderRadius:"var(--r)",padding:"8px 12px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)"}}>Archive</button>}
-          {editingId&&<button onClick={()=>{onDelete(editingId);setShowForm(false);}} style={{background:"none",border:"1px solid var(--danger)",borderRadius:"var(--r)",padding:"8px 12px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--danger)"}}>Delete</button>}
-        </div>
-      </div>
-    )}
-
-    {/* Due today */}
-    {dueToday.length>0&&<>
-      <div className="slbl" style={{marginBottom:6}}>Today</div>
-      {dueToday.map(h=>{
-        const done=!!h.completions?.[todayStr];
-        const streak=habitStreak(h);
-        const sk=skills.find(s=>s.id===h.skillId);
-        return(
-          <div key={h.id} style={{display:"flex",alignItems:"center",gap:10,padding:"10px 12px",background:"var(--s1)",border:`1px solid ${done?h.color+"44":"var(--b1)"}`,borderLeft:`3px solid ${done?h.color:"var(--b2)"}`,borderRadius:"var(--r)",marginBottom:5,transition:"all .15s"}}>
-            <button onClick={()=>onLog(h.id,todayStr)}
-              style={{width:26,height:26,borderRadius:"50%",border:`2px solid ${done?h.color:"var(--b2)"}`,background:done?h.color:"none",cursor:"pointer",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,transition:"all .15s",fontSize:12,color:done?"white":"var(--tx3)"}}>
-              {done?"✓":h.icon}
-            </button>
-            <div style={{flex:1,minWidth:0}}>
-              <div style={{fontSize:13,color:done?"var(--tx3)":"var(--tx)",textDecoration:done?"line-through":"none",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{h.name}</div>
-              <div style={{display:"flex",gap:6,marginTop:2,flexWrap:"wrap"}}>
-                {sk&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:sk.color}}>{sk.icon} {sk.name}</span>}
-                {streak>=2&&<span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--primary)"}}>{streak}d 🔥</span>}
-                <span style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)"}}>{h.xpVal} XP · {FREQ_OPTIONS.find(o=>o.id===h.frequency)?.label||h.frequency}</span>
-              </div>
-            </div>
-            <button onClick={()=>openEdit(h)} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11,padding:"2px 4px",flexShrink:0}}>✎</button>
-          </div>
-        );
-      })}
-    </>}
-
-    {/* Not scheduled today */}
-    {notDueToday.length>0&&<>
-      <div className="slbl" style={{marginBottom:6,marginTop:10}}>Not today</div>
-      {notDueToday.map(h=>{
-        const streak=habitStreak(h);
-        return(
-          <div key={h.id} style={{display:"flex",alignItems:"center",gap:10,padding:"8px 12px",background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",marginBottom:4,opacity:.6}}>
-            <span style={{fontSize:14,width:26,textAlign:"center",flexShrink:0}}>{h.icon}</span>
-            <div style={{flex:1}}>
-              <div style={{fontSize:12,color:"var(--tx2)"}}>{h.name}</div>
-              <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",marginTop:1}}>{FREQ_OPTIONS.find(o=>o.id===h.frequency)?.label||h.frequency}{streak>=2?` · ${streak}d 🔥`:""}</div>
-            </div>
-            <button onClick={()=>openEdit(h)} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11,padding:"2px 4px"}}>✎</button>
-          </div>
-        );
-      })}
-    </>}
-
-    {/* 21-day heatmap across all habits */}
-    {active.length>0&&<>
-      <div className="slbl" style={{marginBottom:8,marginTop:14}}>21-day history</div>
-      <div style={{overflowX:"auto",paddingBottom:4}}>
-        <div style={{display:"grid",gridTemplateColumns:`repeat(21,1fr)`,gap:2,minWidth:280}}>
-          {last21.map(ds=>{
-            const doneCount=active.filter(h=>habitDueToday(h,ds)&&h.completions?.[ds]).length;
-            const totalDue=active.filter(h=>habitDueToday(h,ds)).length;
-            const ratio=totalDue?doneCount/totalDue:0;
-            const isToday=ds===todayStr;
-            return(
-              <div key={ds} title={`${ds}: ${doneCount}/${totalDue}`}
-                style={{aspectRatio:"1",borderRadius:2,background:totalDue===0?"var(--b1)":ratio===0?"var(--s2)":ratio<0.5?"var(--primaryf)":ratio<1?"var(--primary)66":"var(--primary)",border:isToday?"1px solid var(--primary)":"none",transition:"background .2s"}}/>
-            );
-          })}
-        </div>
-        <div style={{display:"flex",justifyContent:"space-between",marginTop:3}}>
-          <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"var(--tx3)"}}>{last21[0]?.slice(5)}</span>
-          <span style={{fontFamily:"'DM Mono',monospace",fontSize:7,color:"var(--primary)"}}>today</span>
-        </div>
-      </div>
-    </>}
-
-    {/* Archived */}
-    {archived.length>0&&(
-      <button onClick={()=>setShowArchived(v=>!v)} style={{background:"none",border:"none",color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:.8,cursor:"pointer",padding:"8px 0",marginTop:8}}>
-        {showArchived?"▾":"▸"} Archived ({archived.length})
-      </button>
-    )}
-    {showArchived&&archived.map(h=>(
-      <div key={h.id} style={{display:"flex",alignItems:"center",gap:10,padding:"7px 12px",background:"var(--s1)",border:"1px solid var(--b1)",borderRadius:"var(--r)",marginBottom:4,opacity:.4}}>
-        <span style={{fontSize:13}}>{h.icon}</span>
-        <span style={{flex:1,fontSize:12,color:"var(--tx3)",textDecoration:"line-through"}}>{h.name}</span>
-        <button onClick={()=>onEdit(h.id,{archived:false})} style={{background:"none",border:"1px solid var(--b2)",borderRadius:3,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:8,cursor:"pointer",padding:"2px 7px"}}>restore</button>
-        <button onClick={()=>onDelete(h.id)} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:11,padding:"2px 4px"}}>✕</button>
-      </div>
-    ))}
-
-    {active.length===0&&!showForm&&(
-      <div className="empty-state" style={{marginTop:20}}>
-        <div className="es-icon">◎</div>
-        <div className="es-title">No habits yet</div>
-        <div className="es-desc">Habits are fixed-frequency behaviours — daily meditation, weekday exercise, whatever you want to show up for consistently. Unlike quests, they're just a daily checkbox.</div>
-      </div>
-    )}
-  </>);
-}
-
-// ── WEEKLY DAY ROW ────────────────────────────────────────────────────────────
 function WkDayRow({d,dk,isToday,dayIdx,dayLabel,dt,dq,skills,quests,onAddTask,onToggle,onDelete,onEdit,onToggleQuest,radiantAvailable,radiantCooldownLabel,onOpenBreakdown,onDragStart,onDrop}){
   const [adding,setAdding]=useState(false);
   const [val,setVal]=useState("");
@@ -1779,6 +1538,15 @@ function PlannerTab({period,setPeriod,tasks,weekDays,allTasks,skills,quests,onAd
           ? <div style={{fontSize:11,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontStyle:"italic"}}>Generating briefing…</div>
           : <div style={{fontSize:12,color:"var(--tx2)",lineHeight:1.6,whiteSpace:"pre-wrap"}}>{dailyBriefing.text}</div>
         }
+        {!dailyBriefing.loading&&dailyBriefing.context&&settings.ui?.showAiWhy!==false&&(
+          <div style={{marginTop:8,paddingTop:6,borderTop:"1px solid var(--b1)",fontFamily:"'DM Mono',monospace",fontSize:8,color:"var(--tx3)",display:"flex",gap:10,flexWrap:"wrap"}}>
+            <span>Based on:</span>
+            {dailyBriefing.context.overdue>0&&<span style={{color:"var(--danger)"}}>⚠ {dailyBriefing.context.overdue} overdue</span>}
+            {dailyBriefing.context.dueToday>0&&<span>◆ {dailyBriefing.context.dueToday} due today</span>}
+            {dailyBriefing.context.streaksAtRisk>0&&<span style={{color:"var(--secondary)"}}>◉ {dailyBriefing.context.streaksAtRisk} streak{dailyBriefing.context.streaksAtRisk>1?"s":""} at risk</span>}
+            {dailyBriefing.context.topSkill&&<span>◈ top skill: {dailyBriefing.context.topSkill}</span>}
+          </div>
+        )}
       </div>
     )}
 
@@ -3312,16 +3080,21 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
   useEffect(()=>{
     if(pending){
       const sids=pending.skillId?[pending.skillId]:[];
-      // Must reset scoring here — form may open without going through openForm()
       setScoring(false);
       setXpPreview(null);
-      setF(v=>({...v,skillIds:sids,subskillIds:[],note:""}));
+      setF(v=>({...v,
+        skillIds:sids,
+        subskillIds:[],
+        note:"",
+        typeId:v.typeId||practiceTypes[0]?.id||"",
+      }));
       setShowForm(true);
     }
   },[pending]);
 
   const submit=async()=>{
-    if(scoring) return; // prevent double-submit
+    if(scoring) return;
+    if(!f.typeId||!f.dur) return; // must have type and duration
     const ptype=practiceTypes.find(t=>t.id===f.typeId);
     let baseXp=Math.max(1,f.dur*ppm), aiReason=null;
     const hasNote=typeof f.note==="string"&&f.note.trim().length>0;
@@ -3331,13 +3104,9 @@ function PracticeTab({meds,skills,streaks,pending,practiceTypes,onAddType,onDele
       const safetyTimer=setTimeout(()=>setScoring(false),15000);
       try{
         const skNames=f.skillIds.map(id=>skills.find(s=>s.id===id)?.name).filter(Boolean).join(", ")||"General";
-        const res=await fetch("/api/chat",{
-          method:"POST",headers:{"Content-Type":"application/json"},
-          body:JSON.stringify({max_tokens:80,
-            messages:[{role:"user",content:`Practice session scoring. XP scale: 6000 XP = 1 level.\nBaseline: ${baseXp} XP (${f.dur}min). Type: ${ptype?.label||"session"}, Skills: ${skNames}.\nJournal: "${f.note.trim()}"\nJudge quality: routine=~baseline, focused=1.5-3x, breakthrough=3-10x. Never cap at 100.\nJSON only: {"xp":number,"reason":"12 words max"}`}]
-          })
+        const data=await aiCall({max_tokens:80,
+          messages:[{role:"user",content:`Practice session scoring. XP scale: 6000 XP = 1 level.\nBaseline: ${baseXp} XP (${f.dur}min). Type: ${ptype?.label||"session"}, Skills: ${skNames}.\nJournal: "${f.note.trim()}"\nJudge quality: routine=~baseline, focused=1.5-3x, breakthrough=3-10x. Never cap at 100.\nJSON only: {"xp":number,"reason":"12 words max"}`}]
         });
-        const data=await res.json(); if(data?.error) throw new Error(data.error.message||"AI error");
         const raw=(data.choices?.[0]?.message?.content||"{}").replace(/```json|```/g,"").trim();
         const parsed=JSON.parse(raw);
         if(parsed.xp&&typeof parsed.xp==="number") baseXp=Math.max(1,Math.round(parsed.xp));
@@ -3648,7 +3417,7 @@ function MedCard({med,ptype,mSkills,skills,onDelete,onEdit}){
           {med.dur>=1440?`${+(med.dur/1440).toFixed(2)}d`:med.dur>=60?`${+(med.dur/60).toFixed(1)}hr`:`${med.dur}min`} · +{med.xpAwarded||med.dur*ppm} {L.xpName}{med.multiplier>1&&` · ${med.multiplier}×`}
           {mSkills.map(s=><span key={s.id} style={{marginLeft:4,color:s.color,display:"inline-flex",alignItems:"center",gap:3}}><SkIcon s={s} sz={11}/>{s.name}</span>)}
         </div>
-        {med.aiReason&&<div className="med-reason">✦ {med.aiReason}</div>}
+        {med.aiReason&&settings.ui?.showAiWhy!==false&&<div className="med-reason">✦ {med.aiReason}</div>}
         {med.note&&<>
           <div className={`med-journal ${expanded?"exp":""}`}>{med.note}</div>
           <button className="jrnl-btn" onClick={()=>setExpanded(e=>!e)}>{expanded?"▲ less":"▼ more"}</button>
@@ -4166,6 +3935,7 @@ function SettingsTab({showToast,onExport,onImport,userId,onSignIn,onSignOut}){
   const setColor=(k,v)=>setDraft(d=>({...d,colors:{...d.colors,[k]:v}}));
   const setThm  =(k,v)=>setDraft(d=>({...d,theme:{...d.theme,[k]:v}}));
   const setXpCfg=(k,v)=>setDraft(d=>({...d,xp:{...d.xp,[k]:typeof v==="boolean"?v:(Number(v)||1)}}));
+  const setUiCfg=(k,v)=>setDraft(d=>({...d,ui:{...d.ui,[k]:v}}));
   const applyPal=p=>setDraft(d=>({...d,colors:{...d.colors,primary:p.primary,secondary:p.secondary}}));
   const applyThm=t=>setDraft(d=>({...d,theme:{bg:t.bg,s1:t.s1,s2:t.s2,b1:t.b1,b2:t.b2,tx:t.tx,tx2:t.tx2,tx3:t.tx3}}));
   const save =async()=>{await saveSettings(draft);showToast("Settings saved");};
@@ -4337,6 +4107,8 @@ function SettingsTab({showToast,onExport,onImport,userId,onSignIn,onSignOut}){
         <SRow label="Global XP per level" sub="Char level = total skill XP ÷ this" type="number" sm value={draft.xp.globalPerLevel} onChange={v=>setXpCfg("globalPerLevel",v)}/>
         <SRow label="Practice XP per min" sub="Default 1"                       type="number" sm value={draft.xp.practicePerMin} onChange={v=>setXpCfg("practicePerMin",v)}/>
         <Tog label="AI session scoring" sub="Journal entries trigger AI XP scoring" val={draft.xp.aiScoring!==false} onChange={v=>setXpCfg("aiScoring",v)}/>
+        <Tog label="Quest completion note" sub="Ask for a note when you complete a quest" val={draft.ui?.showQuestNote!==false} onChange={v=>setUiCfg("showQuestNote",v)}/>
+        <Tog label="Show AI reasoning" sub="Display why AI made each suggestion" val={draft.ui?.showAiWhy!==false} onChange={v=>setUiCfg("showAiWhy",v)}/>
         <div style={{background:"var(--bg)",border:"1px solid var(--b1)",borderRadius:4,padding:"10px 12px",marginTop:8}}>
           <div style={{fontFamily:"'DM Mono',monospace",fontSize:8,letterSpacing:1.5,color:"var(--tx3)",marginBottom:8,textTransform:"uppercase"}}>XP reference</div>
           {[
@@ -4855,7 +4627,7 @@ Reply ONLY with JSON: {"xp":number,"reason":"one sentence max 15 words","reactio
                   <div key={i} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 0",borderBottom:"1px solid var(--b1)"}}>
                     <div style={{flex:1,minWidth:0}}>
                       <div style={{fontSize:11,color:"var(--tx)"}}>{s.title}</div>
-                      {s.reason&&<div style={{fontSize:9,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontStyle:"italic"}}>{s.reason}</div>}
+                      {s.reason&&settings.ui?.showAiWhy!==false&&<div style={{fontSize:9,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",fontStyle:"italic"}}>{s.reason}</div>}
                     </div>
                     <span style={{fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--primary)",flexShrink:0}}>+{s.xpVal}</span>
                     <button onClick={()=>acceptAiSub(s)} style={{background:"var(--primaryf)",border:"1px solid var(--primaryb)",borderRadius:3,padding:"2px 7px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--primary)",flexShrink:0}}>+</button>
@@ -5037,126 +4809,6 @@ Write one honest observation (2-3 sentences). Notice any gap between grades and 
       </div>
     </div>
   </>);
-}
-
-// ─── MORNING RITUAL OVERLAY ───────────────────────────────────────────────────
-function MorningRitualOverlay({quests,tasks,skills,streaks,settings,briefing,onClose,onAddTask,onToggleQuest,radiantAvailable}){
-  const {settings:s}=useSettings();
-  const [step,setStep]=useState(0); // 0=briefing, 1=radiant picks, 2=priority picks, 3=confirm
-  const [selectedRadiant,setSelectedRadiant]=useState([]);
-  const [selectedPriority,setSelectedPriority]=useState([]);
-  const [vibe,setVibe]=useState("open");
-  const VIBES=[{id:"grind",label:"⚔ Grind"},{id:"focus",label:"◉ Focus"},{id:"light",label:"◇ Light"},{id:"open",label:"✦ Open"}];
-
-  const availableRadiant=quests.filter(q=>q.type==="radiant"&&!q.done&&(radiantAvailable?radiantAvailable(q):true)).slice(0,8);
-  const activeMains=quests.filter(q=>!q.done&&(q.type==="main"||q.type==="side")).slice(0,6);
-
-  const confirm=()=>{
-    // Pin selected priority items as today's tasks
-    selectedPriority.forEach(qId=>{
-      const q=quests.find(x=>x.id===qId);
-      if(q) onAddTask({title:q.title,period:"daily",skill:(q.skills||[])[0]||null,xpVal:Math.min(80,Math.round(q.xpVal*0.05)),questId:qId,timeBlock:null,priority:"high"});
-    });
-    onClose();
-  };
-
-  return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.9)",backdropFilter:"blur(6px)",zIndex:700,display:"flex",alignItems:"flex-end",justifyContent:"center"}}>
-      <div style={{width:"min(500px,100vw)",background:"var(--s1)",borderTop:"1px solid var(--b2)",borderRadius:"12px 12px 0 0",maxHeight:"85vh",overflow:"hidden",display:"flex",flexDirection:"column"}}>
-        {/* Header */}
-        <div style={{padding:"16px 18px 12px",borderBottom:"1px solid var(--b1)",display:"flex",alignItems:"center",justifyContent:"space-between",flexShrink:0}}>
-          <div>
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:2,color:"var(--primary)",textTransform:"uppercase",marginBottom:3}}>✦ {new Date().toLocaleDateString("en-US",{weekday:"long",month:"short",day:"numeric"})}</div>
-            <div style={{fontSize:13,color:"var(--tx)"}}>{step===0?"Morning briefing":step===1?"What are you practicing today?":step===2?"What must move forward?":"Ready"}</div>
-          </div>
-          <button onClick={onClose} style={{background:"none",border:"none",color:"var(--tx3)",cursor:"pointer",fontSize:18,padding:"4px"}}>✕</button>
-        </div>
-
-        <div style={{flex:1,overflowY:"auto",padding:"16px 18px"}}>
-          {step===0&&<>
-            {/* Vibe selector */}
-            <div style={{display:"flex",gap:5,marginBottom:12,flexWrap:"wrap"}}>
-              {VIBES.map(v=><button key={v.id} onClick={()=>setVibe(v.id)}
-                style={{padding:"5px 12px",borderRadius:20,border:`1px solid ${vibe===v.id?"var(--primary)":"var(--b2)"}`,background:vibe===v.id?"var(--primaryf)":"none",color:vibe===v.id?"var(--primary)":"var(--tx3)",fontFamily:"'DM Mono',monospace",fontSize:9,cursor:"pointer"}}>
-                {v.label}
-              </button>)}
-            </div>
-            {/* Briefing */}
-            {briefing&&(
-              <div style={{fontSize:12,color:"var(--tx2)",lineHeight:1.7,whiteSpace:"pre-wrap",marginBottom:8}}>
-                {briefing.loading?"Generating briefing…":briefing.text}
-              </div>
-            )}
-          </>}
-
-          {step===1&&<>
-            <div style={{fontSize:11,color:"var(--tx3)",marginBottom:10}}>Tap what you plan to practice today. These stay in the Quest tab — no tasks created.</div>
-            {availableRadiant.length===0&&<div style={{fontSize:12,color:"var(--tx3)",fontStyle:"italic"}}>No radiant quests available right now.</div>}
-            {availableRadiant.map(q=>{
-              const on=selectedRadiant.includes(q.id);
-              const sk=skills.find(s=>(q.skills||[]).includes(s.id));
-              return(
-                <button key={q.id} onClick={()=>setSelectedRadiant(prev=>on?prev.filter(x=>x!==q.id):[...prev,q.id])}
-                  style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"10px 12px",marginBottom:6,background:on?"var(--secondaryf)":"var(--s2)",border:`1px solid ${on?"var(--secondaryb)":"var(--b1)"}`,borderRadius:"var(--r)",cursor:"pointer",textAlign:"left",transition:"all .15s"}}>
-                  <span style={{fontSize:16,color:on?"var(--secondary)":"var(--tx3)"}}>◉</span>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:12,color:"var(--tx)"}}>{q.title}</div>
-                    {sk&&<div style={{fontSize:9,color:sk.color,fontFamily:"'DM Mono',monospace",marginTop:2}}>{sk.icon} {sk.name}</div>}
-                  </div>
-                  {on&&<span style={{color:"var(--secondary)",fontSize:14}}>✓</span>}
-                </button>
-              );
-            })}
-          </>}
-
-          {step===2&&<>
-            <div style={{fontSize:11,color:"var(--tx3)",marginBottom:10}}>Pick up to 3 quests to make today's priority. They'll be pinned to your planner.</div>
-            {activeMains.map(q=>{
-              const on=selectedPriority.includes(q.id);
-              const canAdd=on||selectedPriority.length<3;
-              return(
-                <button key={q.id} onClick={()=>{if(!canAdd&&!on)return;setSelectedPriority(prev=>on?prev.filter(x=>x!==q.id):[...prev,q.id]);}}
-                  style={{display:"flex",alignItems:"center",gap:10,width:"100%",padding:"10px 12px",marginBottom:6,background:on?"var(--primaryf)":"var(--s2)",border:`1px solid ${on?"var(--primaryb)":"var(--b1)"}`,borderRadius:"var(--r)",cursor:canAdd||on?"pointer":"default",opacity:!canAdd&&!on?.4:1,textAlign:"left",transition:"all .15s"}}>
-                  <span style={{fontSize:14,color:on?"var(--primary)":"var(--tx3)"}}>{q.type==="main"?"◆":"◇"}</span>
-                  <div style={{flex:1}}>
-                    <div style={{fontSize:12,color:"var(--tx)"}}>{q.title}</div>
-                    <div style={{fontSize:9,color:"var(--tx3)",fontFamily:"'DM Mono',monospace",marginTop:2}}>{q.type} · +{q.xpVal} XP</div>
-                  </div>
-                  {on&&<span style={{color:"var(--primary)",fontSize:14}}>✓</span>}
-                </button>
-              );
-            })}
-          </>}
-
-          {step===3&&<>
-            <div style={{fontSize:12,color:"var(--tx2)",lineHeight:1.7,marginBottom:12}}>
-              {selectedPriority.length>0?`${selectedPriority.length} quest${selectedPriority.length>1?"s":""} pinned to today.`:"No quests pinned — your day is open."}
-              {selectedRadiant.length>0&&` ${selectedRadiant.length} practice${selectedRadiant.length>1?"s":""} intended.`}
-            </div>
-            <div style={{fontFamily:"'DM Mono',monospace",fontSize:10,color:"var(--tx3)",textAlign:"center",paddingTop:8}}>
-              {vibe==="grind"&&"⚔ Grind day. Make it count."}
-              {vibe==="focus"&&"◉ Focus day. Go deep."}
-              {vibe==="light"&&"◇ Light day. Small wins."}
-              {vibe==="open"&&"✦ Open day. Follow what calls."}
-            </div>
-          </>}
-        </div>
-
-        {/* Footer nav */}
-        <div style={{padding:"12px 18px",borderTop:"1px solid var(--b1)",display:"flex",gap:8,flexShrink:0}}>
-          {step>0&&<button onClick={()=>setStep(s=>s-1)} style={{background:"none",border:"1px solid var(--b2)",borderRadius:"var(--r)",padding:"10px 16px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,color:"var(--tx3)"}}>← Back</button>}
-          {step<3
-            ?<button onClick={()=>setStep(s=>s+1)} style={{flex:1,background:"var(--primaryf)",border:"1px solid var(--primaryb)",borderRadius:"var(--r)",padding:"10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1,color:"var(--primary)",textTransform:"uppercase"}}>
-               {step===0?"Set today's vibe →":step===1?"Choose priorities →":"Review →"}
-             </button>
-            :<button onClick={confirm} style={{flex:1,background:"var(--primary)",border:"none",borderRadius:"var(--r)",padding:"10px",cursor:"pointer",fontFamily:"'DM Mono',monospace",fontSize:9,letterSpacing:1,color:"var(--bg)",textTransform:"uppercase"}}>
-               ✦ Start the day
-             </button>
-          }
-        </div>
-      </div>
-    </div>
-  );
 }
 
 // ─── INLINE QUEST NOTE POPUP ──────────────────────────────────────────────────
